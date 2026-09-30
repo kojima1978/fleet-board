@@ -1,0 +1,96 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../prisma/generated"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum VehicleStatus {
+  AVAILABLE
+  RESERVED
+  IN_USE
+  MAINTENANCE
+}
+
+enum TripStatus {
+  RESERVED
+  IN_USE
+  COMPLETED
+  CANCELLED
+}
+
+model Employee {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  department String
+  nfcUid    String   @unique
+  active    Boolean  @default(true)
+  version   Int      @default(1)
+  trips     Trip[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Vehicle {
+  id            String        @id @default(cuid())
+  code          String        @unique
+  name          String
+  plateNumber   String        @unique
+  nfcUid        String        @unique
+  color         String        @default("#2563eb")
+  active        Boolean       @default(true)
+  status        VehicleStatus @default(AVAILABLE)
+  parkingSpotId String?       @unique
+  parkingSpot   ParkingSpot?  @relation(fields: [parkingSpotId], references: [id])
+  trips         Trip[]
+  version       Int           @default(1)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+}
+
+model ParkingSpot {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  x           Float
+  y           Float
+  width       Float
+  height      Float
+  orientation String
+  enabled     Boolean  @default(true)
+  vehicle     Vehicle?
+  version     Int      @default(1)
+}
+
+model Trip {
+  id            String     @id @default(cuid())
+  employeeId    String
+  employee      Employee   @relation(fields: [employeeId], references: [id])
+  vehicleId     String
+  vehicle       Vehicle    @relation(fields: [vehicleId], references: [id])
+  plannedStart  DateTime
+  plannedEnd    DateTime
+  actualStart   DateTime?
+  actualEnd     DateTime?
+  returnSpotCode String?
+  purpose       String?
+  status        TripStatus @default(RESERVED)
+  version       Int        @default(1)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  @@index([plannedStart, plannedEnd])
+  @@index([vehicleId, status])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorName   String
+  action      String
+  targetType  String
+  targetId    String
+  description String
+  createdAt   DateTime @default(now())
+}
