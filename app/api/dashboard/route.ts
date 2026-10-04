@@ -62,9 +62,13 @@ async function assertNfcAvailable(nfcUid: string, exclude?: { employeeId?: strin
 }
 
 const nfcUidSchema = z.string().trim().min(1).max(100).transform(normalizeNfcUid);
+const optionalNfcUidSchema = z.preprocess(
+  (value) => value == null || (typeof value === "string" && !value.trim()) ? undefined : value,
+  nfcUidSchema.optional(),
+);
 const actorSchema = { actorName: z.string(), actorEmployeeId: z.string().optional() };
-const employeeImportItemSchema = z.object({ code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), department: z.string().trim().min(1).max(50), nfcUid: nfcUidSchema });
-const vehicleImportItemSchema = z.object({ code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: nfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#2563eb") });
+const employeeImportItemSchema = z.object({ code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), department: z.string().trim().min(1).max(50), nfcUid: optionalNfcUidSchema });
+const vehicleImportItemSchema = z.object({ code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#2563eb") });
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("createEmployee"), code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), department: z.string().trim().min(1).max(50), nfcUid: nfcUidSchema }),
   z.object({ action: z.literal("createVehicle"), code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: nfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/) }),
@@ -259,10 +263,13 @@ export async function POST(request: Request) {
       const nfcUids = new Set<string>();
       for (const item of input.items) {
         const codeKey = item.code.toLocaleUpperCase("ja");
-        const nfcKey = item.nfcUid.toLocaleUpperCase("ja");
         if (codes.has(codeKey)) throw new Error(`JSON内で社員番号${item.code}が重複しています`);
-        if (nfcUids.has(nfcKey)) throw new Error(`JSON内でNFC UID ${item.nfcUid}が重複しています`);
-        codes.add(codeKey); nfcUids.add(nfcKey);
+        codes.add(codeKey);
+        if (item.nfcUid) {
+          const nfcKey = item.nfcUid.toLocaleUpperCase("ja");
+          if (nfcUids.has(nfcKey)) throw new Error(`JSON内でNFC UID ${item.nfcUid}が重複しています`);
+          nfcUids.add(nfcKey);
+        }
       }
       await prisma.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('fleet-import-employees'))::text AS import_lock`;
@@ -271,13 +278,17 @@ export async function POST(request: Request) {
           const employeeNumber = await tx.employeeNumber.upsert({ where: { code: item.code }, update: {}, create: { code: item.code } });
           const existingEmployee = await tx.employee.findFirst({ where: { employeeNumberId: employeeNumber.id, active: true }, select: { name: true } });
           if (existingEmployee) throw new Error(`社員番号${item.code}は「${existingEmployee.name}」で使用中です`);
-          const existingNfc = await tx.nfcAssignment.findFirst({ where: { validTo: null, nfcTag: { uid: { equals: item.nfcUid, mode: "insensitive" } } }, select: { employee: { select: { name: true } }, vehicle: { select: { name: true } } } });
-          const nfcOwner = existingNfc?.employee?.name ?? existingNfc?.vehicle?.name;
-          if (nfcOwner) throw new Error(`NFC UID ${item.nfcUid}は「${nfcOwner}」で使用中です`);
+          if (item.nfcUid) {
+            const existingNfc = await tx.nfcAssignment.findFirst({ where: { validTo: null, nfcTag: { uid: { equals: item.nfcUid, mode: "insensitive" } } }, select: { employee: { select: { name: true } }, vehicle: { select: { name: true } } } });
+            const nfcOwner = existingNfc?.employee?.name ?? existingNfc?.vehicle?.name;
+            if (nfcOwner) throw new Error(`NFC UID ${item.nfcUid}は「${nfcOwner}」で使用中です`);
+          }
           const department = await tx.department.upsert({ where: { name: item.department }, update: { active: true }, create: { name: item.department } });
           const employee = await tx.employee.create({ data: { employeeNumberId: employeeNumber.id, departmentId: department.id, name: item.name } });
-          const nfcTag = await tx.nfcTag.upsert({ where: { uid: item.nfcUid }, update: {}, create: { uid: item.nfcUid } });
-          await tx.nfcAssignment.create({ data: { employeeId: employee.id, nfcTagId: nfcTag.id } });
+          if (item.nfcUid) {
+            const nfcTag = await tx.nfcTag.upsert({ where: { uid: item.nfcUid }, update: {}, create: { uid: item.nfcUid } });
+            await tx.nfcAssignment.create({ data: { employeeId: employee.id, nfcTagId: nfcTag.id } });
+          }
         }
         await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "社員JSON取込", targetType: "Employee", targetId: "bulk", description: `${input.items.length}人をJSONから一括登録` } });
       });
@@ -289,11 +300,14 @@ export async function POST(request: Request) {
       for (const item of input.items) {
         const codeKey = item.code.toLocaleUpperCase("ja");
         const plateKey = item.plateNumber.replace(/\s/g, "").toLocaleUpperCase("ja");
-        const nfcKey = item.nfcUid.toLocaleUpperCase("ja");
         if (codes.has(codeKey)) throw new Error(`JSON内で車両番号${item.code}が重複しています`);
         if (plates.has(plateKey)) throw new Error(`JSON内でナンバー${item.plateNumber}が重複しています`);
-        if (nfcUids.has(nfcKey)) throw new Error(`JSON内でNFC UID ${item.nfcUid}が重複しています`);
-        codes.add(codeKey); plates.add(plateKey); nfcUids.add(nfcKey);
+        codes.add(codeKey); plates.add(plateKey);
+        if (item.nfcUid) {
+          const nfcKey = item.nfcUid.toLocaleUpperCase("ja");
+          if (nfcUids.has(nfcKey)) throw new Error(`JSON内でNFC UID ${item.nfcUid}が重複しています`);
+          nfcUids.add(nfcKey);
+        }
       }
       await prisma.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('fleet-import-vehicles'))::text AS import_lock`;
@@ -304,12 +318,16 @@ export async function POST(request: Request) {
           if (existingVehicle) throw new Error(`車両番号${item.code}は「${existingVehicle.name}」で使用中です`);
           const existingPlate = await tx.vehicle.findUnique({ where: { plateNumber: item.plateNumber }, select: { name: true } });
           if (existingPlate) throw new Error(`ナンバー${item.plateNumber}は「${existingPlate.name}」で登録済みです`);
-          const existingNfc = await tx.nfcAssignment.findFirst({ where: { validTo: null, nfcTag: { uid: { equals: item.nfcUid, mode: "insensitive" } } }, select: { employee: { select: { name: true } }, vehicle: { select: { name: true } } } });
-          const nfcOwner = existingNfc?.employee?.name ?? existingNfc?.vehicle?.name;
-          if (nfcOwner) throw new Error(`NFC UID ${item.nfcUid}は「${nfcOwner}」で使用中です`);
+          if (item.nfcUid) {
+            const existingNfc = await tx.nfcAssignment.findFirst({ where: { validTo: null, nfcTag: { uid: { equals: item.nfcUid, mode: "insensitive" } } }, select: { employee: { select: { name: true } }, vehicle: { select: { name: true } } } });
+            const nfcOwner = existingNfc?.employee?.name ?? existingNfc?.vehicle?.name;
+            if (nfcOwner) throw new Error(`NFC UID ${item.nfcUid}は「${nfcOwner}」で使用中です`);
+          }
           const vehicle = await tx.vehicle.create({ data: { vehicleNumberId: vehicleNumber.id, name: item.name, plateNumber: item.plateNumber, color: item.color } });
-          const nfcTag = await tx.nfcTag.upsert({ where: { uid: item.nfcUid }, update: {}, create: { uid: item.nfcUid } });
-          await tx.nfcAssignment.create({ data: { vehicleId: vehicle.id, nfcTagId: nfcTag.id } });
+          if (item.nfcUid) {
+            const nfcTag = await tx.nfcTag.upsert({ where: { uid: item.nfcUid }, update: {}, create: { uid: item.nfcUid } });
+            await tx.nfcAssignment.create({ data: { vehicleId: vehicle.id, nfcTagId: nfcTag.id } });
+          }
         }
         await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "車両JSON取込", targetType: "Vehicle", targetId: "bulk", description: `${input.items.length}台をJSONから一括登録` } });
       });

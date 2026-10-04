@@ -51,6 +51,7 @@ services:
     command: sh scripts/production/prepare-db.sh
     environment:
       DATABASE_URL: postgresql://fleet:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/fleet?schema=public
+      FLEETFLOW_ADMIN_PIN: ${FLEETFLOW_ADMIN_PIN:?FLEETFLOW_ADMIN_PIN is required}
     depends_on:
       db:
         condition: service_healthy

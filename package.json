@@ -8,6 +8,7 @@
     "start": "next start --hostname 0.0.0.0",
     "lint": "tsc --noEmit",
     "test:integration": "node tests/integration/api-idempotency.mjs",
+    "test:integration:optional-nfc": "node tests/integration/optional-nfc-import.mjs",
     "db:migrate:employee-numbers": "node scripts/migrations/migrate-employee-numbers.mjs",
     "db:migrate:employee-normalization": "node scripts/migrations/migrate-employee-normalization.mjs",
     "db:migrate:unified-nfc": "node scripts/migrations/migrate-unified-nfc-assignments.mjs",

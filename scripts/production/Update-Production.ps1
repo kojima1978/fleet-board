@@ -65,6 +65,7 @@ try {
   }
   if (-not $ready) { throw "Updated application did not become healthy." }
   Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "-e", "APP_URL=http://app:3000", "migrate", "npm", "run", "test:integration"))
+  Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "-e", "APP_URL=http://app:3000", "migrate", "npm", "run", "test:integration:optional-nfc"))
   Write-UpdateLog "Completed."
   Show-Message $messages.productionUpdateCompleted $messages.productionUpdateTitle
   exit 0
