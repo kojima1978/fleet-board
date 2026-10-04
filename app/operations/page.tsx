@@ -1,5 +1,5 @@
-import { FleetDashboard } from "@/components/fleet-dashboard";
+import { OperationsDashboard } from "@/components/operations-dashboard";
 
 export default function OperationsPage() {
-  return <FleetDashboard view="operations" />;
+  return <OperationsDashboard />;
 }

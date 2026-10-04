@@ -1,4 +1,5 @@
 export type Employee = { id: string; code: string; name: string; department: string; nfcUid: string; active: boolean; version: number };
+export type Department = { id: string; name: string; active: boolean };
 export type Vehicle = {
   id: string; code: string; name: string; plateNumber: string; nfcUid: string;
   color: string; status: "AVAILABLE" | "RESERVED" | "IN_USE" | "MAINTENANCE";
@@ -14,4 +15,4 @@ export type Trip = {
   purpose: string | null; returnSpotCode: string | null; version: number;
   employee: Employee; vehicle: Vehicle;
 };
-export type DashboardData = { employees: Employee[]; vehicles: Vehicle[]; spots: ParkingSpot[]; trips: Trip[] };
+export type DashboardData = { employees: Employee[]; departments: Department[]; vehicles: Vehicle[]; spots: ParkingSpot[]; trips: Trip[] };

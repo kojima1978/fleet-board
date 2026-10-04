@@ -1,0 +1,1 @@
+export const RESERVATION_GRACE_MINUTES = 30;

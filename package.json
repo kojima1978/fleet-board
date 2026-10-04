@@ -7,6 +7,13 @@
     "build": "next build",
     "start": "next start --hostname 0.0.0.0",
     "lint": "tsc --noEmit",
+    "db:migrate:employee-numbers": "node scripts/migrate-employee-numbers.mjs",
+    "db:migrate:employee-normalization": "node scripts/migrate-employee-normalization.mjs",
+    "db:migrate:unified-nfc": "node scripts/migrate-unified-nfc-assignments.mjs",
+    "db:migrate:vehicle-numbers": "node scripts/migrate-vehicle-numbers.mjs",
+    "db:migrate:nfc-uids": "node scripts/migrate-nfc-uids.mjs",
+    "db:migrate:operation-ids": "node scripts/migrate-operation-ids.mjs",
+    "nfc:build": "docker compose --profile tools run --rm nfc-bridge-build",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts"

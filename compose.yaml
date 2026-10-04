@@ -3,7 +3,7 @@ services:
     build:
       context: .
       target: development
-    command: sh -c "npm run db:generate && npm run db:push && npm run db:seed && npm run dev"
+    command: sh -c "npm run db:migrate:employee-numbers && npm run db:migrate:vehicle-numbers && npm run db:migrate:nfc-uids && npm run db:migrate:employee-normalization && npm run db:migrate:unified-nfc && npm run db:migrate:operation-ids && npm run db:generate && npm run db:push && npm run db:migrate:employee-numbers && npm run db:migrate:vehicle-numbers && npm run db:migrate:employee-normalization && npm run db:migrate:unified-nfc && npm run db:migrate:nfc-uids && npm run db:migrate:operation-ids && npm run db:seed && npm run dev"
     environment:
       DATABASE_URL: postgresql://fleet:fleet@db:5432/fleet?schema=public
       WATCHPACK_POLLING: "true"
@@ -13,10 +13,18 @@ services:
       - .:/app
       - node_modules:/app/node_modules
       - next_cache:/app/.next
+      - ./backups:/backups:ro
     depends_on:
       db:
         condition: service_healthy
     init: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 60s
 
   db:
     image: postgres:17-alpine
@@ -28,11 +36,45 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+      - ./scripts:/scripts:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U fleet -d fleet"]
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
+
+  db-backup:
+    image: postgres:17-alpine
+    command: sh /scripts/backup-db.sh loop
+    environment:
+      POSTGRES_DB: fleet
+      POSTGRES_USER: fleet
+      POSTGRES_PASSWORD: fleet
+      PGPASSWORD: fleet
+    volumes:
+      - ./backups:/backups
+      - ./scripts:/scripts:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "find /backups -type f -name 'fleet-*.sql.gz' -mmin -1560 | grep -q ."]
+      interval: 30m
+      timeout: 5s
+      retries: 2
+      start_period: 2m
+
+  nfc-bridge-build:
+    image: mcr.microsoft.com/dotnet/sdk:8.0
+    profiles: ["tools"]
+    working_dir: /src
+    command: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -o /out
+    volumes:
+      - ./nfc-bridge:/src
+      - ./nfc-bridge/dist:/out
 
 volumes:
   postgres_data:

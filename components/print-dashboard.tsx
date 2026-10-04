@@ -4,9 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowLeft, Printer } from "lucide-react";
 import type { DashboardData } from "@/lib/types";
+import { CUSTOMER_SPOT_CODES, HOLDING_SPOT_CODES, SAKURA_SPOT_CODE, TEMPORARY_SPOT_CODES } from "@/lib/parking-spots";
 
-const TEMPORARY_SPOT_CODES = new Set(["08", "13", "17", "18"]);
-const CUSTOMER_SPOT_CODES = new Set(["01", "02"]);
 const START_HOUR = 6;
 const END_HOUR = 22;
 
@@ -76,8 +75,8 @@ function ParkingPrint({ data }: { data: DashboardData }) {
     <div className="mb-2 grid grid-cols-6 gap-x-3 gap-y-1 border border-slate-300 p-2 text-[7px] leading-tight"><b className="col-span-6 text-[8px]">登録車両一覧（配置図には車両名または車両番号を手書き）</b>{data.vehicles.map((vehicle) => <span key={vehicle.id} className="truncate"><strong>{vehicle.code}</strong> {vehicle.name}・{formatPlateShort(vehicle.plateNumber)}</span>)}</div>
     <div className="relative mx-auto aspect-[950/525] w-full overflow-hidden border border-slate-300 bg-white">
       <img src="/parking-layout.svg" alt="駐車場配置図" className="absolute inset-0 size-full" />
-      {data.spots.map((spot) => <div key={spot.id} className={`absolute overflow-hidden border-2 bg-white/90 ${TEMPORARY_SPOT_CODES.has(spot.code) ? "border-dashed border-amber-600" : CUSTOMER_SPOT_CODES.has(spot.code) ? "border-blue-500" : "border-slate-500"}`} style={{ left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.width}%`, height: `${spot.height}%` }}>
-        <b className="absolute left-1 top-0.5 text-[7px] leading-none">{spot.code}{CUSTOMER_SPOT_CODES.has(spot.code) ? " お客様用" : TEMPORARY_SPOT_CODES.has(spot.code) ? " 臨時" : ""}</b>
+      {data.spots.map((spot) => <div key={spot.id} className={`absolute overflow-hidden text-slate-600 ${HOLDING_SPOT_CODES.has(spot.code) || TEMPORARY_SPOT_CODES.has(spot.code) ? "border-[3px] border-dashed border-slate-300 bg-slate-50/90" : "border-2 border-slate-400 bg-white/90"}`} style={{ left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.width}%`, height: `${spot.height}%` }}>
+        <b className="absolute left-1 top-0.5 text-[7px] leading-none">{spot.code}{spot.code === SAKURA_SPOT_CODE ? " サクラ専用" : CUSTOMER_SPOT_CODES.has(spot.code) ? " お客様用" : HOLDING_SPOT_CODES.has(spot.code) ? " 仮置き（実在なし）" : TEMPORARY_SPOT_CODES.has(spot.code) ? " 臨時" : ""}</b>
       </div>)}
     </div>
   </>;

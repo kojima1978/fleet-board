@@ -5,3 +5,6 @@ node_modules
 .env*
 !.env.example
 README.md
+nfc-bridge/bin
+nfc-bridge/obj
+nfc-bridge/dist

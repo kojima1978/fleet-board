@@ -11,4 +11,16 @@ button { -webkit-tap-highlight-color: transparent; }
 ::-webkit-scrollbar-thumb { border-radius: 999px; background: #cbd5e1; }
 
 @keyframes toast-life { 0% { opacity: 0; transform: translate(-50%, 12px); } 8%, 85% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; transform: translate(-50%, 8px); } }
-[role="status"] { animation: toast-life 3.4s ease both; }
+[role="status"].fixed { animation: toast-life 3.4s ease both; }
+
+.start-dialog > div { height: auto !important; min-height: 0 !important; }
+.start-dialog button { white-space: nowrap; }
+.start-dialog > div:first-child > div:last-child { margin-top: 1rem !important; }
+.start-dialog > div:first-child > div:first-child > div[role="status"] {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+.start-dialog > div:first-child > div:first-child > div[role="status"] > button {
+  grid-column: 1 / -1;
+  width: 100%;
+}

@@ -4,11 +4,13 @@ import { PrismaClient } from "./generated/client";
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) });
 
 const spotGeometry = [
-  ...[251.6, 350.8, 450, 549.2, 648.4, 747.6, 846.8].map((x, i) => ({ code: String(i + 1).padStart(2, "0"), x: x / 9.5, y: 371 / 5.25, width: 72.8 / 9.5, height: 120.8 / 5.25, orientation: "vertical" })),
-  ...[251.6, 389.2, 526.8, 664.4, 798.8].map((x, i) => ({ code: String(i + 8).padStart(2, "0"), x: x / 9.5, y: 282.2 / 5.25, width: 120.8 / 9.5, height: 72.8 / 5.25, orientation: "horizontal" })),
-  ...[251.6, 389.2, 526.8, 664.4].map((x, i) => ({ code: String(i + 13).padStart(2, "0"), x: x / 9.5, y: 193.4 / 5.25, width: 120.8 / 9.5, height: 72.8 / 5.25, orientation: "horizontal" })),
-  ...[251.6, 386.6, 526.8].map((x, i) => ({ code: String(i + 17).padStart(2, "0"), x: x / 9.5, y: 104.6 / 5.25, width: 120.8 / 9.5, height: 72.8 / 5.25, orientation: "horizontal" })),
-  ...[190.6, 282.6, 374.6].map((y, i) => ({ code: String(i + 20).padStart(2, "0"), x: 16.6 / 9.5, y: y / 5.25, width: 120.8 / 9.5, height: 72.8 / 5.25, orientation: "horizontal" })),
+  ...[269.6, 360.6, 451.6, 542.6, 633.6, 724.6, 815.6].map((x, i) => ({ code: String(i + 1).padStart(2, "0"), x: x / 9.5, y: 385.334 / 5.25, width: 66.8 / 9.5, height: 110.8 / 5.25, orientation: "vertical" })),
+  ...[269.6, 395.6, 521.6, 647.6, 771.6].map((x, i) => ({ code: String(i + 8).padStart(2, "0"), x: x / 9.5, y: 304.334 / 5.25, width: 110.8 / 9.5, height: 66.8 / 5.25, orientation: "horizontal" })),
+  ...[269.6, 395.6, 521.6, 647.6].map((x, i) => ({ code: String(i + 13).padStart(2, "0"), x: x / 9.5, y: 222.334 / 5.25, width: 110.8 / 9.5, height: 66.8 / 5.25, orientation: "horizontal" })),
+  ...[269.6, 393.6, 521.6].map((x, i) => ({ code: String(i + 17).padStart(2, "0"), x: x / 9.5, y: 141.334 / 5.25, width: 110.8 / 9.5, height: 66.8 / 5.25, orientation: "horizontal" })),
+  ...[220.334, 304.334, 429.334].map((y, i) => ({ code: String(i + 20).padStart(2, "0"), x: 54.6 / 9.5, y: y / 5.25, width: 110.8 / 9.5, height: 66.8 / 5.25, orientation: "horizontal" })),
+  ...[269.6, 360.6].map((x, i) => ({ code: String(i + 23).padStart(2, "0"), x: x / 9.5, y: 16.6 / 5.25, width: 66.8 / 9.5, height: 110.8 / 5.25, orientation: "vertical" })),
+  ...[16.6, 95.6].map((y, i) => ({ code: String(i + 25).padStart(2, "0"), x: 54.6 / 9.5, y: y / 5.25, width: 110.8 / 9.5, height: 66.8 / 5.25, orientation: "horizontal" })),
 ];
 
 const people = [
@@ -39,27 +41,42 @@ async function main() {
   } else {
     for (const geometry of spotGeometry) await prisma.parkingSpot.upsert({ where: { code: geometry.code }, update: geometry, create: geometry });
   }
-  for (const [code, name, department] of people) await prisma.employee.upsert({
-    where: { code }, update: { name, department }, create: { code, name, department, nfcUid: `NFC-${code}` },
-  });
+  const existingEmployees = await prisma.employee.findMany({ include: { employeeNumber: true }, orderBy: { createdAt: "desc" } });
+  const existingEmployeeByCode = new Map<string, (typeof existingEmployees)[number]>();
+  for (const employee of existingEmployees) if (!existingEmployeeByCode.has(employee.employeeNumber.code) || employee.active) existingEmployeeByCode.set(employee.employeeNumber.code, employee);
+  for (const [code, name, department] of people) {
+    const existingEmployee = existingEmployeeByCode.get(code);
+    const employeeNumber = await prisma.employeeNumber.upsert({ where: { code }, update: {}, create: { code } });
+    const departmentRecord = await prisma.department.upsert({ where: { name: department }, update: { active: true }, create: { name: department } });
+    if (existingEmployee) await prisma.employee.update({ where: { id: existingEmployee.id }, data: { name, departmentId: departmentRecord.id } });
+    else {
+      const employee = await prisma.employee.create({ data: { employeeNumberId: employeeNumber.id, departmentId: departmentRecord.id, name } });
+      const nfcTag = await prisma.nfcTag.upsert({ where: { uid: `NFC-${code}` }, update: {}, create: { uid: `NFC-${code}` } });
+      await prisma.nfcAssignment.create({ data: { employeeId: employee.id, nfcTagId: nfcTag.id } });
+    }
+  }
   const spots = await prisma.parkingSpot.findMany({ orderBy: { code: "asc" } });
-  const existingVehicles = await prisma.vehicle.findMany({ select: { code: true, parkingSpotId: true } });
-  const existingByCode = new Map(existingVehicles.map((vehicle) => [vehicle.code, vehicle]));
+  const existingVehicles = await prisma.vehicle.findMany({ include: { vehicleNumber: true }, orderBy: { createdAt: "desc" } });
+  const existingByCode = new Map<string, (typeof existingVehicles)[number]>();
+  for (const vehicle of existingVehicles) if (!existingByCode.has(vehicle.vehicleNumber.code) || vehicle.active) existingByCode.set(vehicle.vehicleNumber.code, vehicle);
   const occupiedSpotIds = new Set(existingVehicles.flatMap((vehicle) => vehicle.parkingSpotId ? [vehicle.parkingSpotId] : []));
-  const nonRegularCodes = new Set(["01", "02", "08", "13", "17", "18"]);
+  const nonRegularCodes = new Set(["01", "02", "08", "13", "17", "18", "19", "23", "24", "25", "26"]);
   for (let i = 0; i < cars.length; i++) {
     const [code, name, plateNumber, color] = cars[i];
     const existingVehicle = existingByCode.get(code);
-    const freeSpot = existingVehicle ? undefined : spots.find((spot) => !occupiedSpotIds.has(spot.id) && !nonRegularCodes.has(spot.code)) ?? spots.find((spot) => !occupiedSpotIds.has(spot.id));
-    await prisma.vehicle.upsert({
-      where: { code },
-      update: { name, plateNumber, color },
-      create: { code, name, plateNumber, color, nfcUid: `NFC-${code}`, parkingSpotId: freeSpot?.id },
-    });
+    const vehicleNumber = await prisma.vehicleNumber.upsert({ where: { code }, update: {}, create: { code } });
+    const dedicatedSpot = code === "C07" ? spots.find((spot) => spot.code === "19" && !occupiedSpotIds.has(spot.id)) : undefined;
+    const freeSpot = existingVehicle ? undefined : dedicatedSpot ?? spots.find((spot) => !occupiedSpotIds.has(spot.id) && !nonRegularCodes.has(spot.code)) ?? spots.find((spot) => !occupiedSpotIds.has(spot.id));
+    if (existingVehicle) await prisma.vehicle.update({ where: { id: existingVehicle.id }, data: { name, plateNumber, color } });
+    else {
+      const vehicle = await prisma.vehicle.create({ data: { vehicleNumberId: vehicleNumber.id, name, plateNumber, color, parkingSpotId: freeSpot?.id } });
+      const nfcTag = await prisma.nfcTag.upsert({ where: { uid: `NFC-${code}` }, update: {}, create: { uid: `NFC-${code}` } });
+      await prisma.nfcAssignment.create({ data: { vehicleId: vehicle.id, nfcTagId: nfcTag.id } });
+    }
     if (freeSpot) occupiedSpotIds.add(freeSpot.id);
   }
-  const employees = await prisma.employee.findMany({ orderBy: { code: "asc" } });
-  const vehicles = await prisma.vehicle.findMany({ orderBy: { code: "asc" } });
+  const employees = await prisma.employee.findMany({ orderBy: { employeeNumber: { code: "asc" } } });
+  const vehicles = await prisma.vehicle.findMany({ orderBy: { vehicleNumber: { code: "asc" } } });
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   const at = (hours: number, minutes = 0) => new Date(`${day}T${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:00+09:00`);
   const samples = [
@@ -69,7 +86,8 @@ async function main() {
     { id: "sample-trip-04", employeeId: employees[1].id, vehicleId: vehicles[5].id, plannedStart: at(15), plannedEnd: at(16), actualStart: null, actualEnd: null, status: "RESERVED" as const, purpose: "備品購入", returnSpotCode: null },
   ];
   for (const sample of samples) {
-    await prisma.trip.upsert({ where: { id: sample.id }, update: sample, create: sample });
+    // 初回だけデモ予定を作成し、利用開始・返却後の実績は再起動時に上書きしない。
+    await prisma.trip.upsert({ where: { id: sample.id }, update: {}, create: sample });
   }
 }
 

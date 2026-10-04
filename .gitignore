@@ -5,3 +5,9 @@ node_modules/
 *.tsbuildinfo
 prisma/generated/
 .playwright-cli/
+.backups/
+backups/*
+!backups/.gitkeep
+nfc-bridge/dist/
+nfc-bridge/bin/
+nfc-bridge/obj/
