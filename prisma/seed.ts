@@ -51,7 +51,7 @@ async function main() {
   const existingByCode = new Map<string, (typeof existingVehicles)[number]>();
   for (const vehicle of existingVehicles) if (!existingByCode.has(vehicle.vehicleNumber.code) || vehicle.active) existingByCode.set(vehicle.vehicleNumber.code, vehicle);
   const occupiedSpotIds = new Set(existingVehicles.flatMap((vehicle) => vehicle.parkingSpotId ? [vehicle.parkingSpotId] : []));
-  const nonRegularCodes = new Set(["01", "02", "08", "13", "17", "18", "19", "23", "24", "25", "26"]);
+  const nonRegularCodes = new Set(["01", "02", "08", "13", "17", "18", "19", "20", "22", "23", "24"]);
   for (let i = 0; i < cars.length; i++) {
     const [code, name, plateNumber, color] = cars[i];
     const existingVehicle = existingByCode.get(code);

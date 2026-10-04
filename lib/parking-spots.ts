@@ -1,6 +1,6 @@
 export const TEMPORARY_SPOT_CODES = new Set(["08", "13", "17", "18"]);
-export const HOLDING_SPOT_CODES = new Set(["25", "26"]);
-export const CUSTOMER_SPOT_CODES = new Set(["01", "02", "23", "24"]);
+export const HOLDING_SPOT_CODES = new Set(["22", "23"]);
+export const CUSTOMER_SPOT_CODES = new Set(["01", "02", "20", "24"]);
 export const SAKURA_SPOT_CODE = "19";
 
 export const formatSpotLabel = (code: string) =>
