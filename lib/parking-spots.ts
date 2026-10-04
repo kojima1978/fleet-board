@@ -11,5 +11,5 @@ export const formatSpotLabel = (code: string) =>
       : HOLDING_SPOT_CODES.has(code)
         ? `仮置き ${code}（実在区画なし）`
         : TEMPORARY_SPOT_CODES.has(code)
-          ? `区画 ${code}（臨時）`
+          ? `区画 ${code}（一時）`
           : `区画 ${code}`;

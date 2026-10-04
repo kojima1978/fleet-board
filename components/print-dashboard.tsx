@@ -76,7 +76,7 @@ function ParkingPrint({ data }: { data: DashboardData }) {
     <div className="relative mx-auto aspect-[950/525] w-full overflow-hidden border border-slate-300 bg-white">
       <img src="/parking-layout.svg" alt="駐車場配置図" className="absolute inset-0 size-full" />
       {data.spots.map((spot) => <div key={spot.id} className={`absolute overflow-hidden text-slate-600 ${HOLDING_SPOT_CODES.has(spot.code) || TEMPORARY_SPOT_CODES.has(spot.code) ? "border-[3px] border-dashed border-slate-300 bg-slate-50/90" : "border-2 border-slate-400 bg-white/90"}`} style={{ left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.width}%`, height: `${spot.height}%` }}>
-        <b className="absolute left-1 top-0.5 text-[7px] leading-none">{spot.code}{spot.code === SAKURA_SPOT_CODE ? " サクラ専用" : CUSTOMER_SPOT_CODES.has(spot.code) ? " お客様用" : HOLDING_SPOT_CODES.has(spot.code) ? " 仮置き（実在なし）" : TEMPORARY_SPOT_CODES.has(spot.code) ? " 臨時" : ""}</b>
+        <b className="absolute left-1 top-0.5 text-[7px] leading-none">{spot.code}{spot.code === SAKURA_SPOT_CODE ? " サクラ専用" : CUSTOMER_SPOT_CODES.has(spot.code) ? " お客様用" : HOLDING_SPOT_CODES.has(spot.code) ? " 仮置き（実在なし）" : TEMPORARY_SPOT_CODES.has(spot.code) ? " 一時" : ""}</b>
       </div>)}
     </div>
   </>;

@@ -7,6 +7,9 @@ backup_once() {
   pg_dump -h db -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --no-privileges | gzip -9 > "$target"
   find /backups -type f -name 'fleet-*.sql.gz' -mtime +30 -delete
   echo "Backup completed: $target"
+  if [ "${AUTO_VERIFY_BACKUP:-false}" = "true" ]; then
+    sh /scripts/database/verify-backup.sh "$target"
+  fi
 }
 
 backup_once

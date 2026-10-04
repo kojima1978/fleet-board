@@ -2,6 +2,7 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$ProjectDirectory,
   [switch]$StatusOnly,
+  [switch]$Production,
   [switch]$NoUi
 )
 
@@ -12,6 +13,7 @@ $nfcLauncher = Join-Path $PSScriptRoot "launch.ps1"
 $logPath = Join-Path $PSScriptRoot "fleetflow-start.log"
 $messagesPath = Join-Path $PSScriptRoot "messages.ja.json"
 $messages = ConvertFrom-Json ([System.IO.File]::ReadAllText($messagesPath, [System.Text.Encoding]::UTF8))
+$script:lastDockerOutput = ""
 
 function Get-Message([string]$name) {
   return $messages.$name
@@ -47,8 +49,17 @@ function Invoke-Docker([string[]]$arguments) {
   $previousPreference = $ErrorActionPreference
   $ErrorActionPreference = "SilentlyContinue"
   try {
-    & $docker.Source @arguments *> $null
-    return $LASTEXITCODE
+    $output = (& $docker.Source @arguments 2>&1 | Out-String).Trim()
+    $exitCode = $LASTEXITCODE
+    $script:lastDockerOutput = $output
+    if ($exitCode -ne 0) {
+      $commandText = "docker " + ($arguments -join " ")
+      Write-LauncherLog "$commandText failed with exit code $exitCode."
+      if (-not [string]::IsNullOrWhiteSpace($output)) {
+        Write-LauncherLog "Docker output: $output"
+      }
+    }
+    return $exitCode
   }
   finally {
     $ErrorActionPreference = $previousPreference
@@ -74,19 +85,36 @@ function Get-ErrorText([string]$errorCode) {
   return Get-Message "UNKNOWN_ERROR"
 }
 
-if ($StatusOnly) {
-  Show-Result (Get-StatusText) (Get-Message "statusTitle")
-  exit 0
-}
-
 try {
-  Write-LauncherLog "Start requested."
+  $ProjectDirectory = [System.IO.Path]::GetFullPath($ProjectDirectory)
   if (-not (Test-Path -LiteralPath $ProjectDirectory)) {
     throw "PROJECT_NOT_FOUND"
   }
   if (-not (Test-Path -LiteralPath $nfcLauncher)) {
     throw "NFC_LAUNCHER_NOT_FOUND"
   }
+
+  $composeArguments = @("compose", "--project-directory", $ProjectDirectory)
+  if ($Production) {
+    $productionComposePath = Join-Path $ProjectDirectory "compose.production.yaml"
+    $productionEnvironmentPath = Join-Path $ProjectDirectory ".env.production"
+    if (-not (Test-Path -LiteralPath $productionComposePath)) { throw "PRODUCTION_COMPOSE_NOT_FOUND" }
+    if (-not (Test-Path -LiteralPath $productionEnvironmentPath)) { throw "PRODUCTION_CONFIG_NOT_FOUND" }
+    $portSetting = Get-Content -LiteralPath $productionEnvironmentPath | Where-Object { $_ -match '^FLEETFLOW_PORT=' } | Select-Object -First 1
+    if ($portSetting) {
+      $productionPort = ($portSetting -split '=', 2)[1].Trim()
+      if ($productionPort -match '^\d{2,5}$') { $appUrl = "http://localhost:$productionPort/" }
+    }
+    $composeArguments += @("--env-file", $productionEnvironmentPath, "-f", $productionComposePath)
+  }
+
+  if ($StatusOnly) {
+    Show-Result (Get-StatusText) (Get-Message "statusTitle")
+    exit 0
+  }
+
+  $modeName = if ($Production) { "production" } else { "development" }
+  Write-LauncherLog "Start requested. Mode: $modeName. Project directory: $ProjectDirectory"
 
   $docker = Get-Command docker -ErrorAction SilentlyContinue
   if ($null -eq $docker) { throw "DOCKER_NOT_INSTALLED" }
@@ -104,7 +132,19 @@ try {
     if ($dockerExitCode -ne 0) { throw "DOCKER_TIMEOUT" }
   }
 
-  $dockerExitCode = Invoke-Docker @("compose", "--project-directory", $ProjectDirectory, "up", "-d")
+  if ($Production) {
+    $null = Invoke-Docker @("compose", "--project-directory", $ProjectDirectory, "stop")
+  }
+  else {
+    $productionComposePath = Join-Path $ProjectDirectory "compose.production.yaml"
+    $productionEnvironmentPath = Join-Path $ProjectDirectory ".env.production"
+    if ((Test-Path -LiteralPath $productionComposePath) -and (Test-Path -LiteralPath $productionEnvironmentPath)) {
+      $null = Invoke-Docker @("compose", "--project-directory", $ProjectDirectory, "--env-file", $productionEnvironmentPath, "-f", $productionComposePath, "stop")
+    }
+  }
+
+  $upArguments = @("up", "-d")
+  $dockerExitCode = Invoke-Docker ($composeArguments + $upArguments)
   if ($dockerExitCode -ne 0) { throw "DOCKER_SERVICES_FAILED" }
 
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $nfcLauncher

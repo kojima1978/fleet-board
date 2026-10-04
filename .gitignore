@@ -1,11 +1,13 @@
 node_modules/
 .next/
 .env
+.env.production
 *.log
 *.tsbuildinfo
 prisma/generated/
 .playwright-cli/
 .backups/
+diagnostics/
 backups/*
 !backups/.gitkeep
 nfc-bridge/dist/

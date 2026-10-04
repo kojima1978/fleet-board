@@ -11,5 +11,5 @@ if not exist "%FLEETFLOW_LAUNCHER%" (
   exit /b 1
 )
 
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%FLEETFLOW_LAUNCHER%" -ProjectDirectory "%FLEETFLOW_PROJECT%" -StatusOnly %*
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%FLEETFLOW_LAUNCHER%" -ProjectDirectory "%FLEETFLOW_PROJECT%" -Production -StatusOnly %*
 exit /b %ERRORLEVEL%

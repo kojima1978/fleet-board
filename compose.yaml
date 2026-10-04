@@ -7,6 +7,8 @@ services:
     environment:
       DATABASE_URL: postgresql://fleet:fleet@db:5432/fleet?schema=public
       WATCHPACK_POLLING: "true"
+      FLEETFLOW_ADMIN_PIN: ${FLEETFLOW_ADMIN_PIN:-2468}
+      FLEETFLOW_SESSION_SECRET: ${FLEETFLOW_SESSION_SECRET:-fleetflow-local-development-secret}
     ports:
       - "3035:3000"
     volumes:
@@ -47,12 +49,13 @@ services:
 
   db-backup:
     image: postgres:17-alpine
-    command: sh /scripts/backup-db.sh loop
+    command: sh /scripts/database/backup-db.sh loop
     environment:
       POSTGRES_DB: fleet
       POSTGRES_USER: fleet
       POSTGRES_PASSWORD: fleet
       PGPASSWORD: fleet
+      AUTO_VERIFY_BACKUP: "true"
     volumes:
       - ./backups:/backups
       - ./scripts:/scripts:ro
@@ -61,7 +64,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "find /backups -type f -name 'fleet-*.sql.gz' -mmin -1560 | grep -q ."]
+      test: ["CMD-SHELL", "find /backups -type f -name 'fleet-*.sql.gz' -mmin -1560 | grep -q . && find /backups/.last-verified -mmin -1560 | grep -q ."]
       interval: 30m
       timeout: 5s
       retries: 2

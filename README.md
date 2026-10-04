@@ -143,7 +143,7 @@ powershell -ExecutionPolicy Bypass -File .\nfc-bridge\install.ps1
 
 Windowsログイン時に自動起動します。接続確認はブラウザーで [http://127.0.0.1:17831/health](http://127.0.0.1:17831/health) を開き、`readerConnected`が`true`になることを確認します。詳細は[NFC BridgeのREADME](nfc-bridge/README.md)を参照してください。
 
-## FleetFlowの起動と状態確認
+## FleetFlowの開発環境起動と状態確認
 
 デスクトップショートカットは使用しません。開発フォルダー直下の次のファイルを使用します。
 
@@ -152,31 +152,87 @@ Windowsログイン時に自動起動します。接続確認はブラウザー�
 
 通常は `FleetFlow Start.cmd` をダブルクリックするだけで起動できます。NFC BridgeだけはWindowsログイン時にも自動起動します。
 
-正常時は起動通知を表示しません。NFCだけ使用できない場合は「注意」として手動操作が可能なことと対処方法を表示します。DockerまたはFleetFlow本体を起動できない場合は「起動エラー」として原因、対処方法、詳細ログの場所を日本語で表示します。
+ファイル名の`FleetFlow`と`Start`の間には半角スペースがあります。PowerShellから起動する場合は `& '.\FleetFlow Start.cmd'` のように引用符で囲んでください。
+
+正常時は起動通知を表示しません。NFCだけ使用できない場合は「注意」として手動操作が可能なことと対処方法を表示します。DockerまたはFleetFlow本体を起動できない場合は「起動エラー」として原因と対処方法を日本語で表示し、Dockerの詳細エラーを`nfc-bridge\fleetflow-start.log`へ記録します。
 
 画面上部にはアプリの更新状態とNFC接続状態を表示します。データ更新に失敗した場合は、最終更新時刻と「再接続」を表示し、古い情報を正常な情報として見せないようにしています。Dockerの`app`と`db`にはヘルスチェックと自動再起動を設定しています。
 
+## 本番環境の起動
+
+本番環境は開発環境と別のコンテナー・DBボリューム・バックアップ先を使用します。開発フォルダー直下の次のファイルを使用します。
+
+- `FleetFlow Production Start.cmd`：本番設定を初回だけ自動生成し、本番イメージ、DB、バックアップ、NFC Bridgeを起動
+- `FleetFlow Production Update.cmd`：バックアップ、ビルド、型検査、DB移行、切替、主要操作テストを行い、失敗時は直前のアプリへ自動復帰
+- `FleetFlow Production Status.cmd`：本体、NFC Bridge、NFCリーダーの状態確認
+- `FleetFlow Production Stop.cmd`：本番コンテナーを停止。DBとバックアップは保持
+- `FleetFlow Production Diagnostics.cmd`：コンテナー、アプリ、NFC、ディスク、直近ログを秘密情報なしのZIPへ保存
+- `FleetFlow Production Backup Setup.cmd`：NAS、USB、同期フォルダーへの毎日19時のバックアップ複製を設定
+
+初回は`FleetFlow Production Start.cmd`をダブルクリックします。ランダムな管理者PIN、DBパスワード、セッション秘密鍵を`.env.production`へ生成し、管理者PINだけを画面に表示します。`.env.production`はGit管理対象外です。表示されたPINは安全な場所へ保管してください。
+
+通常の起動では、最後に検証済みの本番イメージをそのまま使用するため、ソース変更や通信障害の影響を受けません。変更を本番へ反映するときだけ`FleetFlow Production Update.cmd`を使用します。更新前バックアップと復元検証に失敗した場合は更新を開始しません。ビルド、型検査、起動、ヘルスチェック、主要操作テストのいずれかが失敗した場合は、直前のアプリイメージへ自動復帰します。
+
+本番と開発は同じ`3035`ポートを使用するため、本番起動時は開発コンテナーを停止し、開発起動時は本番コンテナーを停止します。DBデータはそれぞれ独立して保持されます。本番DBには駐車区画だけを初期登録し、デモ社員・デモ車両・デモ予定は登録しません。
+
+本番構成は次を適用します。
+
+- Next.jsのstandalone本番イメージを非rootユーザーで実行
+- DBポートをWindows側へ公開しない
+- ソースコード、`node_modules`、`.next`を本番コンテナーへマウントしない
+- DB準備完了後にのみアプリを起動
+- 自動再起動、ヘルスチェック、CPU・メモリ上限を設定
+- Dockerログを1ファイル10MB・最大3ファイルへ制限
+- 本番バックアップを`backups\production`へ保存し、毎回復元検証
+- Prismaマイグレーション履歴でDB変更を番号管理
+- 初期状態では`127.0.0.1`だけへ公開し、同じWindows PC以外からのアクセスを遮断
+
+設定画面にはアプリバージョン、実行環境、最終更新日時、バックアップ確認日時を表示します。障害調査時は`FleetFlow Production Diagnostics.cmd`で`diagnostics`フォルダーへ診断ZIPを作成してください。`.env.production`やDBパスワードは診断ZIPへ含めません。
+
+## 管理者PIN
+
+社員・車両の設定画面は管理者PINで保護され、認証は8時間有効です。開発環境の初期PINは`2468`です。本番環境では初回起動時にランダムなPINと秘密鍵を`.env.production`へ生成します。
+
+```env
+FLEETFLOW_ADMIN_PIN=任意の4～12桁の数字
+FLEETFLOW_SESSION_SECRET=十分に長いランダム文字列
+```
+
+設定変更APIも同じ管理者セッションを検証するため、画面を迂回した未認証の登録・変更は拒否されます。PINを5回間違えると5分間ロックされます。
+
 ## バックアップ
 
-`db-backup`コンテナが起動時と24時間ごとにDBを`backups`フォルダーへ自動保存し、30日を超えたファイルを削除します。最終成功日時は「履歴」画面で確認できます。
+`db-backup`コンテナが起動時と24時間ごとにDBを`backups`フォルダーへ自動保存し、直後に一時DBへ復元して社員・車両テーブルを検査します。30日を超えたファイルは削除します。バックアップと復元確認の最終成功日時は「履歴」画面で確認できます。
 
 手動バックアップ：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\Backup-Now.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\database\Backup-Now.ps1
 ```
+
+本番DBを手動バックアップする場合：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\database\Backup-Now.ps1 -Production
+```
+
+PC故障にも備える場合は`FleetFlow Production Backup Setup.cmd`を実行し、NAS、USBドライブ、OneDrive等の同期フォルダーを選択します。毎日19時にバックアップ作成、復元検証、SHA-256付き複製を行います。保存先では新しい30ファイルを保持します。USBを保存先にする場合は、実行時刻に接続されている必要があります。
 
 バックアップを一時DBへ復元し、社員・車両テーブルを検査します。本番DBは変更しません。
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\Verify-Backup.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\database\Verify-Backup.ps1
 ```
+
+本番バックアップは同じコマンドへ`-Production`を追加します。
 
 復元確認の成功日時も「履歴」画面へ表示されます。実DBの復元は現在の内容を置き換えるため、ファイル名指定と`RESTORE`の確認入力が必要です。
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\Restore-Backup.ps1 -FileName fleet-YYYYMMDD-HHMMSS.sql.gz
+powershell -ExecutionPolicy Bypass -File .\scripts\database\Restore-Backup.ps1 -FileName fleet-YYYYMMDD-HHMMSS.sql.gz
 ```
+
+本番DBを復元する場合は、同じコマンドへ`-Production`を追加します。
 
 操作更新には一意の操作IDを付けています。同じ通信を再送しても利用開始・返却・予約などは二重登録されません。通信は10秒で区切り、同じ操作IDで一度だけ自動再送した後、最新状態を取得します。オフライン中は警告を表示し、接続復旧時または画面へ戻った時に自動同期します。
 
@@ -188,11 +244,21 @@ TypeScriptチェック：
 docker compose exec app npm run lint
 ```
 
-本番ビルド確認：
+主要操作（利用開始、同時二重送信、返却再送、予約、時間変更、予約取消）のAPI結合テスト：
 
 ```powershell
-docker compose exec -e NODE_ENV=production app npm run build
+docker compose exec app npm run test:integration
 ```
+
+テスト専用の社員・車両・区画を一時作成し、終了時に削除します。実運用データは変更しません。
+
+本番更新の確認：
+
+```powershell
+& '.\FleetFlow Production Update.cmd' -NoUi
+```
+
+DBスキーマは`prisma\migrations`の番号付きSQLで管理します。既存DBは初回更新時に現在の構造をベースラインとして記録し、新規DBには同じベースラインを適用します。以後は`prisma db push`を本番更新に使用しません。
 
 ### 依存関係のセキュリティ監査
 
@@ -227,6 +293,6 @@ docker compose restart app
 
 別の端末で先に変更された可能性があります。画面を更新して最新状態を確認し、もう一度操作してください。
 
-## 本番運用前の注意
+## 本番公開時の注意
 
-現在の`compose.yaml`はローカル・社内検証向けです。インターネットへ直接公開しないでください。本番運用では、認証、HTTPS、ファイアウォール、データベース認証情報の変更、定期バックアップ、ログ保管を別途設定してください。
+`compose.production.yaml`は1台のWindows PCで安定運用する構成で、初期設定では`127.0.0.1`だけへ公開します。管理者PINは設定変更を保護しますが、アプリ全体のユーザー認証ではありません。LAN公開へ変更する場合は、`.env.production`の`FLEETFLOW_BIND_ADDRESS`を変更するだけでなく、利用者認証、HTTPS、Windowsファイアウォールの接続元制限を同時に設定し、HTTPS化後に`FLEETFLOW_COOKIE_SECURE=true`へ変更してください。インターネットへ直接公開しないでください。

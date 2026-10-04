@@ -3,10 +3,14 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { normalizeNfcUid } from "@/lib/nfc";
 import { RESERVATION_GRACE_MINUTES } from "@/lib/reservations";
+import { adminTokenFromRequest, verifyAdminToken } from "@/lib/admin-auth";
+import { getBackupStatus } from "@/lib/backup-status";
 
 export const dynamic = "force-dynamic";
 const SAKURA_SPOT_CODE = "19";
 const SAKURA_VEHICLE_CODE = "C07";
+const activeOperationIds = new Set<string>();
+const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 function withVehicleCode<T extends { id: string; name: string; plateNumber: string; color: string; status: "AVAILABLE" | "RESERVED" | "IN_USE" | "MAINTENANCE"; parkingSpotId: string | null; active: boolean; version: number; vehicleNumber: { code: string }; nfcAssignments: { nfcTag: { uid: string } }[] }>(vehicle: T) {
   return { id: vehicle.id, code: vehicle.vehicleNumber.code, name: vehicle.name, plateNumber: vehicle.plateNumber, nfcUid: vehicle.nfcAssignments[0]?.nfcTag.uid ?? "", color: vehicle.color, status: vehicle.status, parkingSpotId: vehicle.parkingSpotId, active: vehicle.active, version: vehicle.version };
@@ -75,10 +79,12 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("end"), tripId: z.string(), tripVersion: z.number().int(), vehicleId: z.string(), vehicleVersion: z.number().int(), spotId: z.string(), ...actorSchema }),
   z.object({ action: z.literal("undoReturn"), tripId: z.string(), vehicleId: z.string(), ...actorSchema }),
   z.object({ action: z.literal("moveTrip"), tripId: z.string(), version: z.number().int(), plannedStart: z.string().datetime(), plannedEnd: z.string().datetime(), ...actorSchema }),
-  z.object({ action: z.literal("adjustTrip"), tripId: z.string(), version: z.number().int(), minutes: z.union([z.literal(-60), z.literal(-30), z.literal(-15), z.literal(15), z.literal(30), z.literal(60)]), ...actorSchema }),
+  z.object({ action: z.literal("adjustTrip"), tripId: z.string(), version: z.number().int(), minutes: z.union([z.literal(-60), z.literal(-30), z.literal(-15), z.literal(15), z.literal(30), z.literal(60), z.literal(180), z.literal(300)]), ...actorSchema }),
+  z.object({ action: z.literal("setTripEnd"), tripId: z.string(), version: z.number().int(), plannedEnd: z.string().datetime(), ...actorSchema }),
   z.object({ action: z.literal("cancelTrip"), tripId: z.string(), version: z.number().int(), ...actorSchema }),
   z.object({ action: z.literal("moveVehicle"), vehicleId: z.string(), version: z.number().int(), spotId: z.string(), ...actorSchema }),
 ]);
+const adminActions = new Set(["createEmployee", "createVehicle", "updateEmployee", "updateVehicle", "setEmployeeActive", "setVehicleActive", "importEmployees", "importVehicles"]);
 
 export async function GET(request: Request) {
   await expireStaleReservations();
@@ -90,7 +96,7 @@ export async function GET(request: Request) {
   const requestedDays = Number(url.searchParams.get("days"));
   const days = requestedDays === 1 || requestedDays === 3 ? requestedDays : 3;
   const dayEnd = new Date(dayStart.getTime() + days * 24 * 60 * 60_000);
-  const [employees, departments, vehicles, spots, trips] = await Promise.all([
+  const [employees, departments, vehicles, spots, trips, backup] = await Promise.all([
     prisma.employee.findMany({ include: { employeeNumber: true, department: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } }, orderBy: { employeeNumber: { code: "asc" } } }),
     prisma.department.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
     prisma.vehicle.findMany({ include: { vehicleNumber: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } }, orderBy: { vehicleNumber: { code: "asc" } } }),
@@ -104,6 +110,7 @@ export async function GET(request: Request) {
       ] },
       include: { employee: { include: { employeeNumber: true, department: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } } }, vehicle: { include: { vehicleNumber: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } } } }, orderBy: { plannedStart: "asc" },
     }),
+    getBackupStatus(),
   ]);
   return NextResponse.json({
     employees: employees.map(withEmployeeCode),
@@ -111,6 +118,13 @@ export async function GET(request: Request) {
     vehicles: vehicles.map(withVehicleCode),
     spots: spots.map((spot) => ({ ...spot, vehicle: spot.vehicle ? withVehicleCode(spot.vehicle) : null })),
     trips: trips.map((trip) => ({ ...trip, employee: withEmployeeCode(trip.employee), vehicle: withVehicleCode(trip.vehicle) })),
+    system: {
+      backupLatestAt: backup.latestAt,
+      backupVerifiedAt: backup.verifiedAt,
+      appVersion: process.env.FLEETFLOW_APP_VERSION || "development",
+      environment: process.env.NODE_ENV || "development",
+      deployedAt: process.env.FLEETFLOW_DEPLOYED_AT || null,
+    },
   });
 }
 
@@ -122,6 +136,17 @@ export async function POST(request: Request) {
   const parsed = actionSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ message: "入力内容を確認してください", details: process.env.NODE_ENV === "development" ? parsed.error.issues : undefined }, { status: 400 });
   const input = parsed.data;
+  if (adminActions.has(input.action) && !verifyAdminToken(adminTokenFromRequest(request))) return NextResponse.json({ message: "管理者認証の有効期限が切れました。PINを再入力してください" }, { status: 401 });
+  if (activeOperationIds.has(operationId)) {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      await wait(100);
+      const completed = await prisma.auditLog.findUnique({ where: { operationId }, select: { id: true } });
+      if (completed) return NextResponse.json({ ok: true, replayed: true });
+      if (!activeOperationIds.has(operationId)) break;
+    }
+    return NextResponse.json({ message: "同じ操作を処理中です。最新状態を再読込してください" }, { status: 409 });
+  }
+  activeOperationIds.add(operationId);
   try {
     const completed = await prisma.auditLog.findUnique({ where: { operationId }, select: { id: true } });
     if (completed) return NextResponse.json({ ok: true, replayed: true });
@@ -411,7 +436,9 @@ export async function POST(request: Request) {
         if (trip.status !== "RESERVED" && trip.status !== "IN_USE") throw new Error("完了・取消済みの予定時間は変更できません");
         const newEnd = new Date(trip.plannedEnd.getTime() + input.minutes * 60_000);
         const minimumEnd = new Date(trip.plannedStart.getTime() + 15 * 60_000);
+        const maximumEnd = new Date(trip.plannedStart.getTime() + 7 * 24 * 60 * 60_000);
         if (newEnd < minimumEnd) throw new Error("利用時間は15分未満にできません");
+        if (newEnd > maximumEnd) throw new Error("利用期間は開始から7日以内で指定してください");
         if (trip.status === "IN_USE" && newEnd < new Date()) throw new Error("利用中の終了予定を現在時刻より前にはできません");
         if (input.minutes > 0) {
           const overlap = await tx.trip.findFirst({ where: {
@@ -427,6 +454,32 @@ export async function POST(request: Request) {
         if (updated.count !== 1) throw new Error("CONFLICT");
         const direction = input.minutes > 0 ? "延長" : "短縮";
         await tx.auditLog.create({ data: { operationId, actorEmployeeId: input.actorEmployeeId, actorName: input.actorName, action: `利用時間${direction}`, targetType: "Trip", targetId: trip.id, description: `${Math.abs(input.minutes)}分${direction}` } });
+      });
+    }
+    if (input.action === "setTripEnd") {
+      await prisma.$transaction(async (tx) => {
+        const trip = await tx.trip.findUniqueOrThrow({ where: { id: input.tripId } });
+        if (trip.status !== "RESERVED" && trip.status !== "IN_USE") throw new Error("完了・取消済みの予定時間は変更できません");
+        const newEnd = new Date(input.plannedEnd);
+        const minimumEnd = new Date(trip.plannedStart.getTime() + 15 * 60_000);
+        const maximumEnd = new Date(trip.plannedStart.getTime() + 7 * 24 * 60 * 60_000);
+        if (newEnd < minimumEnd) throw new Error("利用時間は15分未満にできません");
+        if (newEnd > maximumEnd) throw new Error("利用期間は開始から7日以内で指定してください");
+        if (trip.status === "IN_USE" && newEnd < new Date()) throw new Error("利用中の終了予定を現在時刻より前にはできません");
+        if (newEnd > trip.plannedEnd) {
+          const sameVehicleOrEmployee = [{ vehicleId: trip.vehicleId }, { employeeId: trip.employeeId }];
+          const overlap = await tx.trip.findFirst({ where: {
+            id: { not: trip.id },
+            OR: [
+              { status: "IN_USE", OR: sameVehicleOrEmployee },
+              { status: "RESERVED", plannedStart: { lt: newEnd }, plannedEnd: { gt: trip.plannedStart }, OR: sameVehicleOrEmployee },
+            ],
+          } });
+          if (overlap) throw new Error("指定した終了日時が車両または利用者の予定と重なります");
+        }
+        const updated = await tx.trip.updateMany({ where: { id: trip.id, version: input.version, status: trip.status }, data: { plannedEnd: newEnd, version: { increment: 1 } } });
+        if (updated.count !== 1) throw new Error("CONFLICT");
+        await tx.auditLog.create({ data: { operationId, actorEmployeeId: input.actorEmployeeId, actorName: input.actorName, action: "利用終了日時変更", targetType: "Trip", targetId: trip.id, description: `${trip.plannedEnd.toISOString()}から${newEnd.toISOString()}へ変更` } });
       });
     }
     if (input.action === "cancelTrip") {
@@ -462,5 +515,7 @@ export async function POST(request: Request) {
     const duplicateMessage = employeeAction ? "社員番号またはNFC UIDがすでに登録されています" : "車両番号・ナンバー・NFC UIDのいずれかがすでに登録されています";
     const message = duplicate ? duplicateMessage : error instanceof Error ? error.message : "更新に失敗しました";
     return NextResponse.json({ message: message === "CONFLICT" ? "他のユーザーが先に更新しました。最新状態を再読込しました。" : message }, { status: message === "CONFLICT" ? 409 : 400 });
+  } finally {
+    activeOperationIds.delete(operationId);
   }
 }

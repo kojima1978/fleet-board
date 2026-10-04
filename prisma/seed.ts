@@ -1,17 +1,8 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "./generated/client";
+import { parkingSpotGeometry } from "./parking-spot-seed";
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) });
-
-const spotGeometry = [
-  ...[269.6, 360.6, 451.6, 542.6, 633.6, 724.6, 815.6].map((x, i) => ({ code: String(i + 1).padStart(2, "0"), x: x / 9.5, y: 385.334 / 5.25, width: 66.8 / 9.5, height: 110.8 / 5.25, orientation: "vertical" })),
-  ...[269.6, 395.6, 521.6, 647.6, 771.6].map((x, i) => ({ code: String(i + 8).padStart(2, "0"), x: x / 9.5, y: 304.334 / 5.25, width: 110.8 / 9.5, height: 66.8 / 5.25, orientation: "horizontal" })),
-  ...[269.6, 395.6, 521.6, 647.6].map((x, i) => ({ code: String(i + 13).padStart(2, "0"), x: x / 9.5, y: 222.334 / 5.25, width: 110.8 / 9.5, height: 66.8 / 5.25, orientation: "horizontal" })),
-  ...[269.6, 393.6, 521.6].map((x, i) => ({ code: String(i + 17).padStart(2, "0"), x: x / 9.5, y: 141.334 / 5.25, width: 110.8 / 9.5, height: 66.8 / 5.25, orientation: "horizontal" })),
-  ...[220.334, 304.334, 429.334].map((y, i) => ({ code: String(i + 20).padStart(2, "0"), x: 54.6 / 9.5, y: y / 5.25, width: 110.8 / 9.5, height: 66.8 / 5.25, orientation: "horizontal" })),
-  ...[269.6, 360.6].map((x, i) => ({ code: String(i + 23).padStart(2, "0"), x: x / 9.5, y: 16.6 / 5.25, width: 66.8 / 9.5, height: 110.8 / 5.25, orientation: "vertical" })),
-  ...[16.6, 95.6].map((y, i) => ({ code: String(i + 25).padStart(2, "0"), x: 54.6 / 9.5, y: y / 5.25, width: 110.8 / 9.5, height: 66.8 / 5.25, orientation: "horizontal" })),
-];
 
 const people = [
   ["E001", "佐藤 美咲", "営業部"], ["E002", "田中 健太", "総務部"], ["E003", "鈴木 翔", "技術部"],
@@ -32,14 +23,14 @@ const cars = [
 
 async function main() {
   const existingSpots = await prisma.parkingSpot.findMany();
-  const positionedSpots = spotGeometry.map((geometry) => ({ geometry, spot: existingSpots.find((spot) => Math.abs(spot.x - geometry.x) < 0.01 && Math.abs(spot.y - geometry.y) < 0.01) }));
+  const positionedSpots = parkingSpotGeometry.map((geometry) => ({ geometry, spot: existingSpots.find((spot) => Math.abs(spot.x - geometry.x) < 0.01 && Math.abs(spot.y - geometry.y) < 0.01) }));
   if (positionedSpots.every(({ spot }) => spot)) {
     await prisma.$transaction(async (tx) => {
       for (const [index, { spot }] of positionedSpots.entries()) await tx.parkingSpot.update({ where: { id: spot!.id }, data: { code: `__renumber_${index + 1}` } });
       for (const { geometry, spot } of positionedSpots) await tx.parkingSpot.update({ where: { id: spot!.id }, data: geometry });
     });
   } else {
-    for (const geometry of spotGeometry) await prisma.parkingSpot.upsert({ where: { code: geometry.code }, update: geometry, create: geometry });
+    for (const geometry of parkingSpotGeometry) await prisma.parkingSpot.upsert({ where: { code: geometry.code }, update: geometry, create: geometry });
   }
   const existingEmployees = await prisma.employee.findMany({ include: { employeeNumber: true }, orderBy: { createdAt: "desc" } });
   const existingEmployeeByCode = new Map<string, (typeof existingEmployees)[number]>();
