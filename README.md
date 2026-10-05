@@ -271,9 +271,9 @@ DBスキーマは`prisma\migrations`の番号付きSQLで管理します。既�
 docker compose exec app npm audit --omit=dev
 ```
 
-2026年10月4日時点では、高重要度4件がPrisma CLIの依存経路（`@prisma/config`、`deepmerge-ts`、`mysql2`、`prisma`）として報告されます。FleetFlowはPostgreSQLを使用しており、警告対象の`mysql2`は使用していません。また、本番Dockerイメージには`mysql2`、`deepmerge-ts`、Prisma CLIは含まれず、実行に必要なPrisma Clientだけが含まれることを確認しています。
+2026年10月5日時点では、Prisma CLI 7.10.0が固定している推移依存の脆弱性を避けるため、`package.json`の`overrides`で`deepmerge-ts` 8.0.2と`mysql2` 3.24.5を使用します。`npm audit`は開発依存を含めて0件です。Prisma本体を6系へダウングレードする`npm audit fix --force`は使用しません。
 
-監査ツールが提案する`npm audit fix --force`はPrisma 7から6へのダウングレードを伴い、DBスキーマや生成コードの互換性を損なう可能性があるため実行しません。Prisma 8の安定版公開後に、別環境でビルド、マイグレーション、データ保持、主要操作を検証してから更新します。監査結果や配布バージョンは変化するため、依存関係を更新する前に再監査してください。
+この上書きを変更・削除するときは、Docker内で`npm audit`、Prisma Client生成、本番ビルド、DBマイグレーション、統合テストを実行してください。Prismaが修正版の依存関係を正式採用した後は、Prismaを更新して`overrides`を削除できます。
 
 ## トラブル対応
 
