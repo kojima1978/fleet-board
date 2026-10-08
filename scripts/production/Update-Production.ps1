@@ -66,6 +66,8 @@ try {
   if (-not $ready) { throw "Updated application did not become healthy." }
   Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "-e", "APP_URL=http://app:3000", "migrate", "npm", "run", "test:integration"))
   Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "-e", "APP_URL=http://app:3000", "migrate", "npm", "run", "test:integration:optional-nfc"))
+  & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $projectPath "scripts\production\Test-ProductionHealth.ps1") -ProjectDirectory $projectPath -NoUi
+  if ($LASTEXITCODE -ne 0) { throw "Post-update production health check failed." }
   Write-UpdateLog "Completed."
   Show-Message $messages.productionUpdateCompleted $messages.productionUpdateTitle
   exit 0

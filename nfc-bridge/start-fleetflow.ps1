@@ -158,6 +158,10 @@ try {
   if (-not $appReady) { throw "APP_TIMEOUT" }
 
   $nfc = Get-NfcHealth
+  if ($Production) {
+    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectDirectory "scripts\production\Test-ProductionHealth.ps1") -ProjectDirectory $ProjectDirectory -NoUi
+    if ($LASTEXITCODE -ne 0) { throw "PRODUCTION_HEALTH_CHECK_FAILED" }
+  }
   Write-LauncherLog "Start completed. App ready: $appReady. NFC ready: $($null -ne $nfc). Reader connected: $($nfc.readerConnected)."
   if (-not $NoUi) { Start-Process $appUrl }
   if ($null -eq $nfc) {

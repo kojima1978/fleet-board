@@ -76,6 +76,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("updateVehicle"), id: z.string(), version: z.number().int(), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: nfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().optional(), hasNavigation: z.boolean().optional() }),
   z.object({ action: z.literal("setEmployeeActive"), id: z.string(), version: z.number().int(), active: z.boolean() }),
   z.object({ action: z.literal("setVehicleActive"), id: z.string(), version: z.number().int(), active: z.boolean() }),
+  z.object({ action: z.literal("setVehicleMaintenance"), id: z.string(), version: z.number().int(), maintenance: z.boolean() }),
   z.object({ action: z.literal("importEmployees"), items: z.array(employeeImportItemSchema).min(1).max(500) }),
   z.object({ action: z.literal("importVehicles"), items: z.array(vehicleImportItemSchema).min(1).max(500) }),
   z.object({ action: z.literal("start"), employeeId: z.string(), vehicleId: z.string(), minutes: z.number().int().min(15).max(10_080), ...actorSchema }),
@@ -88,7 +89,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("cancelTrip"), tripId: z.string(), version: z.number().int(), ...actorSchema }),
   z.object({ action: z.literal("moveVehicle"), vehicleId: z.string(), version: z.number().int(), spotId: z.string(), ...actorSchema }),
 ]);
-const adminActions = new Set(["createEmployee", "createVehicle", "updateEmployee", "updateVehicle", "setEmployeeActive", "setVehicleActive", "importEmployees", "importVehicles"]);
+const adminActions = new Set(["createEmployee", "createVehicle", "updateEmployee", "updateVehicle", "setEmployeeActive", "setVehicleActive", "setVehicleMaintenance", "importEmployees", "importVehicles"]);
 
 export async function GET(request: Request) {
   await expireStaleReservations();
@@ -256,6 +257,17 @@ export async function POST(request: Request) {
         if (updated.count !== 1) throw new Error("CONFLICT");
         if (!input.active) await tx.nfcAssignment.updateMany({ where: { vehicleId: vehicle.id, validTo: null }, data: { validTo: new Date() } });
         await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: input.active ? "車両再有効化" : "車両無効化", targetType: "Vehicle", targetId: input.id, description: input.active ? "車両を再有効化" : "車両を無効化" } });
+      });
+    }
+    if (input.action === "setVehicleMaintenance") {
+      await prisma.$transaction(async (tx) => {
+        const vehicle = await tx.vehicle.findUniqueOrThrow({ where: { id: input.id }, select: { id: true, name: true, active: true, status: true } });
+        if (!vehicle.active) throw new Error("無効な車両は整備状態を変更できません");
+        if (vehicle.status !== "AVAILABLE" && vehicle.status !== "MAINTENANCE") throw new Error("利用中または予約中の車両は整備状態へ変更できません");
+        const nextStatus = input.maintenance ? "MAINTENANCE" : "AVAILABLE";
+        const updated = await tx.vehicle.updateMany({ where: { id: input.id, version: input.version, status: vehicle.status }, data: { status: nextStatus, version: { increment: 1 } } });
+        if (updated.count !== 1) throw new Error("CONFLICT");
+        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: input.maintenance ? "車両整備開始" : "車両整備解除", targetType: "Vehicle", targetId: input.id, description: input.maintenance ? `${vehicle.name}を整備中に変更` : `${vehicle.name}を利用可能に変更` } });
       });
     }
     if (input.action === "importEmployees") {

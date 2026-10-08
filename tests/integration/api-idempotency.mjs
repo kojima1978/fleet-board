@@ -15,6 +15,21 @@ async function post(body) {
   return { status: response.status, body: await response.json() };
 }
 
+async function authenticateAdmin() {
+  const pin = process.env.FLEETFLOW_ADMIN_PIN;
+  if (!pin) throw new Error("FLEETFLOW_ADMIN_PIN is required for maintenance integration test");
+  const response = await fetch(`${appUrl}/api/admin/session`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pin }) });
+  assert.equal(response.status, 200, await response.text());
+  const cookie = response.headers.get("set-cookie")?.split(";", 1)[0];
+  if (!cookie) throw new Error("Admin session cookie was not returned");
+  return cookie;
+}
+
+async function postAdmin(body, cookie) {
+  const response = await fetch(`${appUrl}/api/dashboard`, { method: "POST", headers: { "Content-Type": "application/json", Cookie: cookie }, body: JSON.stringify(body) });
+  return { status: response.status, body: await response.json() };
+}
+
 async function cleanup() {
   if (operationIds.length) await client.query('DELETE FROM "AuditLog" WHERE "operationId" = ANY($1)', [operationIds]);
   await client.query('DELETE FROM "Trip" WHERE "employeeId" = $1 OR "vehicleId" = $2', [ids.employee, ids.vehicle]);
@@ -74,7 +89,23 @@ try {
   assert.equal(cancelled.status, 200, JSON.stringify(cancelled.body));
   const cancelledReservation = await client.query('SELECT status FROM "Trip" WHERE id=$1', [reservation.rows[0].id]);
   assert.equal(cancelledReservation.rows[0].status, "CANCELLED");
-  console.log("API integration passed: start, duplicate suppression, return replay, reservation, edit and cancellation");
+
+  const adminCookie = await authenticateAdmin();
+  const beforeMaintenance = await client.query('SELECT version FROM "Vehicle" WHERE id=$1', [ids.vehicle]);
+  const maintenanceOperationId = crypto.randomUUID(); operationIds.push(maintenanceOperationId);
+  const maintenance = await postAdmin({ operationId: maintenanceOperationId, action: "setVehicleMaintenance", id: ids.vehicle, version: beforeMaintenance.rows[0].version, maintenance: true }, adminCookie);
+  assert.equal(maintenance.status, 200, JSON.stringify(maintenance.body));
+  const maintainedVehicle = await client.query('SELECT status,version FROM "Vehicle" WHERE id=$1', [ids.vehicle]);
+  assert.equal(maintainedVehicle.rows[0].status, "MAINTENANCE");
+  const blockedStartOperationId = crypto.randomUUID(); operationIds.push(blockedStartOperationId);
+  const blockedStart = await post({ operationId: blockedStartOperationId, action: "start", employeeId: ids.employee, vehicleId: ids.vehicle, minutes: 60, actorName: "自動テスト", actorEmployeeId: ids.employee });
+  assert.equal(blockedStart.status, 400, "整備中の車両で利用開始できてしまいました");
+  const releaseOperationId = crypto.randomUUID(); operationIds.push(releaseOperationId);
+  const released = await postAdmin({ operationId: releaseOperationId, action: "setVehicleMaintenance", id: ids.vehicle, version: maintainedVehicle.rows[0].version, maintenance: false }, adminCookie);
+  assert.equal(released.status, 200, JSON.stringify(released.body));
+  const releasedVehicle = await client.query('SELECT status FROM "Vehicle" WHERE id=$1', [ids.vehicle]);
+  assert.equal(releasedVehicle.rows[0].status, "AVAILABLE");
+  console.log("API integration passed: start, duplicate suppression, return replay, reservation, edit, cancellation and maintenance safety");
 } finally {
   await cleanup().catch((error) => console.error("cleanup failed", error));
   await client.end();

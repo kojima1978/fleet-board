@@ -8,6 +8,7 @@ import { normalizeNfcUid, sameNfcUid } from "@/lib/nfc";
 import { CUSTOMER_SPOT_CODES, formatSpotLabel, HOLDING_SPOT_CODES, SAKURA_SPOT_CODE, TEMPORARY_SPOT_CODES } from "@/lib/parking-spots";
 import { RESERVATION_GRACE_MINUTES } from "@/lib/reservations";
 import { nfcBridgeStatusText, useNfcBridge, useNfcBridgeHealth, type NfcBridgeStatus } from "@/lib/use-nfc-bridge";
+import { useKioskIdle } from "@/lib/use-kiosk-idle";
 import { SettingsPanelV2 } from "./settings-panel-v2";
 import { AdminGate } from "./admin-gate";
 import { Button, Card, cn } from "./ui";
@@ -50,6 +51,7 @@ const isSakuraSpot = (spot: ParkingSpot) => spot.code === SAKURA_SPOT_CODE;
 const canUseSpot = (vehicle: Vehicle, spot: ParkingSpot) => !isSakuraSpot(spot) || vehicle.code === SAKURA_VEHICLE_CODE;
 const parkingSpotClass = (spot: ParkingSpot) => {
   const auxiliary = HOLDING_SPOT_CODES.has(spot.code) || TEMPORARY_SPOT_CODES.has(spot.code);
+  if (spot.vehicle?.status === "MAINTENANCE") return cn("border-slate-400 bg-slate-100", auxiliary && "border-[3px] border-dashed");
   if (spot.vehicle) return cn("border-rose-500 bg-rose-50", auxiliary && "border-[3px] border-dashed");
   return auxiliary ? "border-[3px] border-dashed border-slate-300/70 bg-slate-50/70" : "border-slate-300 bg-white/90";
 };
@@ -90,7 +92,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   const nfcHealth = useNfcBridgeHealth(true);
 
   const load = useCallback(async (quiet = false) => {
-    if (loadInFlight.current) return false;
+    if (loadInFlight.current) return true;
     loadInFlight.current = true;
     if (!quiet) setRefreshing(true);
     if (!dataRef.current) setLoading(true);
@@ -129,10 +131,21 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   useEffect(() => {
     load();
     setIsOnline(navigator.onLine);
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible" && navigator.onLine) void load(true);
-    }, 5000);
-    return () => window.clearInterval(timer);
+    let cancelled = false;
+    let timer = 0;
+    let consecutiveFailures = 0;
+    const poll = async () => {
+      if (document.visibilityState === "visible" && navigator.onLine) {
+        const ok = await load(true);
+        consecutiveFailures = ok ? 0 : Math.min(consecutiveFailures + 1, 3);
+      }
+      if (!cancelled) {
+        const delay = [5_000, 10_000, 30_000, 60_000][consecutiveFailures];
+        timer = window.setTimeout(poll, delay);
+      }
+    };
+    timer = window.setTimeout(poll, 5_000);
+    return () => { cancelled = true; window.clearTimeout(timer); };
   }, [load]);
 
   useEffect(() => {
@@ -167,6 +180,13 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   }, [view]);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("idle") !== "1") return;
+    setToast({ message: "安全のため駐車場画面へ戻り、利用者選択を解除しました", tone: "success" });
+    window.history.replaceState({}, "", "/");
+  }, []);
+
+  useEffect(() => {
     if (view !== "timeline" || !startContext || stayOnTimeline) { setAutoReturnSeconds(null); return; }
     const duration = 5_000;
     const startedAt = Date.now();
@@ -197,6 +217,21 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
     const timer = window.setTimeout(() => setToast(null), 4_000);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  const idleWarningSeconds = useKioskIdle({
+    enabled: view === "parking" || view === "timeline",
+    onReset: () => {
+      setEmployee(null);
+      window.sessionStorage.removeItem("fleetflow.employeeId");
+      setDialog(null);
+      setReturnTrip(null);
+      setReturnSpot(null);
+      setMovingVehicle(null);
+      setEditTrip(null);
+      if (window.location.pathname !== "/") window.location.assign("/?idle=1");
+      else setToast({ message: "安全のため利用者選択と入力画面をリセットしました", tone: "success" });
+    },
+  });
 
   const mutate = useCallback(async (body: object, success: string) => {
     if (pendingRef.current) return false;
@@ -239,6 +274,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   const activeTrips = data.trips.filter((trip) => trip.status === "IN_USE");
   const activeEmployees = data.employees.filter((person) => person.active);
   const activeVehicles = data.vehicles.filter((vehicle) => vehicle.active);
+  const setupIncomplete = activeEmployees.length === 0 || activeVehicles.length === 0;
   const available = activeVehicles.filter((vehicle) => vehicle.status === "AVAILABLE");
   const parkedCount = data.spots.reduce((count, spot) => count + (spot.vehicle ? 1 : 0), 0);
   const confirmedTrip = startContext ? data.trips.find((trip) => trip.vehicleId === startContext.vehicleId && trip.employeeId === startContext.employeeId && trip.status === "IN_USE") : undefined;
@@ -268,6 +304,29 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
     window.sessionStorage.removeItem("fleetflow.employeeId");
     setToast({ message: "利用者の選択を解除しました", tone: "success" });
   };
+  const downloadDiagnostics = () => {
+    const diagnostics = {
+      checkedAt: new Date().toISOString(),
+      page: view,
+      application: syncState,
+      online: isOnline,
+      lastSuccessfulSync: lastSuccessfulSync?.toISOString() ?? null,
+      nfcBridge: nfcHealth,
+      appVersion: data.system.appVersion,
+      environment: data.system.environment,
+      deployedAt: data.system.deployedAt,
+      backupLatestAt: data.system.backupLatestAt,
+      backupVerifiedAt: data.system.backupVerifiedAt,
+      userAgent: navigator.userAgent,
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(diagnostics, null, 2)], { type: "application/json" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `fleetflow-diagnostics-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setToast({ message: "診断情報を保存しました", tone: "success" });
+  };
 
   return (
     <div className="min-h-screen bg-[#f4f7fb] text-slate-900">
@@ -279,9 +338,8 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
           </div>
           <Navigation view={view} className="hidden md:flex" />
           <div className="flex items-center gap-2">
-            <SystemStatus syncState={syncState} lastSuccessfulSync={lastSuccessfulSync} nfcStatus={nfcHealth} refreshing={refreshing} onRefresh={() => void load()} />
-            {employee ? <button onClick={clearEmployee} title="クリックして利用者選択を解除" className="hidden items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800 lg:flex"><UserRound className="size-4" /><span>{employee.name}</span><X className="size-3.5" /></button> : <div className="hidden items-center gap-2 rounded-xl bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800 lg:flex"><AlertTriangle className="size-4" /><span>利用者未選択</span></div>}
-            <Button variant="ghost" onClick={() => setDialog("nfc")}><Nfc className="size-5" /><span className="hidden sm:inline">NFC読取</span></Button>
+            <SystemStatus syncState={syncState} lastSuccessfulSync={lastSuccessfulSync} nfcStatus={nfcHealth} refreshing={refreshing} onRefresh={() => void load()} onOpenNfc={() => setDialog("nfc")} onDownloadDiagnostics={downloadDiagnostics} />
+            {employee ? <div className="flex items-center overflow-hidden rounded-xl border border-emerald-200 bg-emerald-50"><button type="button" onClick={() => setDialog("nfc")} title="利用者を変更" className="flex min-h-10 items-center gap-2 px-3 text-sm font-bold text-emerald-800"><UserRound className="size-4" /><span className="hidden max-w-28 truncate lg:inline">{employee.name}</span><span className="hidden text-[10px] text-emerald-600 xl:inline">変更</span></button><button type="button" onClick={clearEmployee} aria-label="利用者選択を解除" className="grid min-h-10 w-9 place-items-center border-l border-emerald-200 text-emerald-700 hover:bg-emerald-100"><X className="size-3.5" /></button></div> : <Button className="border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100" onClick={() => setDialog("nfc")}><Nfc className="size-5" /><span className="hidden sm:inline">社員証をかざす</span></Button>}
             <button aria-label="最新情報に更新" aria-busy={refreshing} disabled={refreshing} onClick={() => void load()} className="grid size-11 place-items-center rounded-xl border border-slate-200 bg-white disabled:opacity-50"><RefreshCw className={cn("size-4", refreshing && "animate-spin")} /></button>
           </div>
         </div>
@@ -290,11 +348,12 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
       <main className="mx-auto max-w-[1600px] space-y-5 p-4 pb-28 md:p-8">
         {!isOnline ? <Card role="alert" className="flex flex-wrap items-center gap-3 border-amber-300 bg-amber-50 p-3 text-amber-950"><span className="grid size-9 shrink-0 place-items-center rounded-full bg-amber-500 text-white"><AlertTriangle className="size-4" /></span><div className="mr-auto"><p className="text-sm font-black">オフラインです</p><p className="text-xs text-amber-800">表示中の情報は更新されません。接続が戻ると自動的に再同期します。</p></div></Card> : null}
         {syncState === "stale" ? <Card role="alert" className="flex flex-wrap items-center gap-3 border-rose-300 bg-rose-50 p-3 text-rose-950"><span className="grid size-9 shrink-0 place-items-center rounded-full bg-rose-600 text-white"><AlertTriangle className="size-4" /></span><div className="mr-auto min-w-0"><p className="text-sm font-black">自動更新が停止しています</p><p className="text-xs text-rose-800">{lastSuccessfulSync ? `最終更新 ${jpTimeSeconds.format(lastSuccessfulSync)}。前回取得した情報を表示しています。` : "最新情報を取得できていません。"}</p></div><Button variant="danger" disabled={refreshing} onClick={() => void load()}>{refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}{refreshing ? "再接続中…" : "再接続"}</Button></Card> : null}
-        <OperationalAlerts data={data} nfcStatus={nfcHealth} />
+        <OperationalAlerts data={data} />
         {undoReturn ? <Card className="flex flex-wrap items-center gap-3 border-amber-300 bg-amber-50 p-3 text-amber-950"><span className="grid size-9 shrink-0 place-items-center rounded-full bg-amber-500 text-white"><AlertTriangle className="size-4" /></span><div className="mr-auto min-w-0"><p className="text-sm font-black">{undoReturn.vehicleName}を返却しました</p><p className="text-xs text-amber-800">間違えた場合は5分以内に取り消せます</p></div><Button variant="secondary" className="border-amber-300 bg-white text-amber-900 hover:bg-amber-100" disabled={pendingAction} onClick={undoLastReturn}>返却を取り消す</Button><button type="button" aria-label="返却取消の案内を閉じる" onClick={() => setUndoReturn(null)} className="grid size-9 place-items-center rounded-lg text-amber-700 hover:bg-amber-100"><X className="size-4" /></button></Card> : null}
         {view === "parking" ? <section className="space-y-3 md:-mt-3">
+          {setupIncomplete ? <InitialSetupGuide hasEmployees={activeEmployees.length > 0} hasVehicles={activeVehicles.length > 0} /> : null}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm md:px-4">
-            <div className="mr-auto min-w-64"><h2 className="text-sm font-black">{parkingMode === "map" ? "社屋隣接駐車場 配置図" : "利用中の車両"}</h2><p className="text-[11px] text-slate-500">{parkingMode === "map" ? "駐車中の車をタップして利用開始 ・ 空き区画をタップして返却" : "利用者・開始時刻・返却予定を確認し、予定変更や返却登録ができます"}</p></div>
+            <div className="mr-auto min-w-64"><h2 className="text-sm font-black">{parkingMode === "map" ? "社屋隣接駐車場 配置図" : "利用中の車両"}</h2><p className="text-[11px] text-slate-500">{parkingMode === "map" ? "駐車中の車をタップして詳細を確認 ・ 空き区画をタップして返却" : "利用者・開始時刻・返却予定を確認し、予定変更や返却登録ができます"}</p></div>
             <div aria-live="polite" className="flex flex-wrap items-center gap-2 text-xs font-bold"><span className="text-rose-700">駐車中 {parkedCount}台</span><span className="text-slate-300">｜</span><span className="text-blue-700">利用中 {activeTrips.length}台</span><span className="px-1 font-normal text-slate-500">{jpDate.format(new Date())} ・ 自動更新 5秒</span></div>
             <ViewSwitch value={parkingMode} onChange={setParkingMode} first={{ value: "map", label: "配置図", icon: <MapIcon className="size-4" /> }} second={{ value: "active", label: "利用中一覧", icon: <CarFront className="size-4" /> }} compact />
           </div>
@@ -307,10 +366,10 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
             <div className="min-w-0 flex-1"><p className="font-black">利用開始を登録しました</p><p className="mt-0.5 text-sm text-emerald-700">{confirmedTrip ? `${confirmedTrip.vehicle.name} ・ ${confirmedTrip.employee.name} ・ ${formatDateTime(confirmedTrip.actualStart ?? confirmedTrip.plannedStart)}〜${formatDateTime(confirmedTrip.plannedEnd)}` : "登録内容がタイムラインに反映されています。"}</p><p className="mt-1 text-xs font-bold text-emerald-800">{stayOnTimeline ? "自動移動を停止しました。続けて予定を修正できます。" : `${autoReturnSeconds ?? 5}秒後に駐車場へ戻ります。画面を操作すると停止します。`}</p></div>
             <div className="flex flex-wrap gap-2"><button type="button" onClick={() => setStayOnTimeline(true)} disabled={stayOnTimeline} className="rounded-xl px-3 py-2 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100 disabled:text-emerald-500">タイムラインに留まる</button><Link href="/" className="rounded-xl border border-emerald-300 bg-white px-4 py-2 text-sm font-bold text-emerald-800 transition hover:bg-emerald-100">今すぐ駐車場へ戻る</Link></div>
           </Card> : null}
-          <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+          {activeVehicles.length === 0 ? <TimelineEmptyState /> : <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
             {timelineMode === "chart" ? <Card className="min-w-0 overflow-hidden"><TimelinePanelHeader mode={timelineMode} onChange={setTimelineMode} /><Timeline data={data} mutate={mutate} openStart={openStart} openEdit={openEdit} actorName={employee?.name ?? "共用端末"} highlightTripId={confirmedTrip?.id} timelineDate={timelineDate} timelineDays={timelineDays} setTimelineDate={setTimelineDate} setTimelineDays={setTimelineDays} /></Card> : <TimelineList trips={data.trips} openEdit={openEdit} mode={timelineMode} onChange={setTimelineMode} />}
             <ActiveTripsPanel trips={activeTrips} openEnd={openEnd} />
-          </section>
+          </section>}
         </> : null}
 
         {view === "settingsEmployees" || view === "settingsVehicles" ? <AdminGate>
@@ -324,13 +383,14 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
         </AdminGate> : null}
       </main>
 
-      {dialog === "nfc" && <NfcDialog employees={activeEmployees} vehicles={activeVehicles} onEmployee={(person) => { selectEmployee(person); setToast({ message: `${person.name}さんを認証しました`, tone: "success" }); setDialog(null); }} onVehicle={(vehicle) => { setDialog(null); const trip = activeTrips.find((item) => item.vehicleId === vehicle.id); if (trip) openEnd(trip); else openStart(vehicle); }} onClose={() => setDialog(null)} />}
+      {dialog === "nfc" && <NfcDialog employees={activeEmployees} vehicles={activeVehicles} onEmployee={(person) => { selectEmployee(person); setToast({ message: `${person.name}さんを認証しました`, tone: "success" }); setDialog(null); }} onVehicle={(vehicle) => { setDialog(null); if (vehicle.status === "MAINTENANCE") { setToast({ message: `${vehicle.name}は整備中のため利用開始できません`, tone: "error" }); return; } const trip = activeTrips.find((item) => item.vehicleId === vehicle.id); if (trip) openEnd(trip); else openStart(vehicle); }} onClose={() => setDialog(null)} />}
       {dialog === "start" && <StartDialog submitting={pendingAction} employees={activeEmployees} vehicles={available} trips={data.trips} initialEmployee={employee?.active ? employee : null} initialVehicleId={selectedVehicleId} onClose={() => setDialog(null)} onSubmit={async (values) => { const identifiedEmployee = activeEmployees.find((person) => person.id === values.employeeId) ?? null; const scheduled = values.plannedStart !== null; const ok = await mutate(scheduled ? { action: "reserve", employeeId: values.employeeId, vehicleId: values.vehicleId, plannedStart: values.plannedStart!, minutes: values.minutes, actorName: values.employeeName, actorEmployeeId: values.employeeId } : { action: "start", employeeId: values.employeeId, vehicleId: values.vehicleId, minutes: values.minutes, actorName: values.employeeName, actorEmployeeId: values.employeeId }, scheduled ? "予約を登録しました" : "利用を開始しました"); if (ok && identifiedEmployee) { selectEmployee(identifiedEmployee); setDialog(null); if (!scheduled) window.location.assign(`/timeline?started=1&vehicleId=${encodeURIComponent(values.vehicleId)}&employeeId=${encodeURIComponent(values.employeeId)}`); } }} />}
       {dialog === "end" && returnTrip && <EndDialog submitting={pendingAction} trip={returnTrip} spots={data.spots} onClose={() => setDialog(null)} onSubmit={async (spotId) => { const ok = await completeReturn(returnTrip, spotId); if (ok) setDialog(null); }} />}
       {dialog === "parkingReturn" && returnSpot && <ParkingReturnDialog submitting={pendingAction} spot={returnSpot} trips={activeTrips} vehicles={data.vehicles} onClose={() => setDialog(null)} onSubmit={async (trip) => { const ok = await completeReturn(trip, returnSpot.id); if (ok) { setDialog(null); setReturnSpot(null); } }} />}
       {dialog === "moveVehicle" && movingVehicle && <MoveVehicleDialog submitting={pendingAction} vehicle={movingVehicle} spots={data.spots} onClose={() => setDialog(null)} onSubmit={async (spotId) => { const spot = data.spots.find((item) => item.id === spotId); const ok = await mutate({ action: "moveVehicle", vehicleId: movingVehicle.id, version: movingVehicle.version, spotId, actorName: employee?.name ?? "共用端末" }, `区画${spot?.code ?? ""}へ移動しました`); if (ok) setDialog(null); }} />}
       {dialog === "edit" && editTrip && <EditTripDialog submitting={pendingAction} trip={editTrip} onClose={() => setDialog(null)} onAdjust={async (minutes) => { const direction = minutes > 0 ? "延長" : "短縮"; const ok = await mutate({ action: "adjustTrip", tripId: editTrip.id, version: editTrip.version, minutes, actorName: employee?.name ?? "共用端末" }, `${Math.abs(minutes)}分${direction}しました`); if (ok) { setDialog(null); if (startContext) setStayOnTimeline(false); } }} onSetEnd={async (plannedEnd) => { const ok = await mutate({ action: "setTripEnd", tripId: editTrip.id, version: editTrip.version, plannedEnd, actorName: employee?.name ?? "共用端末" }, `終了日時を${formatDateTime(plannedEnd)}へ変更しました`); if (ok) { setDialog(null); if (startContext) setStayOnTimeline(false); } }} onCancel={async () => { const ok = await mutate({ action: "cancelTrip", tripId: editTrip.id, version: editTrip.version, actorName: employee?.name ?? "共用端末" }, "予約を取り消しました"); if (ok) setDialog(null); }} />}
       {pendingAction ? <div className="fixed left-0 top-0 z-[80] h-1 w-full overflow-hidden bg-blue-100"><div className="h-full w-1/2 animate-pulse bg-blue-600" /></div> : null}
+      {idleWarningSeconds !== null ? <div role="alert" className="fixed bottom-24 left-1/2 z-[75] flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950 shadow-2xl md:bottom-5"><AlertTriangle className="size-5 shrink-0 text-amber-600" /><div><p className="text-sm font-black">まもなく共用端末をリセットします</p><p className="text-xs text-amber-800">あと{idleWarningSeconds}秒。画面を操作すると継続できます。</p></div></div> : null}
       {toast ? <div role={toast.tone === "error" ? "alert" : "status"} className={cn("fixed bottom-24 left-1/2 z-[70] flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-xl px-5 py-3 text-sm font-bold text-white shadow-2xl md:bottom-5", toast.tone === "error" ? "bg-rose-700" : "bg-slate-950")} >{toast.tone === "error" ? <AlertTriangle className="size-4 shrink-0" /> : <Check className="size-4 shrink-0" />}<span>{toast.message}</span><button type="button" aria-label={toast.tone === "error" ? "エラー通知を閉じる" : "完了通知を閉じる"} onClick={() => setToast(null)} className="ml-1 grid size-7 shrink-0 place-items-center rounded-lg bg-white/15 hover:bg-white/25"><X className="size-3.5" /></button></div> : null}
       <Navigation view={view} className="fixed inset-x-3 bottom-3 z-40 flex rounded-2xl border border-slate-200 bg-white/95 p-1.5 shadow-2xl backdrop-blur md:hidden" />
     </div>
@@ -343,24 +403,22 @@ function InitialLoadError({ view, refreshing, onRetry }: { view: DashboardView; 
   return <div className="min-h-screen bg-[#f4f7fb]"><header className="border-b border-slate-200 bg-white"><div className="mx-auto flex max-w-[1600px] items-center justify-between gap-3 px-4 py-3 md:px-8"><div className="flex items-center gap-3"><div className="grid size-11 place-items-center rounded-2xl bg-blue-600 text-white"><CarFront /></div><p className="text-lg font-black">FleetFlow</p></div><Navigation view={view} className="hidden md:flex" /></div></header><main className="grid min-h-[calc(100vh-72px)] place-items-center p-4 pb-28"><Card role="alert" className="w-full max-w-lg p-6 text-center"><span className="mx-auto grid size-12 place-items-center rounded-full bg-rose-100 text-rose-700"><AlertTriangle className="size-6" /></span><h1 className="mt-4 text-xl font-black">FleetFlowに接続できません</h1><p className="mt-2 text-sm leading-6 text-slate-600">Dockerとデータベースの起動状態を確認してください。接続が戻ったら再試行できます。</p><Button className="mt-5 w-full" disabled={refreshing} onClick={onRetry}>{refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}{refreshing ? "接続中…" : "再接続"}</Button></Card></main><Navigation view={view} className="fixed inset-x-3 bottom-3 z-40 flex rounded-2xl border border-slate-200 bg-white/95 p-1.5 shadow-2xl backdrop-blur md:hidden" /></div>;
 }
 
-function OperationalAlerts({ data, nfcStatus }: { data: DashboardData; nfcStatus: NfcBridgeStatus }) {
+function OperationalAlerts({ data }: { data: DashboardData }) {
   const now = Date.now();
   const overdue = data.trips.filter((trip) => trip.status === "IN_USE" && new Date(trip.plannedEnd).getTime() < now).length;
   const unlocated = data.vehicles.filter((vehicle) => vehicle.active && vehicle.status === "AVAILABLE" && !vehicle.parkingSpotId).length;
   const backupOld = !data.system.backupLatestAt || now - new Date(data.system.backupLatestAt).getTime() > 26 * 60 * 60_000;
   const verificationOld = !data.system.backupVerifiedAt || now - new Date(data.system.backupVerifiedAt).getTime() > 26 * 60 * 60_000;
-  const nfcUnavailable = nfcStatus === "offline" || nfcStatus === "no-reader";
   const alerts = [
     overdue ? { label: `返却予定を超過 ${overdue}台`, href: "/timeline" } : null,
     unlocated ? { label: `駐車位置未確定 ${unlocated}台`, href: "/settings/vehicles?status=active" } : null,
     backupOld || verificationOld ? { label: backupOld ? "DBバックアップを確認できません" : "バックアップ復元確認が古くなっています", href: "/operations" } : null,
-    nfcUnavailable ? { label: nfcStatus === "no-reader" ? "NFCリーダー未接続（手動操作可）" : "NFC連携ソフト停止（手動操作可）", href: "/settings/employees" } : null,
   ].filter((item): item is { label: string; href: string } => item !== null);
   if (alerts.length === 0) return null;
   return <Card role="status" className="flex flex-wrap items-center gap-2 border-amber-300 bg-amber-50 p-3"><span className="mr-1 inline-flex items-center gap-2 text-sm font-black text-amber-950"><AlertTriangle className="size-4" />確認が必要</span>{alerts.map((alert) => <Link key={alert.label} href={alert.href} className="rounded-full border border-amber-200 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 hover:border-amber-400">{alert.label}</Link>)}</Card>;
 }
 
-function SystemStatus({ syncState, lastSuccessfulSync, nfcStatus, refreshing, onRefresh }: { syncState: SyncState; lastSuccessfulSync: Date | null; nfcStatus: NfcBridgeStatus; refreshing: boolean; onRefresh: () => void }) {
+function SystemStatus({ syncState, lastSuccessfulSync, nfcStatus, refreshing, onRefresh, onOpenNfc, onDownloadDiagnostics }: { syncState: SyncState; lastSuccessfulSync: Date | null; nfcStatus: NfcBridgeStatus; refreshing: boolean; onRefresh: () => void; onOpenNfc: () => void; onDownloadDiagnostics: () => void }) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
   const appHealthy = syncState === "healthy";
@@ -368,7 +426,7 @@ function SystemStatus({ syncState, lastSuccessfulSync, nfcStatus, refreshing, on
   const nfcHealthy = nfcStatus === "ready";
   return <div className="relative hidden lg:block">
     <button type="button" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen((current) => !current)} className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 transition hover:border-slate-300 hover:bg-white" title="システム状態の詳細を表示"><span className={cn("size-2 rounded-full", appHealthy ? "bg-emerald-500" : "bg-rose-500")} /><span className={cn("text-xs font-bold", appHealthy ? "text-emerald-700" : "text-rose-700")}>{appHealthy ? "正常" : "更新停止"}</span><span className="text-slate-300">｜</span><Nfc className={cn("size-3.5", nfcHealthy ? "text-emerald-600" : "text-amber-600")} /><span className={cn("text-xs font-bold", nfcHealthy ? "text-emerald-700" : "text-amber-700")}>{nfcLabel}</span>{open ? <ChevronUp className="size-3.5 text-slate-400" /> : <ChevronDown className="size-3.5 text-slate-400" />}</button>
-    {open ? <div id={panelId} role="status" className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-80 rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl"><div className="flex items-start justify-between gap-3"><div><p className="font-black">システム状態</p><p className="mt-0.5 text-[11px] text-slate-500">運用に必要な接続をまとめて確認できます</p></div><button type="button" aria-label="システム状態を閉じる" onClick={() => setOpen(false)} className="grid size-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100"><X className="size-4" /></button></div><div className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-100 bg-slate-50/60 px-3"><StatusRow label="FleetFlow本体" value={appHealthy ? "接続済み" : "更新停止"} healthy={appHealthy} /><StatusRow label="データベース" value={appHealthy ? "接続済み" : "確認が必要"} healthy={appHealthy} /><StatusRow label="NFCリーダー" value={nfcLabel} healthy={nfcHealthy} warning={!nfcHealthy} /></div><p className="mt-3 text-xs text-slate-500">最終更新：{lastSuccessfulSync ? jpTimeSeconds.format(lastSuccessfulSync) : "確認中"}</p><Button variant="secondary" className="mt-3 w-full" disabled={refreshing} onClick={onRefresh}>{refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}{refreshing ? "確認中…" : "状態を再確認"}</Button></div> : null}
+    {open ? <div id={panelId} role="status" className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-80 rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl"><div className="flex items-start justify-between gap-3"><div><p className="font-black">システム状態</p><p className="mt-0.5 text-[11px] text-slate-500">運用に必要な接続をまとめて確認できます</p></div><button type="button" aria-label="システム状態を閉じる" onClick={() => setOpen(false)} className="grid size-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100"><X className="size-4" /></button></div><div className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-100 bg-slate-50/60 px-3"><StatusRow label="FleetFlow本体" value={appHealthy ? "接続済み" : "更新停止"} healthy={appHealthy} /><StatusRow label="データベース" value={appHealthy ? "接続済み" : "確認が必要"} healthy={appHealthy} /><StatusRow label="NFCリーダー" value={nfcLabel} healthy={nfcHealthy} warning={!nfcHealthy} /></div>{!nfcHealthy ? <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-black text-amber-900">NFCが使えない場合</p><p className="mt-1 text-[11px] leading-5 text-amber-800">連携ソフトとリーダーを確認してください。復旧するまでは手動選択で運用できます。</p><button type="button" onClick={() => { setOpen(false); onOpenNfc(); }} className="mt-2 min-h-9 w-full rounded-lg bg-white px-3 text-xs font-bold text-amber-900 shadow-sm hover:bg-amber-100">手動選択・NFC読取を開く</button></div> : null}<p className="mt-3 text-xs text-slate-500">最終更新：{lastSuccessfulSync ? jpTimeSeconds.format(lastSuccessfulSync) : "確認中"}</p><div className="mt-3 grid grid-cols-2 gap-2"><Button variant="secondary" disabled={refreshing} onClick={onRefresh}>{refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}{refreshing ? "確認中…" : "再確認"}</Button><Button variant="ghost" onClick={onDownloadDiagnostics}>診断を保存</Button></div></div> : null}
   </div>;
 }
 
@@ -388,6 +446,19 @@ function Navigation({ view, className }: { view: DashboardView; className?: stri
 
 function PageHeading({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
   return <div><p className="text-xs font-bold text-blue-600">{eyebrow}</p><h2 className="mt-1 text-2xl font-black">{title}</h2><p className="mt-1 text-sm text-slate-500">{description}</p></div>;
+}
+
+function InitialSetupGuide({ hasEmployees, hasVehicles }: { hasEmployees: boolean; hasVehicles: boolean }) {
+  const steps = [
+    { done: hasEmployees, label: "社員を登録", href: "/settings/employees", icon: <UserRound className="size-4" /> },
+    { done: hasVehicles, label: "車両を登録", href: "/settings/vehicles", icon: <CarFront className="size-4" /> },
+    { done: hasEmployees && hasVehicles, label: "NFC・装備を確認", href: "/settings/vehicles", icon: <Nfc className="size-4" /> },
+  ];
+  return <Card className="flex flex-wrap items-center gap-3 border-blue-200 bg-blue-50/70 px-4 py-3"><div className="mr-auto min-w-56"><p className="text-sm font-black text-blue-950">最初に利用情報を登録してください</p><p className="text-[11px] text-blue-700">登録後、配置図とタイムラインから日常操作を開始できます。</p></div><ol className="flex flex-wrap gap-2">{steps.map((step, index) => <li key={step.label}><Link href={step.href} className={cn("inline-flex min-h-9 items-center gap-2 rounded-xl border px-3 text-xs font-bold transition", step.done ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-blue-200 bg-white text-blue-800 hover:border-blue-400")}><span className={cn("grid size-5 place-items-center rounded-full text-[10px]", step.done ? "bg-emerald-600 text-white" : "bg-blue-100 text-blue-700")}>{step.done ? <Check className="size-3" /> : index + 1}</span>{step.icon}{step.label}</Link></li>)}</ol></Card>;
+}
+
+function TimelineEmptyState() {
+  return <Card className="grid min-h-72 place-items-center p-6 text-center"><div><span className="mx-auto grid size-14 place-items-center rounded-2xl bg-blue-50 text-blue-600"><Clock3 className="size-7" /></span><h2 className="mt-4 text-lg font-black">表示する車両がありません</h2><p className="mt-1 text-sm text-slate-500">車両を登録すると、利用予定と現在の利用状況を確認できます。</p><div className="mt-5 flex flex-wrap justify-center gap-2"><Link href="/settings/vehicles" className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white hover:bg-blue-700"><Plus className="size-4" />車両を登録</Link><Link href="/" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 hover:bg-slate-50"><LayoutGrid className="size-4" />駐車場を見る</Link></div></div></Card>;
 }
 
 function ActiveTripsPanel({ trips, openEnd }: { trips: Trip[]; openEnd: (trip: Trip) => void }) {
@@ -622,14 +693,18 @@ function VehicleEquipmentBadges({ vehicle, compact = false }: { vehicle: Pick<Ve
 
 function ParkingMap({ data, changedVehicleIds, mutate, openStart, openReturn, openMove, actorName }: { data: DashboardData; changedVehicleIds: string[]; mutate: (body: object, success: string) => Promise<boolean>; openStart: (vehicle?: Vehicle) => void; openReturn: (spot: ParkingSpot) => void; openMove: (vehicle: Vehicle) => void; actorName: string }) {
   const [dragVehicle, setDragVehicle] = useState<Vehicle | null>(null);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
+  const selectedSpot = selectedVehicleId ? data.spots.find((spot) => spot.vehicle?.id === selectedVehicleId) : undefined;
+  const selectedVehicle = selectedSpot?.vehicle ?? null;
   return <Card className="overflow-hidden">
-    <div className="p-4 md:p-5">
-      <div className="relative mx-auto aspect-[950/525] w-full max-w-[1180px] overflow-hidden rounded-xl border border-slate-200 bg-white">
+    <div className="p-3 md:p-4">
+      <div className="relative mx-auto aspect-[950/525] max-w-[1180px] overflow-hidden rounded-xl border border-slate-200 bg-white" style={{ width: "min(100%, calc((100vh - 270px) * 1.81))" }}>
         <img src="/parking-layout.svg" alt="" className="pointer-events-none absolute inset-0 size-full select-none" draggable={false} />
-        {data.spots.map((spot) => <div key={spot.id} onDragOver={(e) => { if (dragVehicle && !spot.vehicle && canUseSpot(dragVehicle, spot)) e.preventDefault(); }} onDrop={() => { if (dragVehicle && !spot.vehicle && canUseSpot(dragVehicle, spot)) mutate({ action: "moveVehicle", vehicleId: dragVehicle.id, version: dragVehicle.version, spotId: spot.id, actorName }, `${formatSpotLabel(spot.code)}へ移動しました`); setDragVehicle(null); }} className={cn("absolute grid place-items-center rounded-[4px] border-2 transition", parkingSpotClass(spot), dragVehicle && !spot.vehicle && canUseSpot(dragVehicle, spot) && "border-dashed bg-emerald-100", dragVehicle && !spot.vehicle && !canUseSpot(dragVehicle, spot) && "cursor-not-allowed opacity-60", spot.vehicle && changedVehicleIds.includes(spot.vehicle.id) && "z-10 ring-4 ring-amber-300 animate-pulse")} style={{ left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.width}%`, height: `${spot.height}%` }}>
+        {data.spots.map((spot) => <div key={spot.id} onDragOver={(e) => { if (dragVehicle && !spot.vehicle && canUseSpot(dragVehicle, spot)) e.preventDefault(); }} onDrop={() => { if (dragVehicle && !spot.vehicle && canUseSpot(dragVehicle, spot)) mutate({ action: "moveVehicle", vehicleId: dragVehicle.id, version: dragVehicle.version, spotId: spot.id, actorName }, `${formatSpotLabel(spot.code)}へ移動しました`); setDragVehicle(null); setSelectedVehicleId(null); }} className={cn("absolute grid place-items-center rounded-[4px] border-2 transition", parkingSpotClass(spot), dragVehicle && !spot.vehicle && canUseSpot(dragVehicle, spot) && "border-dashed bg-emerald-100", dragVehicle && !spot.vehicle && !canUseSpot(dragVehicle, spot) && "cursor-not-allowed opacity-60", spot.vehicle?.id === selectedVehicleId && "z-20 ring-4 ring-blue-300", spot.vehicle && changedVehicleIds.includes(spot.vehicle.id) && "z-10 ring-4 ring-amber-300 animate-pulse")} style={{ left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.width}%`, height: `${spot.height}%` }}>
           <span className="absolute left-1 top-0.5 z-[1] text-[9px] font-black text-slate-500">{spot.code}{isSakuraSpot(spot) ? <small className="ml-0.5 hidden text-[7px] sm:inline">サクラ専用</small> : CUSTOMER_SPOT_CODES.has(spot.code) ? <small className="ml-0.5 hidden text-[7px] sm:inline">お客様用</small> : HOLDING_SPOT_CODES.has(spot.code) ? <small className="ml-0.5 text-[7px]">仮置き</small> : TEMPORARY_SPOT_CODES.has(spot.code) ? <small className="ml-0.5 hidden text-[7px] text-slate-400 sm:inline">一時</small> : null}</span>
-          {spot.vehicle ? <div className="relative size-full"><button type="button" title={`${spot.vehicle.name}（${spot.vehicle.plateNumber}・${spot.vehicle.code}）${spot.vehicle.hasEtc ? "・ETC付" : ""}${spot.vehicle.hasNavigation ? "・ナビ付" : ""}を利用開始`} onClick={() => { if (spot.vehicle?.status === "AVAILABLE") openStart(spot.vehicle); }} className={cn("grid size-full place-content-center overflow-hidden text-center", spot.vehicle.status !== "AVAILABLE" && "cursor-not-allowed opacity-60")}><CarFront className="mx-auto size-4 sm:size-5" style={{ color: spot.vehicle.color }} /><b className="mt-0.5 block max-w-full truncate px-1 text-[8px] leading-tight sm:text-[10px]">{spot.vehicle.name}</b><small className="mt-0.5 block whitespace-nowrap text-[7px] font-bold leading-none text-slate-500 sm:text-[8px]">{formatPlateShort(spot.vehicle.plateNumber)} ・ {spot.vehicle.code}</small><VehicleEquipmentBadges vehicle={spot.vehicle} compact /></button><button type="button" title="駐車位置を移動" aria-label={`${spot.vehicle.name}の駐車位置を移動`} onClick={() => openMove(spot.vehicle!)} draggable onDragStart={() => setDragVehicle(spot.vehicle)} onDragEnd={() => setDragVehicle(null)} className="absolute right-1 top-1 grid size-7 cursor-grab place-items-center rounded-lg border border-slate-200 bg-white/95 text-slate-600 shadow-md transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 active:cursor-grabbing"><GripVertical className="size-4" /></button></div> : <button type="button" title={`${formatSpotLabel(spot.code)}へ返却`} onClick={() => { if (!dragVehicle) openReturn(spot); }} className="grid size-full place-content-center text-center text-[9px] font-bold text-slate-500 transition hover:bg-slate-100/70 sm:text-[10px]"><MapPin className="mx-auto mb-0.5 size-3" />{HOLDING_SPOT_CODES.has(spot.code) ? "仮置き" : TEMPORARY_SPOT_CODES.has(spot.code) ? "一時" : isSakuraSpot(spot) ? "サクラ" : "空き"}<span className="hidden sm:block">{HOLDING_SPOT_CODES.has(spot.code) ? "実在なし" : TEMPORARY_SPOT_CODES.has(spot.code) ? "駐車可" : isSakuraSpot(spot) ? "専用" : "返却"}</span></button>}
+          {spot.vehicle ? <div className="relative size-full"><button type="button" aria-pressed={spot.vehicle.id === selectedVehicleId} title={`${spot.vehicle.name}の詳細を表示`} onClick={() => setSelectedVehicleId((current) => current === spot.vehicle?.id ? null : spot.vehicle?.id ?? null)} className="grid size-full place-content-center overflow-hidden text-center"><CarFront className="mx-auto size-4 sm:size-5" style={{ color: spot.vehicle.color }} /><b className="mt-0.5 block max-w-full truncate px-1 text-[8px] leading-tight sm:text-[10px]">{spot.vehicle.name}</b><small className="mt-0.5 block whitespace-nowrap text-[7px] font-bold leading-none text-slate-500 sm:text-[8px]">{formatPlateShort(spot.vehicle.plateNumber)} ・ {spot.vehicle.code}</small>{spot.vehicle.status === "MAINTENANCE" ? <small className="mt-0.5 block text-[7px] font-black text-amber-800">整備中</small> : <VehicleEquipmentBadges vehicle={spot.vehicle} compact />}</button><button type="button" title="駐車位置を移動" aria-label={`${spot.vehicle.name}の駐車位置を移動`} onClick={() => openMove(spot.vehicle!)} draggable onDragStart={() => setDragVehicle(spot.vehicle)} onDragEnd={() => setDragVehicle(null)} className="absolute right-1 top-1 grid size-7 cursor-grab place-items-center rounded-lg border border-slate-200 bg-white/95 text-slate-600 shadow-md transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 active:cursor-grabbing"><GripVertical className="size-4" /></button></div> : <button type="button" title={`${formatSpotLabel(spot.code)}へ返却`} onClick={() => { if (!dragVehicle) openReturn(spot); }} className="grid size-full place-content-center text-center text-[9px] font-bold text-slate-500 transition hover:bg-slate-100/70 sm:text-[10px]"><MapPin className="mx-auto mb-0.5 size-3" />{HOLDING_SPOT_CODES.has(spot.code) ? "仮置き" : TEMPORARY_SPOT_CODES.has(spot.code) ? "一時" : isSakuraSpot(spot) ? "サクラ" : "空き"}<span className="hidden sm:block">{HOLDING_SPOT_CODES.has(spot.code) ? "実在なし" : TEMPORARY_SPOT_CODES.has(spot.code) ? "駐車可" : isSakuraSpot(spot) ? "専用" : "返却"}</span></button>}
         </div>)}
+        {selectedVehicle && selectedSpot ? <div role="region" aria-label={`${selectedVehicle.name}の詳細`} className="absolute inset-x-2 bottom-2 z-30 mx-auto flex max-w-xl flex-wrap items-center gap-2 rounded-2xl border border-blue-200 bg-white/95 p-2.5 shadow-2xl backdrop-blur"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-blue-50"><CarFront className="size-5" style={{ color: selectedVehicle.color }} /></span><div className="mr-auto min-w-28 flex-1"><div className="flex flex-wrap items-center gap-1.5"><b className="text-sm">{selectedVehicle.name}</b>{selectedVehicle.status === "MAINTENANCE" ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-800">整備中</span> : null}<VehicleEquipmentBadges vehicle={selectedVehicle} /></div><p className="text-[10px] font-bold text-slate-500">{selectedVehicle.plateNumber} ・ {selectedVehicle.code} ・ 駐車位置 {selectedSpot.code}</p></div><Button className="min-h-9 px-3 text-xs" disabled={selectedVehicle.status !== "AVAILABLE"} onClick={() => openStart(selectedVehicle)}><CarFront className="size-3.5" />{selectedVehicle.status === "MAINTENANCE" ? "利用不可" : "利用開始"}</Button><Button variant="ghost" className="min-h-9 px-3 text-xs" onClick={() => openMove(selectedVehicle)}><MapPin className="size-3.5" />位置変更</Button><button type="button" aria-label="車両詳細を閉じる" onClick={() => setSelectedVehicleId(null)} className="grid size-9 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"><X className="size-4" /></button></div> : null}
       </div>
     </div>
   </Card>;

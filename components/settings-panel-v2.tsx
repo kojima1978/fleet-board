@@ -1,15 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CarFront, Check, Download, FileJson, Nfc, Pencil, Plus, Power, Search, Upload, UserRound, X } from "lucide-react";
+import { CarFront, Check, Download, FileJson, Nfc, Pencil, Plus, Power, Search, Upload, UserRound, Wrench, X } from "lucide-react";
 import type { DashboardData, Employee, Vehicle } from "@/lib/types";
 import { normalizeNfcUid, sameNfcUid } from "@/lib/nfc";
 import { nfcBridgeStatusText, useNfcBridge } from "@/lib/use-nfc-bridge";
 import { Button, Card, cn } from "./ui";
 
 type Mutate = (body: object, success: string) => Promise<boolean>;
-type StatusFilter = "all" | "active" | "inactive" | "inUse";
+type StatusFilter = "all" | "active" | "inactive" | "inUse" | "maintenance";
 type ConfirmTarget = { id: string; name: string; active: boolean; version: number };
+type MaintenanceTarget = { id: string; name: string; maintenance: boolean; version: number };
 type ImportRow = Record<string, unknown>;
 
 const emptyEmployee = { code: "", name: "", department: "", nfcUid: "" };
@@ -30,6 +31,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
   const [newDepartmentMode, setNewDepartmentMode] = useState(false);
   const [vehicleForm, setVehicleForm] = useState(emptyVehicle);
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);
+  const [maintenanceTarget, setMaintenanceTarget] = useState<MaintenanceTarget | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [highlightId, setHighlightId] = useState("");
@@ -48,7 +50,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
     const params = new URLSearchParams(window.location.search);
     setQuery(params.get("q") ?? "");
     const savedStatus = params.get("status") as StatusFilter | null;
-    if (savedStatus && ["all", "active", "inactive", "inUse"].includes(savedStatus)) setStatus(savedStatus);
+    if (savedStatus && ["all", "active", "inactive", "inUse", "maintenance"].includes(savedStatus)) setStatus(savedStatus);
     setDepartment(params.get("department") ?? "all");
     setUrlHydrated(true);
   }, [kind]);
@@ -78,7 +80,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
   }), [data.employees, department, normalizedQuery, status]);
   const vehicles = useMemo(() => data.vehicles.filter((vehicle) => {
     const matchesQuery = !normalizedQuery || [vehicle.code, vehicle.name, vehicle.plateNumber, vehicle.nfcUid].some((value) => value.toLowerCase().includes(normalizedQuery));
-    const matchesStatus = status === "all" || (status === "active" && vehicle.active) || (status === "inactive" && !vehicle.active) || (status === "inUse" && vehicle.active && vehicle.status === "IN_USE");
+    const matchesStatus = status === "all" || (status === "active" && vehicle.active) || (status === "inactive" && !vehicle.active) || (status === "inUse" && vehicle.active && vehicle.status === "IN_USE") || (status === "maintenance" && vehicle.active && vehicle.status === "MAINTENANCE");
     return matchesQuery && matchesStatus;
   }), [data.vehicles, normalizedQuery, status]);
   useEffect(() => { setPage(1); }, [department, kind, normalizedQuery, status]);
@@ -114,13 +116,14 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
   }, [drawerOpen]);
 
   useEffect(() => {
-    if (!drawerOpen && !confirmTarget) return;
+    if (!drawerOpen && !confirmTarget && !maintenanceTarget) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       const activeLayer = document.querySelector<HTMLElement>("[role='alertdialog']") ?? drawerRef.current;
       if (event.key === "Escape") {
         event.preventDefault();
         if (submitting) return;
         if (discardConfirm) { setDiscardConfirm(false); return; }
+        if (maintenanceTarget) { setMaintenanceTarget(null); return; }
         if (confirmTarget) { setConfirmTarget(null); return; }
         closeDrawer();
         return;
@@ -134,7 +137,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [closeDrawer, confirmTarget, discardConfirm, drawerOpen, submitting]);
+  }, [closeDrawer, confirmTarget, discardConfirm, drawerOpen, maintenanceTarget, submitting]);
   const openCreate = () => { closeDrawer(true); setNewDepartmentMode(kind === "employee" && departments.length === 0); setDrawerOpen(true); };
   const openEmployee = (person: Employee) => {
     setEditingEmployee(person); setEmployeeForm({ code: person.code, name: person.name, department: person.department, nfcUid: person.nfcUid }); setNewDepartmentMode(false); setDrawerOpen(true);
@@ -222,6 +225,17 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
       setSubmitting(false);
     }
   };
+  const applyMaintenanceChange = async () => {
+    if (!maintenanceTarget || submitting) return;
+    setSubmitting(true);
+    try {
+      const next = !maintenanceTarget.maintenance;
+      const ok = await mutate({ action: "setVehicleMaintenance", id: maintenanceTarget.id, version: maintenanceTarget.version, maintenance: next }, next ? `${maintenanceTarget.name}を整備中に変更しました` : `${maintenanceTarget.name}を利用可能に戻しました`);
+      if (ok) { setHighlightId(maintenanceTarget.id); setMaintenanceTarget(null); }
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const total = kind === "employee" ? data.employees.length : data.vehicles.length;
   const active = kind === "employee" ? data.employees.filter((person) => person.active).length : data.vehicles.filter((vehicle) => vehicle.active).length;
@@ -240,7 +254,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
       <div className="flex flex-col gap-3 border-b border-slate-100 p-4 lg:flex-row lg:items-center">
         <div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" /><input aria-label={`${kind === "employee" ? "社員" : "車両"}を検索`} className={cn(field, "pl-9")} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={kind === "employee" ? "社員番号・氏名・部署・NFC UIDで検索" : "車両番号・車両名・ナンバー・NFC UIDで検索"} /></div>
         <div className="flex flex-wrap gap-2">
-          <select aria-label="状態で絞り込み" className={cn(field, "w-auto min-w-28")} value={status} onChange={(event) => setStatus(event.target.value as StatusFilter)}><option value="all">すべて</option><option value="active">有効</option><option value="inactive">無効</option>{kind === "vehicle" ? <option value="inUse">利用中</option> : null}</select>
+          <select aria-label="状態で絞り込み" className={cn(field, "w-auto min-w-28")} value={status} onChange={(event) => setStatus(event.target.value as StatusFilter)}><option value="all">すべて</option><option value="active">有効</option><option value="inactive">無効</option>{kind === "vehicle" ? <><option value="inUse">利用中</option><option value="maintenance">整備中</option></> : null}</select>
           {kind === "employee" ? <select aria-label="部署で絞り込み" className={cn(field, "w-auto min-w-32")} value={department} onChange={(event) => setDepartment(event.target.value)}><option value="all">すべての部署</option>{departments.map((name) => <option key={name} value={name}>{name}</option>)}</select> : null}
           <Button variant="secondary" onClick={() => setImportOpen(true)}><FileJson className="size-4" />JSON取込</Button>
           <Button onClick={openCreate}><Plus className="size-4" />{kind === "employee" ? "社員を追加" : "車両を追加"}</Button>
@@ -250,8 +264,8 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
       {shown === 0 ? <div className="p-10 text-center"><p className="text-sm text-slate-400">条件に一致する{kind === "employee" ? "社員" : "車両"}がありません</p><button type="button" onClick={() => { setQuery(""); setStatus("all"); setDepartment("all"); }} className="mt-3 rounded-lg px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50">検索条件をクリア</button></div> : <div className="divide-y divide-slate-100">
         {kind === "employee" ? visibleEmployees.map((person) => <div key={person.id} className={cn("grid items-center gap-3 px-4 py-3 transition [content-visibility:auto] sm:grid-cols-[90px_minmax(0,1fr)_150px_220px]", !person.active && "bg-slate-50 text-slate-500", highlightId === person.id && "bg-amber-50 ring-2 ring-inset ring-amber-300")}>
           <span className="w-fit rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-black">{person.code}</span><div className="min-w-0"><p className="truncate text-sm font-black">{person.name}</p><p className="truncate text-xs text-slate-400 sm:hidden">{person.department} ・ {nfcUidLabel(person.nfcUid)}</p></div><div className="hidden min-w-0 sm:block"><p className="truncate text-xs font-bold">{person.department}</p><p className={cn("truncate text-[11px]", person.nfcUid ? "text-slate-400" : "font-bold text-amber-600")}>{nfcUidLabel(person.nfcUid)}</p></div><RowActions active={person.active} name={person.name} onEdit={() => openEmployee(person)} onActive={() => setConfirmTarget({ id: person.id, name: person.name, active: person.active, version: person.version })} />
-        </div>) : visibleVehicles.map((vehicle) => <div key={vehicle.id} className={cn("grid items-center gap-3 px-4 py-3 transition [content-visibility:auto] sm:grid-cols-[48px_minmax(0,1fr)_150px_220px]", !vehicle.active && "bg-slate-50 text-slate-500", highlightId === vehicle.id && "bg-amber-50 ring-2 ring-inset ring-amber-300")}>
-          <span className="grid size-10 place-items-center rounded-xl bg-slate-100"><CarFront className="size-5" style={{ color: vehicle.color }} /></span><div className="min-w-0"><div className="flex min-w-0 items-center gap-1.5"><p className="truncate text-sm font-black">{vehicle.code} ・ {vehicle.name}</p><EquipmentBadges vehicle={vehicle} /></div><p className="truncate text-xs text-slate-400">{vehicle.plateNumber} ・ <span className={vehicle.nfcUid ? undefined : "font-bold text-amber-600"}>{nfcUidLabel(vehicle.nfcUid)}</span></p></div><span className={cn("hidden w-fit rounded-full px-2.5 py-1 text-[10px] font-bold sm:inline", !vehicle.active ? "bg-slate-200 text-slate-600" : vehicle.status === "AVAILABLE" ? "bg-emerald-50 text-emerald-700" : "bg-blue-50 text-blue-700")}>{!vehicle.active ? "無効" : vehicle.status === "AVAILABLE" ? "利用可能" : vehicle.status === "IN_USE" ? "利用中" : vehicle.status}</span><RowActions active={vehicle.active} name={vehicle.name} onEdit={() => openVehicle(vehicle)} onActive={() => setConfirmTarget({ id: vehicle.id, name: vehicle.name, active: vehicle.active, version: vehicle.version })} />
+        </div>) : visibleVehicles.map((vehicle) => <div key={vehicle.id} className={cn("grid items-center gap-3 px-4 py-3 transition [content-visibility:auto] sm:grid-cols-[48px_minmax(0,1fr)_150px_300px]", !vehicle.active && "bg-slate-50 text-slate-500", vehicle.status === "MAINTENANCE" && "bg-amber-50/60", highlightId === vehicle.id && "bg-amber-50 ring-2 ring-inset ring-amber-300")}>
+          <span className="grid size-10 place-items-center rounded-xl bg-slate-100"><CarFront className="size-5" style={{ color: vehicle.color }} /></span><div className="min-w-0"><div className="flex min-w-0 items-center gap-1.5"><p className="truncate text-sm font-black">{vehicle.code} ・ {vehicle.name}</p><EquipmentBadges vehicle={vehicle} /></div><p className="truncate text-xs text-slate-400">{vehicle.plateNumber} ・ <span className={vehicle.nfcUid ? undefined : "font-bold text-amber-600"}>{nfcUidLabel(vehicle.nfcUid)}</span></p></div><span className={cn("hidden w-fit rounded-full px-2.5 py-1 text-[10px] font-bold sm:inline", !vehicle.active ? "bg-slate-200 text-slate-600" : vehicle.status === "AVAILABLE" ? "bg-emerald-50 text-emerald-700" : vehicle.status === "MAINTENANCE" ? "bg-amber-100 text-amber-800" : "bg-blue-50 text-blue-700")}>{!vehicle.active ? "無効" : vehicle.status === "AVAILABLE" ? "利用可能" : vehicle.status === "IN_USE" ? "利用中" : vehicle.status === "MAINTENANCE" ? "整備中" : vehicle.status}</span><RowActions active={vehicle.active} name={vehicle.name} maintenance={vehicle.status === "MAINTENANCE"} maintenanceDisabled={!vehicle.active || (vehicle.status !== "AVAILABLE" && vehicle.status !== "MAINTENANCE")} onEdit={() => openVehicle(vehicle)} onActive={() => setConfirmTarget({ id: vehicle.id, name: vehicle.name, active: vehicle.active, version: vehicle.version })} onMaintenance={() => setMaintenanceTarget({ id: vehicle.id, name: vehicle.name, maintenance: vehicle.status === "MAINTENANCE", version: vehicle.version })} />
         </div>)}
       </div>}
       {shown > PAGE_SIZE ? <div className="flex items-center justify-center gap-3 border-t border-slate-100 bg-slate-50 px-4 py-3"><button type="button" disabled={currentPage === 1} onClick={() => setPage((value) => Math.max(1, value - 1))} className="min-h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 disabled:opacity-35">前へ</button><span className="text-xs font-bold text-slate-600">{currentPage} / {pageCount}ページ</span><button type="button" disabled={currentPage === pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))} className="min-h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 disabled:opacity-35">次へ</button></div> : null}
@@ -285,12 +299,13 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
     </aside></div> : null}
 
     {confirmTarget ? <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm"><div role="alertdialog" aria-modal="true" aria-busy={submitting} className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl"><span className={cn("mx-auto grid size-12 place-items-center rounded-full", confirmTarget.active ? "bg-rose-50 text-rose-600" : "bg-emerald-50 text-emerald-600")}>{confirmTarget.active ? <Power /> : <Check />}</span><h2 className="mt-4 text-center text-lg font-black">{confirmTarget.active ? "無効化しますか？" : "再有効化しますか？"}</h2><p className="mt-2 text-center text-sm text-slate-500">{confirmTarget.name}を{confirmTarget.active ? "利用開始の選択肢から除外します。過去の利用履歴は保持されます。" : "再び利用開始の選択肢へ表示します。"}</p><div className="mt-5 grid grid-cols-2 gap-2"><Button autoFocus variant="ghost" disabled={submitting} onClick={() => setConfirmTarget(null)}>キャンセル</Button><Button disabled={submitting} variant={confirmTarget.active ? "danger" : "primary"} onClick={applyActiveChange}>{submitting ? "処理中…" : confirmTarget.active ? "無効化" : "再有効化"}</Button></div></div></div> : null}
+    {maintenanceTarget ? <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm"><div role="alertdialog" aria-modal="true" aria-busy={submitting} className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl"><span className="mx-auto grid size-12 place-items-center rounded-full bg-amber-50 text-amber-700"><Wrench /></span><h2 className="mt-4 text-center text-lg font-black">{maintenanceTarget.maintenance ? "利用可能に戻しますか？" : "整備中に変更しますか？"}</h2><p className="mt-2 text-center text-sm text-slate-500">{maintenanceTarget.name}を{maintenanceTarget.maintenance ? "利用開始できる状態へ戻します。" : "利用開始の選択肢から一時的に除外します。駐車位置と履歴は保持されます。"}</p><div className="mt-5 grid grid-cols-2 gap-2"><Button autoFocus variant="ghost" disabled={submitting} onClick={() => setMaintenanceTarget(null)}>キャンセル</Button><Button disabled={submitting} onClick={applyMaintenanceChange}>{submitting ? "処理中…" : maintenanceTarget.maintenance ? "利用可能に戻す" : "整備中にする"}</Button></div></div></div> : null}
     {discardConfirm ? <div className="fixed inset-0 z-[70] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm"><div role="alertdialog" aria-modal="true" className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl"><span className="mx-auto grid size-12 place-items-center rounded-full bg-amber-50 text-amber-600"><X /></span><h2 className="mt-4 text-center text-lg font-black">入力内容を破棄しますか？</h2><p className="mt-2 text-center text-sm text-slate-500">保存していない変更があります。この操作は元に戻せません。</p><div className="mt-5 grid grid-cols-2 gap-2"><Button autoFocus variant="ghost" onClick={() => setDiscardConfirm(false)}>編集を続ける</Button><Button variant="danger" onClick={() => { setDiscardConfirm(false); closeDrawer(true); }}>破棄して閉じる</Button></div></div></div> : null}
   </>;
 }
 
-function RowActions({ active, name, onEdit, onActive }: { active: boolean; name: string; onEdit: () => void; onActive: () => void }) {
-  return <div className="flex justify-end gap-2"><button type="button" onClick={onEdit} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:bg-slate-50" aria-label={`${name}を編集`}><Pencil className="size-3.5" /><span className="hidden md:inline">編集</span></button><button type="button" onClick={onActive} className={cn("inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-bold", active ? "border-rose-200 text-rose-600 hover:bg-rose-50" : "border-emerald-200 text-emerald-600 hover:bg-emerald-50")} aria-label={`${name}を${active ? "無効化" : "再有効化"}`}><Power className="size-3.5" /><span className="hidden md:inline">{active ? "無効化" : "再有効化"}</span></button></div>;
+function RowActions({ active, name, maintenance, maintenanceDisabled, onEdit, onActive, onMaintenance }: { active: boolean; name: string; maintenance?: boolean; maintenanceDisabled?: boolean; onEdit: () => void; onActive: () => void; onMaintenance?: () => void }) {
+  return <div className="flex justify-end gap-2">{onMaintenance ? <button type="button" disabled={maintenanceDisabled} onClick={onMaintenance} className={cn("inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-35", maintenance ? "border-emerald-200 text-emerald-700 hover:bg-emerald-50" : "border-amber-200 text-amber-700 hover:bg-amber-50")} aria-label={`${name}を${maintenance ? "利用可能に戻す" : "整備中にする"}`}><Wrench className="size-3.5" /><span className="hidden md:inline">{maintenance ? "整備解除" : "整備"}</span></button> : null}<button type="button" onClick={onEdit} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:bg-slate-50" aria-label={`${name}を編集`}><Pencil className="size-3.5" /><span className="hidden md:inline">編集</span></button><button type="button" onClick={onActive} className={cn("inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-bold", active ? "border-rose-200 text-rose-600 hover:bg-rose-50" : "border-emerald-200 text-emerald-600 hover:bg-emerald-50")} aria-label={`${name}を${active ? "無効化" : "再有効化"}`}><Power className="size-3.5" /><span className="hidden md:inline">{active ? "無効化" : "再有効化"}</span></button></div>;
 }
 
 function EquipmentBadges({ vehicle }: { vehicle: Pick<Vehicle, "hasEtc" | "hasNavigation"> }) {
