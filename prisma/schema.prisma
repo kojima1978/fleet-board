@@ -89,6 +89,8 @@ model Vehicle {
   name          String
   plateNumber   String        @unique
   color         String        @default("#2563eb")
+  hasEtc        Boolean       @default(false)
+  hasNavigation Boolean       @default(false)
   active        Boolean       @default(true)
   status        VehicleStatus @default(AVAILABLE)
   parkingSpotId String?       @unique

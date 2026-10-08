@@ -2,6 +2,7 @@ export type Employee = { id: string; code: string; name: string; department: str
 export type Department = { id: string; name: string; active: boolean };
 export type Vehicle = {
   id: string; code: string; name: string; plateNumber: string; nfcUid: string;
+  hasEtc: boolean; hasNavigation: boolean;
   color: string; status: "AVAILABLE" | "RESERVED" | "IN_USE" | "MAINTENANCE";
   parkingSpotId: string | null; active: boolean; version: number;
 };

@@ -80,7 +80,7 @@ try {
   await postAdmin({
     action: "importVehicles",
     items: [
-      { code: vehicleCodes[0], name: "NFC後登録車両", plateNumber: plateNumbers[0], color: "#2563EB" },
+      { code: vehicleCodes[0], name: "NFC後登録車両", plateNumber: plateNumbers[0], color: "#2563EB", hasEtc: true, hasNavigation: true },
       { code: vehicleCodes[1], name: "NFC同時登録車両", plateNumber: plateNumbers[1], nfcUid: vehicleUids[1], color: "#0891B2" },
     ],
   });
@@ -94,6 +94,10 @@ try {
   assert.equal(employeeWithNfc?.nfcUid, employeeUids[1]);
   assert.equal(vehicleWithoutNfc?.nfcUid, "");
   assert.equal(vehicleWithNfc?.nfcUid, vehicleUids[1]);
+  assert.equal(vehicleWithoutNfc?.hasEtc, true);
+  assert.equal(vehicleWithoutNfc?.hasNavigation, true);
+  assert.equal(vehicleWithNfc?.hasEtc, false);
+  assert.equal(vehicleWithNfc?.hasNavigation, false);
 
   await postAdmin({ action: "updateEmployee", id: employeeWithoutNfc.id, version: employeeWithoutNfc.version, name: employeeWithoutNfc.name, department: employeeWithoutNfc.department, nfcUid: employeeUids[0] });
   await postAdmin({ action: "updateVehicle", id: vehicleWithoutNfc.id, version: vehicleWithoutNfc.version, name: vehicleWithoutNfc.name, plateNumber: vehicleWithoutNfc.plateNumber, nfcUid: vehicleUids[0], color: vehicleWithoutNfc.color });
@@ -101,7 +105,9 @@ try {
   data = await dashboard();
   assert.equal(data.employees.find((item) => item.code === employeeCodes[0])?.nfcUid, employeeUids[0]);
   assert.equal(data.vehicles.find((item) => item.code === vehicleCodes[0])?.nfcUid, vehicleUids[0]);
-  console.log("Optional NFC import passed: employee and vehicle import with/without UID, followed by NFC registration");
+  assert.equal(data.vehicles.find((item) => item.code === vehicleCodes[0])?.hasEtc, true);
+  assert.equal(data.vehicles.find((item) => item.code === vehicleCodes[0])?.hasNavigation, true);
+  console.log("Optional NFC and vehicle equipment import passed: equipment survives later NFC registration");
 } finally {
   await cleanup().catch((error) => console.error("cleanup failed", error));
   await client.end();

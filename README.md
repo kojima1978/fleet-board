@@ -97,6 +97,8 @@ docker compose up --build -d
 - 各一覧の「JSON取込」から最大500件を一括登録できます。「ひな形を保存」で正しい形式を取得できます。
 - JSON取込は新規登録専用です。社員番号・車両番号・ナンバー、および指定されたNFC UIDの重複や不正な行が1件でもある場合、全件を登録せず元の状態を保ちます。
 - NFC UIDは省略または空欄でも取り込めます。取り込み後、社員・車両の編集画面からNFC読取で追加できます。
+- 車両はETC・ナビの有無を登録でき、車両一覧、利用開始画面、駐車場配置図に装備タグを表示します。
+- 車両JSONの`hasEtc`と`hasNavigation`は任意の真偽値です。省略時は`false`（なし）になります。
 - 指定されたNFC UIDは区切り文字の有無にかかわらず正規化して保存されます。
 - 同じNFC UIDを複数の社員・車両へ登録することはできません。
 - 社員番号・車両番号は再利用できる設計ですが、同じ番号を同時に有効化することはできません。
@@ -115,8 +117,8 @@ docker compose up --build -d
 
 ```json
 [
-  { "code": "C18", "name": "営業車18", "plateNumber": "品川 500 あ 12-34", "nfcUid": "04AABBCCDDEE11", "color": "#2563EB" },
-  { "code": "C19", "name": "営業車19", "plateNumber": "品川 500 い 56-78", "color": "#0891B2" }
+  { "code": "C18", "name": "営業車18", "plateNumber": "品川 500 あ 12-34", "nfcUid": "04AABBCCDDEE11", "color": "#2563EB", "hasEtc": true, "hasNavigation": true },
+  { "code": "C19", "name": "営業車19", "plateNumber": "品川 500 い 56-78", "color": "#0891B2", "hasEtc": false, "hasNavigation": true }
 ]
 ```
 

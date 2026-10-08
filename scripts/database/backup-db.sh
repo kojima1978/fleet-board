@@ -14,5 +14,11 @@ backup_once() {
 
 backup_once
 if [ "${1:-}" = "loop" ]; then
-  while sleep 86400; do backup_once; done
+  # Docker Desktopの停止・PCスリープ中は長時間sleepが持ち越されるため、
+  # 短い間隔で最終バックアップ時刻を確認して日次実行を保証する。
+  while sleep "${BACKUP_CHECK_INTERVAL_SECONDS:-300}"; do
+    if ! find /backups -type f -name 'fleet-*.sql.gz' -mmin "-${BACKUP_MAX_AGE_MINUTES:-1380}" -print -quit | grep -q .; then
+      backup_once
+    fi
+  done
 fi
