@@ -2,16 +2,17 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, Archive, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Nfc, Pencil, Plus, Power, Printer, RefreshCw, Settings, UserRound, X } from "lucide-react";
+import { AlertTriangle, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Nfc, Pencil, Plus, Power, Printer, RefreshCw, Settings, UserRound, X } from "lucide-react";
 import type { DashboardData, Employee, ParkingSpot, Trip, Vehicle } from "@/lib/types";
 import { normalizeNfcUid, sameNfcUid } from "@/lib/nfc";
 import { CUSTOMER_SPOT_CODES, formatSpotLabel, HOLDING_SPOT_CODES, SAKURA_SPOT_CODE, TEMPORARY_SPOT_CODES } from "@/lib/parking-spots";
 import { RESERVATION_GRACE_MINUTES } from "@/lib/reservations";
-import { nfcBridgeStatusText, useNfcBridge, useNfcBridgeHealth, type NfcBridgeStatus } from "@/lib/use-nfc-bridge";
+import { nfcBridgeStatusText, useNfcBridge, useNfcBridgeHealth } from "@/lib/use-nfc-bridge";
 import { useKioskIdle } from "@/lib/use-kiosk-idle";
 import { SettingsPanelV2 } from "./settings-panel-v2";
 import { AdminGate } from "./admin-gate";
 import { Button, Card, cn } from "./ui";
+import { AppHeader, HeaderSystemStatus, Navigation, type HeaderSyncState } from "./app-header";
 
 const MINUTES_PER_DAY = 24 * 60;
 const DAY_VIEW_START_MINUTE = 6 * 60;
@@ -19,7 +20,7 @@ const DAY_VIEW_END_MINUTE = 22 * 60;
 const SAKURA_VEHICLE_CODE = "C07";
 type Dialog = "start" | "end" | "parkingReturn" | "moveVehicle" | "edit" | "nfc" | null;
 type DashboardView = "parking" | "timeline" | "settingsEmployees" | "settingsVehicles";
-type SyncState = "loading" | "healthy" | "stale";
+type SyncState = HeaderSyncState;
 type StartContext = { vehicleId: string; employeeId: string };
 type UndoReturn = { tripId: string; vehicleId: string; vehicleName: string; expiresAt: number };
 const jpTime = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false });
@@ -167,8 +168,19 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
     const employeeId = window.sessionStorage.getItem("fleetflow.employeeId");
     const saved = data.employees.find((person) => person.id === employeeId && person.active) ?? null;
     setEmployee(saved);
-    if (!saved && employeeId) window.sessionStorage.removeItem("fleetflow.employeeId");
+    if (saved) window.sessionStorage.setItem("fleetflow.employeeName", saved.name);
+    if (!saved && employeeId) {
+      window.sessionStorage.removeItem("fleetflow.employeeId");
+      window.sessionStorage.removeItem("fleetflow.employeeName");
+    }
   }, [data?.employees]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("nfc") !== "1") return;
+    setDialog("nfc");
+    window.history.replaceState({}, "", "/");
+  }, []);
 
   useEffect(() => {
     if (view !== "timeline") return;
@@ -298,10 +310,12 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   const selectEmployee = (person: Employee) => {
     setEmployee(person);
     window.sessionStorage.setItem("fleetflow.employeeId", person.id);
+    window.sessionStorage.setItem("fleetflow.employeeName", person.name);
   };
   const clearEmployee = () => {
     setEmployee(null);
     window.sessionStorage.removeItem("fleetflow.employeeId");
+    window.sessionStorage.removeItem("fleetflow.employeeName");
     setToast({ message: "利用者の選択を解除しました", tone: "success" });
   };
   const downloadDiagnostics = () => {
@@ -330,20 +344,11 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
 
   return (
     <div className="min-h-screen bg-[#f4f7fb] text-slate-900">
-      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-5 px-4 py-3 md:px-8">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="grid size-11 place-items-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-200"><CarFront /></div>
-            <div className="min-w-0 max-[360px]:hidden"><h1 className="text-lg font-black tracking-tight">FleetFlow</h1><p className="hidden text-xs text-slate-500 sm:block">社用車 利用・駐車管理</p></div>
-          </div>
-          <Navigation view={view} className="hidden md:flex" />
-          <div className="flex items-center gap-2">
-            <SystemStatus syncState={syncState} lastSuccessfulSync={lastSuccessfulSync} nfcStatus={nfcHealth} refreshing={refreshing} onRefresh={() => void load()} onOpenNfc={() => setDialog("nfc")} onDownloadDiagnostics={downloadDiagnostics} />
+      <AppHeader view={view} actions={<>
+            <HeaderSystemStatus syncState={syncState} lastSuccessfulSync={lastSuccessfulSync} nfcStatus={nfcHealth} refreshing={refreshing} onRefresh={() => void load()} onOpenNfc={() => setDialog("nfc")} onDownloadDiagnostics={downloadDiagnostics} />
             {employee ? <div className="flex items-center overflow-hidden rounded-xl border border-emerald-200 bg-emerald-50"><button type="button" onClick={() => setDialog("nfc")} title="利用者を変更" className="flex min-h-10 items-center gap-2 px-3 text-sm font-bold text-emerald-800"><UserRound className="size-4" /><span className="hidden max-w-28 truncate lg:inline">{employee.name}</span><span className="hidden text-[10px] text-emerald-600 xl:inline">変更</span></button><button type="button" onClick={clearEmployee} aria-label="利用者選択を解除" className="grid min-h-10 w-9 place-items-center border-l border-emerald-200 text-emerald-700 hover:bg-emerald-100"><X className="size-3.5" /></button></div> : <Button className="border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100" onClick={() => setDialog("nfc")}><Nfc className="size-5" /><span className="hidden sm:inline">社員証をかざす</span></Button>}
             <button aria-label="最新情報に更新" aria-busy={refreshing} disabled={refreshing} onClick={() => void load()} className="grid size-11 place-items-center rounded-xl border border-slate-200 bg-white disabled:opacity-50"><RefreshCw className={cn("size-4", refreshing && "animate-spin")} /></button>
-          </div>
-        </div>
-      </header>
+      </>} />
 
       <main className="mx-auto max-w-[1600px] space-y-5 p-4 pb-28 md:p-8">
         {!isOnline ? <Card role="alert" className="flex flex-wrap items-center gap-3 border-amber-300 bg-amber-50 p-3 text-amber-950"><span className="grid size-9 shrink-0 place-items-center rounded-full bg-amber-500 text-white"><AlertTriangle className="size-4" /></span><div className="mr-auto"><p className="text-sm font-black">オフラインです</p><p className="text-xs text-amber-800">表示中の情報は更新されません。接続が戻ると自動的に再同期します。</p></div></Card> : null}
@@ -416,32 +421,6 @@ function OperationalAlerts({ data }: { data: DashboardData }) {
   ].filter((item): item is { label: string; href: string } => item !== null);
   if (alerts.length === 0) return null;
   return <Card role="status" className="flex flex-wrap items-center gap-2 border-amber-300 bg-amber-50 p-3"><span className="mr-1 inline-flex items-center gap-2 text-sm font-black text-amber-950"><AlertTriangle className="size-4" />確認が必要</span>{alerts.map((alert) => <Link key={alert.label} href={alert.href} className="rounded-full border border-amber-200 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 hover:border-amber-400">{alert.label}</Link>)}</Card>;
-}
-
-function SystemStatus({ syncState, lastSuccessfulSync, nfcStatus, refreshing, onRefresh, onOpenNfc, onDownloadDiagnostics }: { syncState: SyncState; lastSuccessfulSync: Date | null; nfcStatus: NfcBridgeStatus; refreshing: boolean; onRefresh: () => void; onOpenNfc: () => void; onDownloadDiagnostics: () => void }) {
-  const [open, setOpen] = useState(false);
-  const panelId = useId();
-  const appHealthy = syncState === "healthy";
-  const nfcLabel = nfcStatus === "ready" ? "NFC接続" : nfcStatus === "no-reader" ? "NFC未接続" : nfcStatus === "offline" ? "NFC手動" : "NFC確認中";
-  const nfcHealthy = nfcStatus === "ready";
-  return <div className="relative hidden lg:block">
-    <button type="button" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen((current) => !current)} className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 transition hover:border-slate-300 hover:bg-white" title="システム状態の詳細を表示"><span className={cn("size-2 rounded-full", appHealthy ? "bg-emerald-500" : "bg-rose-500")} /><span className={cn("text-xs font-bold", appHealthy ? "text-emerald-700" : "text-rose-700")}>{appHealthy ? "正常" : "更新停止"}</span><span className="text-slate-300">｜</span><Nfc className={cn("size-3.5", nfcHealthy ? "text-emerald-600" : "text-amber-600")} /><span className={cn("text-xs font-bold", nfcHealthy ? "text-emerald-700" : "text-amber-700")}>{nfcLabel}</span>{open ? <ChevronUp className="size-3.5 text-slate-400" /> : <ChevronDown className="size-3.5 text-slate-400" />}</button>
-    {open ? <div id={panelId} role="status" className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-80 rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl"><div className="flex items-start justify-between gap-3"><div><p className="font-black">システム状態</p><p className="mt-0.5 text-[11px] text-slate-500">運用に必要な接続をまとめて確認できます</p></div><button type="button" aria-label="システム状態を閉じる" onClick={() => setOpen(false)} className="grid size-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100"><X className="size-4" /></button></div><div className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-100 bg-slate-50/60 px-3"><StatusRow label="FleetFlow本体" value={appHealthy ? "接続済み" : "更新停止"} healthy={appHealthy} /><StatusRow label="データベース" value={appHealthy ? "接続済み" : "確認が必要"} healthy={appHealthy} /><StatusRow label="NFCリーダー" value={nfcLabel} healthy={nfcHealthy} warning={!nfcHealthy} /></div>{!nfcHealthy ? <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-black text-amber-900">NFCが使えない場合</p><p className="mt-1 text-[11px] leading-5 text-amber-800">連携ソフトとリーダーを確認してください。復旧するまでは手動選択で運用できます。</p><button type="button" onClick={() => { setOpen(false); onOpenNfc(); }} className="mt-2 min-h-9 w-full rounded-lg bg-white px-3 text-xs font-bold text-amber-900 shadow-sm hover:bg-amber-100">手動選択・NFC読取を開く</button></div> : null}<p className="mt-3 text-xs text-slate-500">最終更新：{lastSuccessfulSync ? jpTimeSeconds.format(lastSuccessfulSync) : "確認中"}</p><div className="mt-3 grid grid-cols-2 gap-2"><Button variant="secondary" disabled={refreshing} onClick={onRefresh}>{refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}{refreshing ? "確認中…" : "再確認"}</Button><Button variant="ghost" onClick={onDownloadDiagnostics}>診断を保存</Button></div></div> : null}
-  </div>;
-}
-
-function StatusRow({ label, value, healthy, warning = false }: { label: string; value: string; healthy: boolean; warning?: boolean }) {
-  return <div className="flex items-center justify-between gap-3 py-2.5 text-xs"><span className="font-bold text-slate-600">{label}</span><span className={cn("flex items-center gap-1.5 font-black", healthy ? "text-emerald-700" : warning ? "text-amber-700" : "text-rose-700")}><i className={cn("size-2 rounded-full", healthy ? "bg-emerald-500" : warning ? "bg-amber-500" : "bg-rose-500")} />{value}</span></div>;
-}
-
-function Navigation({ view, className }: { view: DashboardView; className?: string }) {
-  const links: { id: "parking" | "timeline" | "settings" | "operations"; href: string; label: string; icon: React.ReactNode }[] = [
-    { id: "parking", href: "/", label: "駐車場", icon: <LayoutGrid className="size-4" /> },
-    { id: "timeline", href: "/timeline", label: "タイムライン", icon: <Clock3 className="size-4" /> },
-    { id: "settings", href: "/settings/employees", label: "設定", icon: <Settings className="size-4" /> },
-    { id: "operations", href: "/operations", label: "履歴", icon: <Archive className="size-4" /> },
-  ];
-  return <nav aria-label="メインメニュー" className={cn("items-center justify-center gap-1", className)}>{links.map((link) => { const active = link.id === "settings" ? view.startsWith("settings") : view === link.id; return <Link key={link.id} href={link.href} aria-current={active ? "page" : undefined} className={cn("flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 whitespace-nowrap rounded-xl px-1 text-[10px] font-bold transition md:min-h-10 md:flex-none md:flex-row md:gap-2 md:px-4 md:text-xs", active ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900")}>{link.icon}<span className="max-w-full truncate max-[300px]:hidden">{link.label}</span></Link>; })}</nav>;
 }
 
 function PageHeading({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
