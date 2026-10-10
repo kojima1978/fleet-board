@@ -307,4 +307,15 @@ docker compose restart app
 
 ## 本番公開時の注意
 
-`compose.production.yaml`は1台のWindows PCで安定運用する構成で、初期設定では`127.0.0.1`だけへ公開します。管理者PINは設定変更を保護しますが、アプリ全体のユーザー認証ではありません。LAN公開へ変更する場合は、`.env.production`の`FLEETFLOW_BIND_ADDRESS`を変更するだけでなく、利用者認証、HTTPS、Windowsファイアウォールの接続元制限を同時に設定し、HTTPS化後に`FLEETFLOW_COOKIE_SECURE=true`へ変更してください。インターネットへ直接公開しないでください。
+`compose.production.yaml`は1台のWindows PCで安定運用する構成で、初期設定では`127.0.0.1`だけへ公開します。管理者PINは設定変更と操作履歴を保護しますが、共用端末で行う利用・返却操作には個別ログインを要求しません。NFC UIDは通常画面の一覧データへ含めず、読取時にサーバーで1件ずつ照合します。
+
+社内LANで公開するときは、次をすべて実施してください。
+
+1. サーバーPCの固定LAN IPを決め、`.env.production`の`FLEETFLOW_BIND_ADDRESS`へそのIPを指定する（`0.0.0.0`は避ける）。
+2. WindowsファイアウォールでTCP 3035の接続元を社内のプライベートサブネットだけに制限する。
+3. 可能なら社内証明書を設定したリバースプロキシでHTTPS化し、`FLEETFLOW_COOKIE_SECURE=true`にする。
+4. リバースプロキシが接続元ヘッダーを上書きする信頼済み構成の場合だけ`FLEETFLOW_TRUST_PROXY=true`にする。直接公開時は`false`のままにする。
+5. バックアップ先にはBitLocker対応ドライブ、アクセス制限済みNASなど暗号化・権限制御された保存先を使用する。
+6. インターネットや来客用Wi-Fiからは到達できないことを別端末で確認する。
+
+アプリはフレーム埋め込み禁止、MIME推測禁止、権限制限、CSPなどのHTTPセキュリティヘッダーを返します。Dockerのアプリコンテナーは非root・読み取り専用ファイルシステム・Linux capability全削除で実行します。LAN公開前後に`FleetFlow Production Health Check.cmd`とDocker内の`npm audit`を実行してください。インターネットへ直接公開しないでください。

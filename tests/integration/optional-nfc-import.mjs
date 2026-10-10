@@ -31,8 +31,8 @@ async function postAdmin(body) {
   assert.equal(response.status, 200, JSON.stringify(responseBody));
 }
 
-async function dashboard() {
-  const response = await fetch(`${appUrl}/api/dashboard`);
+async function dashboard(authenticated = true) {
+  const response = await fetch(`${appUrl}/api/dashboard`, { headers: authenticated ? { Cookie: cookie } : undefined });
   assert.equal(response.status, 200);
   return response.json();
 }
@@ -84,6 +84,10 @@ try {
       { code: vehicleCodes[1], name: "NFC同時登録車両", plateNumber: plateNumbers[1], nfcUid: vehicleUids[1], color: "#0891B2" },
     ],
   });
+
+  const publicData = await dashboard(false);
+  assert.equal(publicData.employees.find((item) => item.code === employeeCodes[1])?.nfcUid, "", "未認証の一覧に社員NFC UIDを含めない");
+  assert.equal(publicData.vehicles.find((item) => item.code === vehicleCodes[1])?.nfcUid, "", "未認証の一覧に車両NFC UIDを含めない");
 
   let data = await dashboard();
   const employeeWithoutNfc = data.employees.find((item) => item.code === employeeCodes[0]);

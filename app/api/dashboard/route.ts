@@ -5,6 +5,7 @@ import { normalizeNfcUid } from "@/lib/nfc";
 import { RESERVATION_GRACE_MINUTES } from "@/lib/reservations";
 import { adminTokenFromRequest, verifyAdminToken } from "@/lib/admin-auth";
 import { getBackupStatus } from "@/lib/backup-status";
+import { isSameOriginRequest, readJsonBody } from "@/lib/request-security";
 
 export const dynamic = "force-dynamic";
 const SAKURA_SPOT_CODE = "19";
@@ -12,12 +13,12 @@ const SAKURA_VEHICLE_CODE = "C07";
 const activeOperationIds = new Set<string>();
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-function withVehicleCode<T extends { id: string; name: string; plateNumber: string; color: string; hasEtc: boolean; hasNavigation: boolean; status: "AVAILABLE" | "RESERVED" | "IN_USE" | "MAINTENANCE"; parkingSpotId: string | null; active: boolean; version: number; vehicleNumber: { code: string }; nfcAssignments: { nfcTag: { uid: string } }[] }>(vehicle: T) {
-  return { id: vehicle.id, code: vehicle.vehicleNumber.code, name: vehicle.name, plateNumber: vehicle.plateNumber, nfcUid: vehicle.nfcAssignments[0]?.nfcTag.uid ?? "", color: vehicle.color, hasEtc: vehicle.hasEtc, hasNavigation: vehicle.hasNavigation, status: vehicle.status, parkingSpotId: vehicle.parkingSpotId, active: vehicle.active, version: vehicle.version };
+function withVehicleCode<T extends { id: string; name: string; plateNumber: string; color: string; hasEtc: boolean; hasNavigation: boolean; status: "AVAILABLE" | "RESERVED" | "IN_USE" | "MAINTENANCE"; parkingSpotId: string | null; active: boolean; version: number; vehicleNumber: { code: string }; nfcAssignments: { nfcTag: { uid: string } }[] }>(vehicle: T, includeNfc = false) {
+  return { id: vehicle.id, code: vehicle.vehicleNumber.code, name: vehicle.name, plateNumber: vehicle.plateNumber, nfcUid: includeNfc ? vehicle.nfcAssignments[0]?.nfcTag.uid ?? "" : "", color: vehicle.color, hasEtc: vehicle.hasEtc, hasNavigation: vehicle.hasNavigation, status: vehicle.status, parkingSpotId: vehicle.parkingSpotId, active: vehicle.active, version: vehicle.version };
 }
 
-function withEmployeeCode<T extends { id: string; name: string; active: boolean; version: number; employeeNumber: { code: string }; department: { name: string }; nfcAssignments: { nfcTag: { uid: string } }[] }>(employee: T) {
-  return { id: employee.id, code: employee.employeeNumber.code, name: employee.name, department: employee.department.name, nfcUid: employee.nfcAssignments[0]?.nfcTag.uid ?? "", active: employee.active, version: employee.version };
+function withEmployeeCode<T extends { id: string; name: string; active: boolean; version: number; employeeNumber: { code: string }; department: { name: string }; nfcAssignments: { nfcTag: { uid: string } }[] }>(employee: T, includeNfc = false) {
+  return { id: employee.id, code: employee.employeeNumber.code, name: employee.name, department: employee.department.name, nfcUid: includeNfc ? employee.nfcAssignments[0]?.nfcTag.uid ?? "" : "", active: employee.active, version: employee.version };
 }
 
 function todayInTokyo() {
@@ -66,28 +67,29 @@ const optionalNfcUidSchema = z.preprocess(
   (value) => value == null || (typeof value === "string" && !value.trim()) ? undefined : value,
   nfcUidSchema.optional(),
 );
-const actorSchema = { actorName: z.string(), actorEmployeeId: z.string().optional() };
+const idSchema = z.string().trim().min(1).max(100);
+const actorSchema = { actorName: z.string().trim().max(50).optional(), actorEmployeeId: idSchema.optional() };
 const employeeImportItemSchema = z.object({ code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), department: z.string().trim().min(1).max(50), nfcUid: optionalNfcUidSchema });
 const vehicleImportItemSchema = z.object({ code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#2563eb"), hasEtc: z.boolean().default(false), hasNavigation: z.boolean().default(false) });
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("createEmployee"), code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), department: z.string().trim().min(1).max(50), nfcUid: nfcUidSchema }),
   z.object({ action: z.literal("createVehicle"), code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: nfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().default(false), hasNavigation: z.boolean().default(false) }),
-  z.object({ action: z.literal("updateEmployee"), id: z.string(), version: z.number().int(), name: z.string().trim().min(1).max(50), department: z.string().trim().min(1).max(50), nfcUid: nfcUidSchema }),
-  z.object({ action: z.literal("updateVehicle"), id: z.string(), version: z.number().int(), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: nfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().optional(), hasNavigation: z.boolean().optional() }),
-  z.object({ action: z.literal("setEmployeeActive"), id: z.string(), version: z.number().int(), active: z.boolean() }),
-  z.object({ action: z.literal("setVehicleActive"), id: z.string(), version: z.number().int(), active: z.boolean() }),
-  z.object({ action: z.literal("setVehicleMaintenance"), id: z.string(), version: z.number().int(), maintenance: z.boolean() }),
+  z.object({ action: z.literal("updateEmployee"), id: idSchema, version: z.number().int().nonnegative(), name: z.string().trim().min(1).max(50), department: z.string().trim().min(1).max(50), nfcUid: nfcUidSchema }),
+  z.object({ action: z.literal("updateVehicle"), id: idSchema, version: z.number().int().nonnegative(), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: nfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().optional(), hasNavigation: z.boolean().optional() }),
+  z.object({ action: z.literal("setEmployeeActive"), id: idSchema, version: z.number().int().nonnegative(), active: z.boolean() }),
+  z.object({ action: z.literal("setVehicleActive"), id: idSchema, version: z.number().int().nonnegative(), active: z.boolean() }),
+  z.object({ action: z.literal("setVehicleMaintenance"), id: idSchema, version: z.number().int().nonnegative(), maintenance: z.boolean() }),
   z.object({ action: z.literal("importEmployees"), items: z.array(employeeImportItemSchema).min(1).max(500) }),
   z.object({ action: z.literal("importVehicles"), items: z.array(vehicleImportItemSchema).min(1).max(500) }),
-  z.object({ action: z.literal("start"), employeeId: z.string(), vehicleId: z.string(), minutes: z.number().int().min(15).max(10_080), ...actorSchema }),
-  z.object({ action: z.literal("reserve"), employeeId: z.string(), vehicleId: z.string(), plannedStart: z.string().datetime(), minutes: z.number().int().min(15).max(10_080), ...actorSchema }),
-  z.object({ action: z.literal("end"), tripId: z.string(), tripVersion: z.number().int(), vehicleId: z.string(), vehicleVersion: z.number().int(), spotId: z.string(), ...actorSchema }),
-  z.object({ action: z.literal("undoReturn"), tripId: z.string(), vehicleId: z.string(), ...actorSchema }),
-  z.object({ action: z.literal("moveTrip"), tripId: z.string(), version: z.number().int(), plannedStart: z.string().datetime(), plannedEnd: z.string().datetime(), ...actorSchema }),
-  z.object({ action: z.literal("adjustTrip"), tripId: z.string(), version: z.number().int(), minutes: z.union([z.literal(-60), z.literal(-30), z.literal(-15), z.literal(15), z.literal(30), z.literal(60), z.literal(180), z.literal(300)]), ...actorSchema }),
-  z.object({ action: z.literal("setTripEnd"), tripId: z.string(), version: z.number().int(), plannedEnd: z.string().datetime(), ...actorSchema }),
-  z.object({ action: z.literal("cancelTrip"), tripId: z.string(), version: z.number().int(), ...actorSchema }),
-  z.object({ action: z.literal("moveVehicle"), vehicleId: z.string(), version: z.number().int(), spotId: z.string(), ...actorSchema }),
+  z.object({ action: z.literal("start"), employeeId: idSchema, vehicleId: idSchema, minutes: z.number().int().min(15).max(10_080), ...actorSchema }),
+  z.object({ action: z.literal("reserve"), employeeId: idSchema, vehicleId: idSchema, plannedStart: z.string().datetime(), minutes: z.number().int().min(15).max(10_080), ...actorSchema }),
+  z.object({ action: z.literal("end"), tripId: idSchema, tripVersion: z.number().int().nonnegative(), vehicleId: idSchema, vehicleVersion: z.number().int().nonnegative(), spotId: idSchema, ...actorSchema }),
+  z.object({ action: z.literal("undoReturn"), tripId: idSchema, vehicleId: idSchema, ...actorSchema }),
+  z.object({ action: z.literal("moveTrip"), tripId: idSchema, version: z.number().int().nonnegative(), plannedStart: z.string().datetime(), plannedEnd: z.string().datetime(), ...actorSchema }),
+  z.object({ action: z.literal("adjustTrip"), tripId: idSchema, version: z.number().int().nonnegative(), minutes: z.union([z.literal(-60), z.literal(-30), z.literal(-15), z.literal(15), z.literal(30), z.literal(60), z.literal(180), z.literal(300)]), ...actorSchema }),
+  z.object({ action: z.literal("setTripEnd"), tripId: idSchema, version: z.number().int().nonnegative(), plannedEnd: z.string().datetime(), ...actorSchema }),
+  z.object({ action: z.literal("cancelTrip"), tripId: idSchema, version: z.number().int().nonnegative(), ...actorSchema }),
+  z.object({ action: z.literal("moveVehicle"), vehicleId: idSchema, version: z.number().int().nonnegative(), spotId: idSchema, ...actorSchema }),
 ]);
 const adminActions = new Set(["createEmployee", "createVehicle", "updateEmployee", "updateVehicle", "setEmployeeActive", "setVehicleActive", "setVehicleMaintenance", "importEmployees", "importVehicles"]);
 
@@ -117,12 +119,13 @@ export async function GET(request: Request) {
     }),
     getBackupStatus(),
   ]);
+  const includeNfc = verifyAdminToken(adminTokenFromRequest(request));
   return NextResponse.json({
-    employees: employees.map(withEmployeeCode),
+    employees: employees.map((employee) => withEmployeeCode(employee, includeNfc)),
     departments,
-    vehicles: vehicles.map(withVehicleCode),
-    spots: spots.map((spot) => ({ ...spot, vehicle: spot.vehicle ? withVehicleCode(spot.vehicle) : null })),
-    trips: trips.map((trip) => ({ ...trip, employee: withEmployeeCode(trip.employee), vehicle: withVehicleCode(trip.vehicle) })),
+    vehicles: vehicles.map((vehicle) => withVehicleCode(vehicle, includeNfc)),
+    spots: spots.map((spot) => ({ ...spot, vehicle: spot.vehicle ? withVehicleCode(spot.vehicle, includeNfc) : null })),
+    trips: trips.map((trip) => ({ ...trip, employee: withEmployeeCode(trip.employee, includeNfc), vehicle: withVehicleCode(trip.vehicle, includeNfc) })),
     system: {
       backupLatestAt: backup.latestAt,
       backupVerifiedAt: backup.verifiedAt,
@@ -134,8 +137,11 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const body = await request.json();
-  const operationIdResult = z.string().uuid().safeParse(body?.operationId);
+  if (!isSameOriginRequest(request)) return NextResponse.json({ message: "許可されていない送信元です" }, { status: 403 });
+  let body: unknown;
+  try { body = await readJsonBody(request); }
+  catch (error) { return NextResponse.json({ message: error instanceof Error && error.message === "REQUEST_TOO_LARGE" ? "入力データが大きすぎます" : "入力内容を確認してください" }, { status: error instanceof Error && error.message === "REQUEST_TOO_LARGE" ? 413 : 400 }); }
+  const operationIdResult = z.string().uuid().safeParse(typeof body === "object" && body !== null && "operationId" in body ? body.operationId : undefined);
   if (!operationIdResult.success) return NextResponse.json({ message: "操作IDを確認できません。画面を更新して再試行してください" }, { status: 400 });
   const operationId = operationIdResult.data;
   const parsed = actionSchema.safeParse(body);
@@ -156,6 +162,12 @@ export async function POST(request: Request) {
     const completed = await prisma.auditLog.findUnique({ where: { operationId }, select: { id: true } });
     if (completed) return NextResponse.json({ ok: true, replayed: true });
     await expireStaleReservations();
+    let auditActor: { actorEmployeeId: string | null; actorName: string } = { actorEmployeeId: null, actorName: "共用端末" };
+    if ("actorEmployeeId" in input && input.actorEmployeeId) {
+      const actor = await prisma.employee.findFirst({ where: { id: input.actorEmployeeId, active: true }, select: { id: true, name: true } });
+      if (!actor) return NextResponse.json({ message: "利用者を確認できません。社員証を再度読み取ってください" }, { status: 400 });
+      auditActor = { actorEmployeeId: actor.id, actorName: actor.name };
+    }
     if (input.action === "createEmployee") {
       await assertNfcAvailable(input.nfcUid);
       await prisma.$transaction(async (tx) => {
@@ -377,7 +389,7 @@ export async function POST(request: Request) {
         } else {
           await tx.trip.create({ data: { employeeId: input.employeeId, vehicleId: input.vehicleId, plannedStart: now, plannedEnd, actualStart: now, status: "IN_USE", purpose: "" } });
         }
-        await tx.auditLog.create({ data: { operationId, actorEmployeeId: input.actorEmployeeId, actorName: input.actorName, action: "利用開始", targetType: "Vehicle", targetId: input.vehicleId, description: reservation ? "予約から利用を開始" : `${input.minutes}分の利用を開始` } });
+        await tx.auditLog.create({ data: { operationId, ...auditActor, action: "利用開始", targetType: "Vehicle", targetId: input.vehicleId, description: reservation ? "予約から利用を開始" : `${input.minutes}分の利用を開始` } });
       });
     }
     if (input.action === "reserve") {
@@ -402,7 +414,7 @@ export async function POST(request: Request) {
         });
         if (conflict) throw new Error(conflict.vehicleId === input.vehicleId ? `${conflict.vehicle.name}は指定時間に利用予定があります` : `${conflict.employee.name}さんは指定時間に別の予定があります`);
         const trip = await tx.trip.create({ data: { employeeId: input.employeeId, vehicleId: input.vehicleId, plannedStart, plannedEnd, status: "RESERVED", purpose: "" } });
-        await tx.auditLog.create({ data: { operationId, actorEmployeeId: input.actorEmployeeId, actorName: input.actorName, action: "予約登録", targetType: "Trip", targetId: trip.id, description: `${input.minutes}分の利用予定を登録` } });
+        await tx.auditLog.create({ data: { operationId, ...auditActor, action: "予約登録", targetType: "Trip", targetId: trip.id, description: `${input.minutes}分の利用予定を登録` } });
       });
     }
     if (input.action === "end") {
@@ -417,7 +429,7 @@ export async function POST(request: Request) {
         const trip = await tx.trip.updateMany({ where: { id: input.tripId, vehicleId: input.vehicleId, version: input.tripVersion, status: "IN_USE" }, data: { status: "COMPLETED", actualEnd: new Date(), returnSpotCode: target.code, version: { increment: 1 } } });
         const vehicle = await tx.vehicle.updateMany({ where: { id: input.vehicleId, version: input.vehicleVersion }, data: { status: "AVAILABLE", parkingSpotId: input.spotId, version: { increment: 1 } } });
         if (trip.count !== 1 || vehicle.count !== 1) throw new Error("CONFLICT");
-        await tx.auditLog.create({ data: { operationId, actorEmployeeId: input.actorEmployeeId, actorName: input.actorName, action: "返却", targetType: "Trip", targetId: input.tripId, description: `区画${target.code}へ返却` } });
+        await tx.auditLog.create({ data: { operationId, ...auditActor, action: "返却", targetType: "Trip", targetId: input.tripId, description: `区画${target.code}へ返却` } });
       });
     }
     if (input.action === "undoReturn") {
@@ -437,7 +449,7 @@ export async function POST(request: Request) {
         const restoredTrip = await tx.trip.updateMany({ where: { id: trip.id, status: "COMPLETED", version: trip.version }, data: { status: "IN_USE", actualEnd: null, returnSpotCode: null, version: { increment: 1 } } });
         const restoredVehicle = await tx.vehicle.updateMany({ where: { id: vehicle.id, status: "AVAILABLE", version: vehicle.version }, data: { status: "IN_USE", parkingSpotId: null, version: { increment: 1 } } });
         if (restoredTrip.count !== 1 || restoredVehicle.count !== 1) throw new Error("CONFLICT");
-        await tx.auditLog.create({ data: { operationId, actorEmployeeId: input.actorEmployeeId, actorName: input.actorName, action: "返却取消", targetType: "Trip", targetId: trip.id, description: `${trip.vehicle.name}の返却を取り消して利用中へ復元` } });
+        await tx.auditLog.create({ data: { operationId, ...auditActor, action: "返却取消", targetType: "Trip", targetId: trip.id, description: `${trip.vehicle.name}の返却を取り消して利用中へ復元` } });
       });
     }
     if (input.action === "moveTrip") {
@@ -457,7 +469,7 @@ export async function POST(request: Request) {
         if (conflict) throw new Error("車両または利用者の予定と重なっています");
         const updated = await tx.trip.updateMany({ where: { id: trip.id, version: input.version, status: "RESERVED" }, data: { plannedStart, plannedEnd, version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
-        await tx.auditLog.create({ data: { operationId, actorEmployeeId: input.actorEmployeeId, actorName: input.actorName, action: "利用時間修正", targetType: "Trip", targetId: trip.id, description: "タイムラインから時間を変更" } });
+        await tx.auditLog.create({ data: { operationId, ...auditActor, action: "利用時間修正", targetType: "Trip", targetId: trip.id, description: "タイムラインから時間を変更" } });
       });
     }
     if (input.action === "adjustTrip") {
@@ -483,7 +495,7 @@ export async function POST(request: Request) {
         const updated = await tx.trip.updateMany({ where: { id: trip.id, version: input.version }, data: { plannedEnd: newEnd, version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
         const direction = input.minutes > 0 ? "延長" : "短縮";
-        await tx.auditLog.create({ data: { operationId, actorEmployeeId: input.actorEmployeeId, actorName: input.actorName, action: `利用時間${direction}`, targetType: "Trip", targetId: trip.id, description: `${Math.abs(input.minutes)}分${direction}` } });
+        await tx.auditLog.create({ data: { operationId, ...auditActor, action: `利用時間${direction}`, targetType: "Trip", targetId: trip.id, description: `${Math.abs(input.minutes)}分${direction}` } });
       });
     }
     if (input.action === "setTripEnd") {
@@ -509,14 +521,14 @@ export async function POST(request: Request) {
         }
         const updated = await tx.trip.updateMany({ where: { id: trip.id, version: input.version, status: trip.status }, data: { plannedEnd: newEnd, version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
-        await tx.auditLog.create({ data: { operationId, actorEmployeeId: input.actorEmployeeId, actorName: input.actorName, action: "利用終了日時変更", targetType: "Trip", targetId: trip.id, description: `${trip.plannedEnd.toISOString()}から${newEnd.toISOString()}へ変更` } });
+        await tx.auditLog.create({ data: { operationId, ...auditActor, action: "利用終了日時変更", targetType: "Trip", targetId: trip.id, description: `${trip.plannedEnd.toISOString()}から${newEnd.toISOString()}へ変更` } });
       });
     }
     if (input.action === "cancelTrip") {
       await prisma.$transaction(async (tx) => {
         const updated = await tx.trip.updateMany({ where: { id: input.tripId, version: input.version, status: "RESERVED" }, data: { status: "CANCELLED", version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("予約済みの予定だけ取り消せます");
-        await tx.auditLog.create({ data: { operationId, actorEmployeeId: input.actorEmployeeId, actorName: input.actorName, action: "予約取消", targetType: "Trip", targetId: input.tripId, description: "タイムラインから予約を取り消し" } });
+        await tx.auditLog.create({ data: { operationId, ...auditActor, action: "予約取消", targetType: "Trip", targetId: input.tripId, description: "タイムラインから予約を取り消し" } });
       });
     }
     if (input.action === "moveVehicle") {
@@ -531,7 +543,7 @@ export async function POST(request: Request) {
         if (target.code === SAKURA_SPOT_CODE && movingVehicle.vehicleNumber.code !== SAKURA_VEHICLE_CODE) throw new Error("区画19はサクラ専用です");
         const updated = await tx.vehicle.updateMany({ where: { id: input.vehicleId, version: input.version }, data: { parkingSpotId: input.spotId, version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
-        await tx.auditLog.create({ data: { operationId, actorEmployeeId: input.actorEmployeeId, actorName: input.actorName, action: "駐車位置修正", targetType: "Vehicle", targetId: input.vehicleId, description: `区画${target.code}へ変更` } });
+        await tx.auditLog.create({ data: { operationId, ...auditActor, action: "駐車位置修正", targetType: "Vehicle", targetId: input.vehicleId, description: `区画${target.code}へ変更` } });
       });
     }
     return NextResponse.json({ ok: true });
@@ -543,8 +555,12 @@ export async function POST(request: Request) {
     }
     const employeeAction = input.action === "createEmployee" || input.action === "updateEmployee" || input.action === "importEmployees";
     const duplicateMessage = employeeAction ? "社員番号またはNFC UIDがすでに登録されています" : "車両番号・ナンバー・NFC UIDのいずれかがすでに登録されています";
-    const message = duplicate ? duplicateMessage : error instanceof Error ? error.message : "更新に失敗しました";
-    return NextResponse.json({ message: message === "CONFLICT" ? "他のユーザーが先に更新しました。最新状態を再読込しました。" : message }, { status: message === "CONFLICT" ? 409 : 400 });
+    const rawMessage = error instanceof Error ? error.message : "";
+    const isConflict = rawMessage === "CONFLICT";
+    const isBusinessMessage = rawMessage.length <= 200 && /[ぁ-んァ-ン一-龯]/.test(rawMessage);
+    if (!duplicate && !isConflict && !isBusinessMessage) console.error("Dashboard action failed", { action: input.action, error });
+    const message = duplicate ? duplicateMessage : isConflict ? "他のユーザーが先に更新しました。最新状態を再読込しました。" : isBusinessMessage ? rawMessage : "更新に失敗しました。再試行しても直らない場合は管理者へ連絡してください";
+    return NextResponse.json({ message }, { status: isConflict ? 409 : 400 });
   } finally {
     activeOperationIds.delete(operationId);
   }

@@ -4,7 +4,8 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Nfc, Pencil, Plus, Power, Printer, RefreshCw, Settings, UserRound, X } from "lucide-react";
 import type { DashboardData, Employee, ParkingSpot, Trip, Vehicle } from "@/lib/types";
-import { normalizeNfcUid, sameNfcUid } from "@/lib/nfc";
+import { normalizeNfcUid } from "@/lib/nfc";
+import { resolveNfcUid } from "@/lib/resolve-nfc";
 import { CUSTOMER_SPOT_CODES, formatSpotLabel, HOLDING_SPOT_CODES, SAKURA_SPOT_CODE, TEMPORARY_SPOT_CODES } from "@/lib/parking-spots";
 import { RESERVATION_GRACE_MINUTES } from "@/lib/reservations";
 import { nfcBridgeStatusText, useNfcBridge, useNfcBridgeHealth } from "@/lib/use-nfc-bridge";
@@ -377,7 +378,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
           </section>}
         </> : null}
 
-        {view === "settingsEmployees" || view === "settingsVehicles" ? <AdminGate>
+        {view === "settingsEmployees" || view === "settingsVehicles" ? <AdminGate onAuthenticated={async () => { await load(true); }} onLogout={async () => { await load(true); }}>
           <div className="space-y-5">
             <PageHeading eyebrow="管理設定" title={view === "settingsEmployees" ? "社員登録" : "車両登録"} description={view === "settingsEmployees" ? "利用者となる社員と社員証のNFCタグを登録します。" : "利用する社用車と車両のNFCタグを登録します。"} />
             <SettingsNavigation view={view} />
@@ -777,11 +778,14 @@ function StartDialog({ employees, vehicles, trips, initialEmployee, initialVehic
   const scheduledValid = startMode === "now" || (effectiveStart > now && plannedEnd > effectiveStart && submissionMinutes >= 15 && submissionMinutes <= 10_080);
   const activeReservation = selectedEmployee ? trips.filter((trip) => trip.status === "RESERVED" && trip.vehicleId === vehicleId && trip.employeeId === selectedEmployee.id && new Date(trip.plannedStart).getTime() <= now.getTime() && new Date(trip.plannedEnd).getTime() > now.getTime()).sort((left, right) => new Date(left.plannedStart).getTime() - new Date(right.plannedStart).getTime())[0] : undefined;
   const activeReservationMinutes = activeReservation ? Math.max(15, Math.ceil((new Date(activeReservation.plannedEnd).getTime() - now.getTime()) / 60_000)) : submissionMinutes;
-  const identifyEmployee = (uid: string) => {
+  const identifyEmployee = async (uid: string) => {
     const normalized = normalizeNfcUid(uid);
-    const person = employees.find((item) => sameNfcUid(item.nfcUid, normalized));
-    if (!person) { setEmployeeId(""); setNfcError("登録されていない社員タグです"); return; }
-    setEmployeeId(person.id); setNfcUid(person.nfcUid); setNfcError(""); setEmployeeScanEnabled(false); setEmployeeScanTimedOut(false);
+    try {
+      const result = await resolveNfcUid(normalized);
+      const person = result?.kind === "employee" ? employees.find((item) => item.id === result.id) : undefined;
+      if (!person) { setEmployeeId(""); setNfcError("登録されていない社員タグです"); return; }
+      setEmployeeId(person.id); setNfcUid(normalized); setNfcError(""); setEmployeeScanEnabled(false); setEmployeeScanTimedOut(false);
+    } catch { setEmployeeId(""); setNfcError("NFCタグを確認できませんでした。接続状態を確認してください"); }
   };
   const bridgeStatus = useNfcBridge(!selectedEmployee && employeeScanEnabled, identifyEmployee);
   useNfcScanTimeout(!selectedEmployee && employeeScanEnabled, () => {
@@ -833,14 +837,17 @@ function ParkingReturnDialog({ spot, trips: allTrips, vehicles, submitting, onCl
   const [fallbackNotice, setFallbackNotice] = useState("");
   const trips = isSakuraSpot(spot) ? allTrips.filter((trip) => trip.vehicle.code === SAKURA_VEHICLE_CODE) : allTrips;
   const selected = trips.find((trip) => trip.id === tripId);
-  const bridgeStatus = useNfcBridge(method === "nfc", (uid) => {
-    const vehicle = vehicles.find((item) => sameNfcUid(item.nfcUid, uid));
-    if (!vehicle) { setTripId(""); setNfcError("登録されていない車両タグです"); return; }
-    const activeTrip = allTrips.find((item) => item.vehicleId === vehicle.id);
-    if (!activeTrip) { setTripId(""); setNfcError(`${vehicle.name}は現在利用中ではありません`); return; }
-    const trip = trips.find((item) => item.id === activeTrip.id);
-    if (!trip) { setTripId(""); setNfcError(`${vehicle.name}は${formatSpotLabel(spot.code)}へ返却できません`); return; }
-    setTripId(trip.id); setNfcError("");
+  const bridgeStatus = useNfcBridge(method === "nfc", async (uid) => {
+    try {
+      const result = await resolveNfcUid(uid);
+      const vehicle = result?.kind === "vehicle" ? vehicles.find((item) => item.id === result.id) : undefined;
+      if (!vehicle) { setTripId(""); setNfcError("登録されていない車両タグです"); return; }
+      const activeTrip = allTrips.find((item) => item.vehicleId === vehicle.id);
+      if (!activeTrip) { setTripId(""); setNfcError(`${vehicle.name}は現在利用中ではありません`); return; }
+      const trip = trips.find((item) => item.id === activeTrip.id);
+      if (!trip) { setTripId(""); setNfcError(`${vehicle.name}は${formatSpotLabel(spot.code)}へ返却できません`); return; }
+      setTripId(trip.id); setNfcError("");
+    } catch { setTripId(""); setNfcError("NFCタグを確認できませんでした。接続状態を確認してください"); }
   });
   useEffect(() => {
     if (method !== "nfc" || (bridgeStatus !== "offline" && bridgeStatus !== "no-reader")) return;
@@ -854,7 +861,7 @@ function ParkingReturnDialog({ spot, trips: allTrips, vehicles, submitting, onCl
   const switchMethod = (next: "manual" | "nfc") => { setMethod(next); setFallbackNotice(""); setNfcError(""); setTripId(""); };
   return <DialogShell busy={submitting} title={`${formatSpotLabel(spot.code)} へ返却`} subtitle={CUSTOMER_SPOT_CODES.has(spot.code) ? "お客様用区画ですが、社用車も返却できます" : HOLDING_SPOT_CODES.has(spot.code) ? "実在する駐車区画ではありません。駐車場所を確定できない場合だけ使用してください" : TEMPORARY_SPOT_CODES.has(spot.code) ? "通常区画ではありませんが、一時的な返却先として利用できます" : "車両タグを読み取り、返却内容を確認してください"} onClose={onClose}><div className="space-y-4">
     <OperationProgress labels={["返却先", "車両読取", "内容確定"]} current={selected ? 3 : 2} />
-    {trips.length === 0 ? <Empty label="現在利用中の車両はありません" /> : method === "manual" ? <div className="space-y-3">{fallbackNotice ? <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-800">{fallbackNotice}</p> : null}<Label text="返却する車両"><select className={field} value={tripId} onChange={(event) => setTripId(event.target.value)}><option value="">車両を選択してください</option>{trips.map((trip) => <option key={trip.id} value={trip.id}>{trip.vehicle.name}　{trip.vehicle.plateNumber}（{trip.employee.name}）</option>)}</select></Label><button type="button" onClick={() => switchMethod("nfc")} className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-blue-700 hover:bg-blue-100"><Nfc className="size-4" />NFC読取を再試行</button></div> : <div className={cn("rounded-2xl border p-4 transition", selected ? "border-emerald-300 bg-emerald-50" : "border-blue-200 bg-blue-50")}><div className="text-center"><span className={cn("mx-auto grid size-14 place-items-center rounded-full", selected ? "bg-emerald-600 text-white" : "bg-white text-blue-600")} >{selected ? <Check className="size-7" /> : <Nfc className="size-8 animate-pulse" />}</span><p className={cn("mt-3 text-sm font-black", selected ? "text-emerald-800" : "text-blue-800")}>{selected ? "車両を読み取りました" : "車両のNFCタグをかざしてください"}</p><p className={cn("text-[11px]", bridgeStatus === "ready" ? "font-bold text-emerald-700" : "text-blue-500")}>{nfcBridgeStatusText(bridgeStatus)}</p>{nfcError ? <p role="alert" className="mt-3 rounded-xl bg-white p-3 text-xs font-bold text-rose-600">{nfcError}</p> : null}</div>{process.env.NODE_ENV === "development" && !selected ? <div className="mt-4 grid gap-2 sm:grid-cols-2">{trips.map((trip) => <button type="button" key={trip.id} onClick={() => { setTripId(trip.id); setNfcError(""); }} className="rounded-xl border border-blue-100 bg-white p-3 text-left text-xs transition hover:border-blue-300"><b className="block">{trip.vehicle.nfcUid}</b><span className="text-slate-500">{trip.vehicle.name} ・ {trip.employee.name}</span></button>)}</div> : null}{!selected ? <button type="button" onClick={() => switchMethod("manual")} className="mt-4 min-h-9 w-full text-xs font-bold text-slate-500 underline decoration-slate-300 underline-offset-4">NFCを使わず手動で選択</button> : null}</div>}
+    {trips.length === 0 ? <Empty label="現在利用中の車両はありません" /> : method === "manual" ? <div className="space-y-3">{fallbackNotice ? <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-800">{fallbackNotice}</p> : null}<Label text="返却する車両"><select className={field} value={tripId} onChange={(event) => setTripId(event.target.value)}><option value="">車両を選択してください</option>{trips.map((trip) => <option key={trip.id} value={trip.id}>{trip.vehicle.name}　{trip.vehicle.plateNumber}（{trip.employee.name}）</option>)}</select></Label><button type="button" onClick={() => switchMethod("nfc")} className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-blue-700 hover:bg-blue-100"><Nfc className="size-4" />NFC読取を再試行</button></div> : <div className={cn("rounded-2xl border p-4 transition", selected ? "border-emerald-300 bg-emerald-50" : "border-blue-200 bg-blue-50")}><div className="text-center"><span className={cn("mx-auto grid size-14 place-items-center rounded-full", selected ? "bg-emerald-600 text-white" : "bg-white text-blue-600")} >{selected ? <Check className="size-7" /> : <Nfc className="size-8 animate-pulse" />}</span><p className={cn("mt-3 text-sm font-black", selected ? "text-emerald-800" : "text-blue-800")}>{selected ? "車両を読み取りました" : "車両のNFCタグをかざしてください"}</p><p className={cn("text-[11px]", bridgeStatus === "ready" ? "font-bold text-emerald-700" : "text-blue-500")}>{nfcBridgeStatusText(bridgeStatus)}</p>{nfcError ? <p role="alert" className="mt-3 rounded-xl bg-white p-3 text-xs font-bold text-rose-600">{nfcError}</p> : null}</div>{process.env.NODE_ENV === "development" && !selected ? <div className="mt-4 grid gap-2 sm:grid-cols-2">{trips.map((trip) => <button type="button" key={trip.id} onClick={() => { setTripId(trip.id); setNfcError(""); }} className="rounded-xl border border-blue-100 bg-white p-3 text-left text-xs transition hover:border-blue-300"><b className="block">{trip.vehicle.name}</b><span className="text-slate-500">{trip.employee.name}</span></button>)}</div> : null}{!selected ? <button type="button" onClick={() => switchMethod("manual")} className="mt-4 min-h-9 w-full text-xs font-bold text-slate-500 underline decoration-slate-300 underline-offset-4">NFCを使わず手動で選択</button> : null}</div>}
     {selected ? <div className="rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm"><div className="flex items-start gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-xl bg-emerald-100 text-emerald-700"><CarFront className="size-6" /></span><div className="min-w-0 flex-1"><p className="text-[11px] font-bold text-emerald-700">返却内容を確認</p><p className="truncate text-base font-black">{selected.vehicle.name} <span className="text-slate-400">・ {formatPlateShort(selected.vehicle.plateNumber)}</span></p><p className="mt-1 text-xs text-slate-600">返却先：<b>{formatSpotLabel(spot.code)}</b>　利用者：{selected.employee.name}</p></div><button type="button" onClick={() => setTripId("")} className="shrink-0 text-xs font-bold text-slate-500">選び直す</button></div></div> : null}
     <Button className="w-full bg-emerald-600 hover:bg-emerald-700" disabled={!selected || submitting} onClick={() => selected && onSubmit(selected)}>{submitting ? <LoaderCircle className="size-4 animate-spin" /> : <Check className="size-4" />}{submitting ? "返却登録中…" : "返却を完了して利用可能にする"}</Button>
     <p className="text-center text-[11px] text-slate-400">確認ボタンを押すまで返却は確定しません。</p>
@@ -876,17 +883,20 @@ function NfcDialog({ employees, vehicles, onEmployee, onVehicle, onClose }: { em
   const [error, setError] = useState("");
   const [scanEnabled, setScanEnabled] = useState(true);
   const [scanTimedOut, setScanTimedOut] = useState(false);
-  const bridgeStatus = useNfcBridge(scanEnabled, (uid) => {
-    const person = employees.find((item) => sameNfcUid(item.nfcUid, uid));
-    if (person) { setScanEnabled(false); setScanTimedOut(false); onEmployee(person); return; }
-    const vehicle = vehicles.find((item) => sameNfcUid(item.nfcUid, uid));
-    if (vehicle) { setScanEnabled(false); setScanTimedOut(false); onVehicle(vehicle); return; }
-    setError("登録されていないNFCタグです");
+  const bridgeStatus = useNfcBridge(scanEnabled, async (uid) => {
+    try {
+      const result = await resolveNfcUid(uid);
+      const person = result?.kind === "employee" ? employees.find((item) => item.id === result.id) : undefined;
+      if (person) { setScanEnabled(false); setScanTimedOut(false); onEmployee(person); return; }
+      const vehicle = result?.kind === "vehicle" ? vehicles.find((item) => item.id === result.id) : undefined;
+      if (vehicle) { setScanEnabled(false); setScanTimedOut(false); onVehicle(vehicle); return; }
+      setError("登録されていないNFCタグです");
+    } catch { setError("NFCタグを確認できませんでした。接続状態を確認してください"); }
   });
   useNfcScanTimeout(scanEnabled, () => {
     setScanEnabled(false);
     setScanTimedOut(true);
   });
-  return <DialogShell title="NFCタグを読み取る" subtitle={development ? "専用連携ソフトからの読み取りを待機しています。開発用タグでも確認できます。" : "専用連携ソフトからの読み取りを待機しています。"} onClose={onClose}><div className="text-center"><div className={cn("mx-auto mb-5 grid size-24 place-items-center rounded-full", scanTimedOut ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-600")}><Nfc className={cn("size-12", scanEnabled && "animate-pulse")} /></div><p className="text-sm font-bold">{scanTimedOut ? "タグを読み取れませんでした" : "タグをリーダーにかざしてください"}</p><p role="status" aria-live="polite" className={cn("mb-4 mt-1 text-[11px]", scanTimedOut ? "font-bold text-amber-700" : bridgeStatus === "ready" ? "font-bold text-emerald-700" : "text-slate-500")}>{scanTimedOut ? "15秒以内に読み取れませんでした。再試行するか、画面を閉じて手動操作してください。" : nfcBridgeStatusText(bridgeStatus)}</p>{error ? <p role="alert" className="mb-4 rounded-xl bg-rose-50 p-3 text-xs font-bold text-rose-700">{error}</p> : null}{scanTimedOut ? <button type="button" onClick={() => { setScanEnabled(true); setScanTimedOut(false); setError(""); }} className="mb-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-amber-600 px-4 text-sm font-bold text-white hover:bg-amber-700"><Nfc className="size-4" />NFC読取を再試行</button> : null}{development ? <div className="grid grid-cols-2 gap-3 text-left"><div><p className="mb-2 text-xs font-bold text-slate-400">社員タグ（開発用）</p>{employees.slice(0, 3).map((p) => <button key={p.id} onClick={() => onEmployee(p)} className="mb-2 w-full rounded-xl border border-slate-200 p-3 text-xs font-bold hover:bg-slate-50">{p.nfcUid}<small className="block font-normal text-slate-400">{p.name}</small></button>)}</div><div><p className="mb-2 text-xs font-bold text-slate-400">車両タグ（開発用）</p>{vehicles.slice(0, 3).map((v) => <button key={v.id} onClick={() => onVehicle(v)} className="mb-2 w-full rounded-xl border border-slate-200 p-3 text-xs font-bold hover:bg-slate-50">{v.nfcUid}<small className="block font-normal text-slate-400">{v.name}</small></button>)}</div></div> : null}</div></DialogShell>;
+  return <DialogShell title="NFCタグを読み取る" subtitle={development ? "専用連携ソフトからの読み取りを待機しています。開発用選択でも確認できます。" : "専用連携ソフトからの読み取りを待機しています。"} onClose={onClose}><div className="text-center"><div className={cn("mx-auto mb-5 grid size-24 place-items-center rounded-full", scanTimedOut ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-600")}><Nfc className={cn("size-12", scanEnabled && "animate-pulse")} /></div><p className="text-sm font-bold">{scanTimedOut ? "タグを読み取れませんでした" : "タグをリーダーにかざしてください"}</p><p role="status" aria-live="polite" className={cn("mb-4 mt-1 text-[11px]", scanTimedOut ? "font-bold text-amber-700" : bridgeStatus === "ready" ? "font-bold text-emerald-700" : "text-slate-500")}>{scanTimedOut ? "15秒以内に読み取れませんでした。再試行するか、画面を閉じて手動操作してください。" : nfcBridgeStatusText(bridgeStatus)}</p>{error ? <p role="alert" className="mb-4 rounded-xl bg-rose-50 p-3 text-xs font-bold text-rose-700">{error}</p> : null}{scanTimedOut ? <button type="button" onClick={() => { setScanEnabled(true); setScanTimedOut(false); setError(""); }} className="mb-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-amber-600 px-4 text-sm font-bold text-white hover:bg-amber-700"><Nfc className="size-4" />NFC読取を再試行</button> : null}{development ? <div className="grid grid-cols-2 gap-3 text-left"><div><p className="mb-2 text-xs font-bold text-slate-400">社員（開発用）</p>{employees.slice(0, 3).map((p) => <button key={p.id} onClick={() => onEmployee(p)} className="mb-2 w-full rounded-xl border border-slate-200 p-3 text-xs font-bold hover:bg-slate-50">{p.name}<small className="block font-normal text-slate-400">{p.code}</small></button>)}</div><div><p className="mb-2 text-xs font-bold text-slate-400">車両（開発用）</p>{vehicles.slice(0, 3).map((v) => <button key={v.id} onClick={() => onVehicle(v)} className="mb-2 w-full rounded-xl border border-slate-200 p-3 text-xs font-bold hover:bg-slate-50">{v.name}<small className="block font-normal text-slate-400">{v.code}</small></button>)}</div></div> : null}</div></DialogShell>;
 }
 function Label({ text, children }: { text: string; children: React.ReactNode }) { return <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-600">{text}</span>{children}</label>; }

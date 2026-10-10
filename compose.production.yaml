@@ -19,6 +19,7 @@ services:
       FLEETFLOW_APP_VERSION: ${FLEETFLOW_APP_VERSION:-0.1.0}
       FLEETFLOW_DEPLOYED_AT: ${FLEETFLOW_DEPLOYED_AT:-unknown}
       FLEETFLOW_COOKIE_SECURE: ${FLEETFLOW_COOKIE_SECURE:-false}
+      FLEETFLOW_TRUST_PROXY: ${FLEETFLOW_TRUST_PROXY:-false}
     ports:
       - "${FLEETFLOW_BIND_ADDRESS:-127.0.0.1}:${FLEETFLOW_PORT:-3035}:3000"
     volumes:
@@ -33,6 +34,11 @@ services:
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
     mem_limit: 1g
     cpus: 1.0
     logging: *default-logging
@@ -60,6 +66,8 @@ services:
     restart: "no"
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
     mem_limit: 1g
     cpus: 1.0
     logging: *default-logging

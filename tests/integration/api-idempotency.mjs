@@ -58,8 +58,10 @@ try {
   assert.equal(replayedStart.status, 200, JSON.stringify(replayedStart.body));
   const started = await client.query('SELECT id,version FROM "Trip" WHERE "vehicleId"=$1 AND status=\'IN_USE\'', [ids.vehicle]);
   assert.equal(started.rowCount, 1, "同一操作の同時送信でTripが重複しています");
-  const startLogs = await client.query('SELECT id FROM "AuditLog" WHERE "operationId"=$1', [startOperationId]);
+  const startLogs = await client.query('SELECT id,"actorName","actorEmployeeId" FROM "AuditLog" WHERE "operationId"=$1', [startOperationId]);
   assert.equal(startLogs.rowCount, 1, "同一操作の監査ログが重複しています");
+  assert.equal(startLogs.rows[0].actorName, `テスト社員${suffix}`, "監査ログの利用者名がサーバー側の社員情報と一致しません");
+  assert.equal(startLogs.rows[0].actorEmployeeId, ids.employee, "監査ログの社員IDが一致しません");
 
   const vehicle = await client.query('SELECT version FROM "Vehicle" WHERE id=$1', [ids.vehicle]);
   const endOperationId = crypto.randomUUID(); operationIds.push(endOperationId);
@@ -91,6 +93,10 @@ try {
   assert.equal(cancelledReservation.rows[0].status, "CANCELLED");
 
   const adminCookie = await authenticateAdmin();
+  const unauthenticatedOperations = await fetch(`${appUrl}/api/operations`);
+  assert.equal(unauthenticatedOperations.status, 401, "未認証で操作履歴を取得できてしまいます");
+  const authenticatedOperations = await fetch(`${appUrl}/api/operations`, { headers: { Cookie: adminCookie } });
+  assert.equal(authenticatedOperations.status, 200, await authenticatedOperations.text());
   const beforeMaintenance = await client.query('SELECT version FROM "Vehicle" WHERE id=$1', [ids.vehicle]);
   const maintenanceOperationId = crypto.randomUUID(); operationIds.push(maintenanceOperationId);
   const maintenance = await postAdmin({ operationId: maintenanceOperationId, action: "setVehicleMaintenance", id: ids.vehicle, version: beforeMaintenance.rows[0].version, maintenance: true }, adminCookie);
