@@ -248,7 +248,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
   return <>
     <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs text-slate-500 shadow-sm">
       <span><b className="text-slate-800">FleetFlow {data.system.appVersion}</b> ・ {data.system.environment === "production" ? "本番環境" : "開発環境"}</span>
-      <span>更新 {data.system.deployedAt ? new Date(data.system.deployedAt).toLocaleString("ja-JP") : "未確認"} ・ バックアップ確認 {data.system.backupVerifiedAt ? new Date(data.system.backupVerifiedAt).toLocaleString("ja-JP") : "未確認"}</span>
+      <span>DB {data.system.schemaVersion} ・ 更新 {data.system.deployedAt ? new Date(data.system.deployedAt).toLocaleString("ja-JP") : "未確認"} ・ バックアップ確認 {data.system.backupVerifiedAt ? new Date(data.system.backupVerifiedAt).toLocaleString("ja-JP") : "未確認"}</span>
     </div>
     <Card className="overflow-hidden">
       <div className="flex flex-col gap-3 border-b border-slate-100 p-4 lg:flex-row lg:items-center">

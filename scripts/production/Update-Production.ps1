@@ -34,6 +34,9 @@ try {
   if (-not (Test-Path -LiteralPath $environmentPath)) { throw $messages.productionConfigMissing }
   Write-UpdateLog "Started."
 
+  & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $projectPath "scripts\production\Test-ProductionPreflight.ps1") -ProjectDirectory $projectPath -NoUi
+  if ($LASTEXITCODE -ne 0) { throw "Pre-update checks failed." }
+
   & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $projectPath "scripts\database\Backup-Now.ps1") -Production
   if ($LASTEXITCODE -ne 0) { throw "Pre-update backup failed." }
 
@@ -47,6 +50,7 @@ try {
   }
 
   Invoke-Docker ($composeArguments + @("build", "app", "migrate"))
+  Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "migrate", "npm", "audit", "--audit-level=high"))
   Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "migrate", "npm", "run", "lint"))
   Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "migrate", "sh", "scripts/production/prepare-db.sh"))
   $previousEnvironment = [System.IO.File]::ReadAllText($environmentPath, [System.Text.Encoding]::UTF8)
@@ -66,6 +70,7 @@ try {
   if (-not $ready) { throw "Updated application did not become healthy." }
   Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "-e", "APP_URL=http://app:3000", "migrate", "npm", "run", "test:integration"))
   Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "-e", "APP_URL=http://app:3000", "migrate", "npm", "run", "test:integration:optional-nfc"))
+  Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "-e", "APP_URL=http://app:3000", "migrate", "npm", "run", "test:integration:operations"))
   Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "migrate", "npm", "run", "test:security"))
   & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $projectPath "scripts\production\Test-ProductionHealth.ps1") -ProjectDirectory $projectPath -NoUi
   if ($LASTEXITCODE -ne 0) { throw "Post-update production health check failed." }

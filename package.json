@@ -9,6 +9,7 @@
     "lint": "tsc --noEmit",
     "test:integration": "node tests/integration/api-idempotency.mjs",
     "test:integration:optional-nfc": "node tests/integration/optional-nfc-import.mjs",
+    "test:integration:operations": "node tests/integration/operations-export.mjs",
     "test:security": "tsx tests/request-security.test.ts",
     "db:migrate:employee-numbers": "node scripts/migrations/migrate-employee-numbers.mjs",
     "db:migrate:employee-normalization": "node scripts/migrations/migrate-employee-normalization.mjs",

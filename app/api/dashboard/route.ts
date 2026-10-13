@@ -6,6 +6,7 @@ import { RESERVATION_GRACE_MINUTES } from "@/lib/reservations";
 import { adminTokenFromRequest, verifyAdminToken } from "@/lib/admin-auth";
 import { getBackupStatus } from "@/lib/backup-status";
 import { isSameOriginRequest, readJsonBody } from "@/lib/request-security";
+import { getApplicationSystemStatus } from "@/lib/system-status";
 
 export const dynamic = "force-dynamic";
 const SAKURA_SPOT_CODE = "19";
@@ -103,7 +104,7 @@ export async function GET(request: Request) {
   const requestedDays = Number(url.searchParams.get("days"));
   const days = requestedDays === 1 || requestedDays === 3 ? requestedDays : 3;
   const dayEnd = new Date(dayStart.getTime() + days * 24 * 60 * 60_000);
-  const [employees, departments, vehicles, spots, trips, backup] = await Promise.all([
+  const [employees, departments, vehicles, spots, trips, backup, system] = await Promise.all([
     prisma.employee.findMany({ include: { employeeNumber: true, department: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } }, orderBy: { employeeNumber: { code: "asc" } } }),
     prisma.department.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
     prisma.vehicle.findMany({ include: { vehicleNumber: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } }, orderBy: { vehicleNumber: { code: "asc" } } }),
@@ -118,6 +119,7 @@ export async function GET(request: Request) {
       include: { employee: { include: { employeeNumber: true, department: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } } }, vehicle: { include: { vehicleNumber: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } } } }, orderBy: { plannedStart: "asc" },
     }),
     getBackupStatus(),
+    getApplicationSystemStatus(),
   ]);
   const includeNfc = verifyAdminToken(adminTokenFromRequest(request));
   return NextResponse.json({
@@ -129,9 +131,7 @@ export async function GET(request: Request) {
     system: {
       backupLatestAt: backup.latestAt,
       backupVerifiedAt: backup.verifiedAt,
-      appVersion: process.env.FLEETFLOW_APP_VERSION || "development",
-      environment: process.env.NODE_ENV || "development",
-      deployedAt: process.env.FLEETFLOW_DEPLOYED_AT || null,
+      ...system,
     },
   });
 }

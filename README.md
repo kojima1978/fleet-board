@@ -82,11 +82,14 @@ git pull origin main
 # 詳細な健全性確認
 & '.\FleetFlow Production Health Check.cmd'
 
+# 起動前の設定・Docker・容量確認
+& '.\FleetFlow Production Preflight.cmd'
+
 # 停止（DBとバックアップは残ります）
 & '.\FleetFlow Production Stop.cmd'
 ```
 
-本番の通常起動は、最後に検証済みのイメージを再利用します。ソースをpullしただけでは本番へ反映されません。変更を反映するときだけ`FleetFlow Production Update.cmd`を実行してください。
+本番の通常起動は、最後に検証済みのイメージを再利用します。ソースをpullしただけでは本番へ反映されません。変更を反映するときだけ`FleetFlow Production Update.cmd`を実行してください。起動と更新の前には、Docker構成、秘密情報、公開アドレス、ポート、ディスク空きを自動点検します。NFC未接続や容量低下などは注意表示に留め、設定欠落など安全に起動できない場合だけ停止します。
 
 ## 開発環境
 
@@ -273,6 +276,22 @@ powershell -ExecutionPolicy Bypass -File .\scripts\database\Restore-Backup.ps1 `
 
 PC故障に備える場合は`FleetFlow Production Backup Setup.cmd`を実行し、NAS、USB、OneDriveなどの同期フォルダーへ毎日複製してください。複製にはSHA-256検証が付き、保存先では新しい30ファイルを保持します。
 
+### 新しいPCへ本番データを移す
+
+古いPCで次を実行し、USBやNASなどを保存先に指定します。
+
+```powershell
+& '.\FleetFlow Production Migration Export.cmd'
+```
+
+新しいPCではリポジトリをcloneし、`FleetFlow Production Start.cmd`を一度実行してから次を実行します。
+
+```powershell
+& '.\FleetFlow Production Migration Import.cmd'
+```
+
+移行パッケージにはDBバックアップ、SHA-256、作成日時、Gitコミットを保存します。管理者PINやDBパスワードは移さず、新PC側で安全に再生成します。取込時は破損検査と復元検証を行い、最後に`RESTORE`と入力した場合だけ本番DBを置き換えます。
+
 ## 社内LANで本番公開する場合
 
 初期設定では安全のため`127.0.0.1`だけへ公開され、同じPCからしか接続できません。LAN公開時は次をすべて実施してください。
@@ -302,12 +321,17 @@ docker compose exec app npm run test:integration
 # NFC UIDを省略したJSON取込
 docker compose exec app npm run test:integration:optional-nfc
 
+# 履歴検索・状態表示・CSV出力
+docker compose exec app npm run test:integration:operations
+
 # Origin・プロキシ判定
 docker compose exec app npm run test:security
 
 # 依存関係
 docker compose exec app npm audit
 ```
+
+`FleetFlow Production Update.cmd`でも`npm audit --audit-level=high`を自動実行します。HighまたはCriticalが見つかった場合は本番切替を中止します。Moderate以下は更新を妨げず、個別に確認できます。
 
 本番更新を画面表示なしで検査する場合：
 
@@ -356,6 +380,10 @@ docker compose restart app
 ### データ更新が競合した
 
 別の端末で先に変更されています。最新状態を読み直し、内容を確認してからもう一度操作してください。
+
+### 履歴を絞り込み・保存したい
+
+「履歴」画面では、利用者・内容のキーワード、操作種別、開始日、終了日で絞り込めます。「CSV」を押すと現在の検索条件に一致する履歴を最大10,000件まで保存します。同じ画面でアプリ、DB、NFC、バックアップの状態と、アプリ・DBバージョンを確認できます。
 
 ### 本番障害の情報を保存したい
 

@@ -133,6 +133,8 @@ try {
   }
 
   if ($Production) {
+    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectDirectory "scripts\production\Test-ProductionPreflight.ps1") -ProjectDirectory $ProjectDirectory -NoUi
+    if ($LASTEXITCODE -ne 0) { throw "PRODUCTION_PREFLIGHT_FAILED" }
     $null = Invoke-Docker @("compose", "--project-directory", $ProjectDirectory, "stop")
   }
   else {
