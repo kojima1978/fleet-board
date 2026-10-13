@@ -161,6 +161,8 @@ Windowsログイン時に自動起動します。接続確認はブラウザー�
 
 通常は `FleetFlow Start.cmd` をダブルクリックするだけで起動できます。NFC BridgeだけはWindowsログイン時にも自動起動します。
 
+開発用Dockerは初回起動時にDBが空かどうかを判定します。空の場合はPrismaで現行スキーマを作成してから既存DB向けの補助マイグレーションを実行し、既存DBの場合は旧データを移行してから現行スキーマへ同期します。そのため、空のDockerボリュームでも`AuditLog`未作成エラーになりません。開発用のアプリとDBポートは初期状態で`127.0.0.1`だけへ公開され、社内LANへは公開されません。
+
 ファイル名の`FleetFlow`と`Start`の間には半角スペースがあります。PowerShellから起動する場合は `& '.\FleetFlow Start.cmd'` のように引用符で囲んでください。
 
 正常時は起動通知を表示しません。NFCだけ使用できない場合は「注意」として手動操作が可能なことと対処方法を表示します。DockerまたはFleetFlow本体を起動できない場合は「起動エラー」として原因と対処方法を日本語で表示し、Dockerの詳細エラーを`nfc-bridge\fleetflow-start.log`へ記録します。
@@ -317,5 +319,13 @@ docker compose restart app
 4. リバースプロキシが接続元ヘッダーを上書きする信頼済み構成の場合だけ`FLEETFLOW_TRUST_PROXY=true`にする。直接公開時は`false`のままにする。
 5. バックアップ先にはBitLocker対応ドライブ、アクセス制限済みNASなど暗号化・権限制御された保存先を使用する。
 6. インターネットや来客用Wi-Fiからは到達できないことを別端末で確認する。
+
+NFCを利用する各Windows端末では、その端末のNFC BridgeをLAN用URLのOrigin付きで再設定します。例えばFleetFlowを`http://192.168.1.20:3035`で開く場合は、NFC Bridgeのフォルダーで次を実行します。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\nfc-bridge\install.ps1 -AllowedOrigins "http://192.168.1.20:3035;http://localhost:3035"
+```
+
+HTTPS化した場合は`https://`のOriginを指定してください。Originにはパスを含めません。NFC Bridgeはブラウザーを開く各PCの`127.0.0.1:17831`で動作するため、サーバーPCだけでなくNFCを使う端末ごとにインストール・起動が必要です。
 
 アプリはフレーム埋め込み禁止、MIME推測禁止、権限制限、CSPなどのHTTPセキュリティヘッダーを返します。Dockerのアプリコンテナーは非root・読み取り専用ファイルシステム・Linux capability全削除で実行します。LAN公開前後に`FleetFlow Production Health Check.cmd`とDocker内の`npm audit`を実行してください。インターネットへ直接公開しないでください。

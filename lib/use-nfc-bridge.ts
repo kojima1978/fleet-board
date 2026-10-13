@@ -99,7 +99,7 @@ export function useNfcBridgeHealth(enabled = true) {
 export function nfcBridgeStatusText(status: NfcBridgeStatus) {
   if (status === "ready") return "NFCリーダー接続済み";
   if (status === "no-reader") return "連携ソフトは起動中です。リーダーを接続してください";
-  if (status === "offline") return "NFC連携ソフトを起動してください（手入力も可能です）";
+  if (status === "offline") return "このPCで「FleetFlow NFC Start」を起動してください（手動選択も可能です）";
   if (status === "connecting") return "NFC連携ソフトへ接続中…";
   return "";
 }

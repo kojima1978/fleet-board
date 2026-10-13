@@ -44,7 +44,14 @@ export function isSameOriginRequest(request: Request) {
   try {
     const requestUrl = new URL(request.url);
     const originUrl = new URL(origin);
-    return originUrl.protocol === requestUrl.protocol && originUrl.host === requestUrl.host;
+    const trustedProxy = process.env.FLEETFLOW_TRUST_PROXY === "true";
+    const forwardedProtocol = trustedProxy ? request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() : null;
+    const forwardedHost = trustedProxy ? request.headers.get("x-forwarded-host")?.split(",")[0]?.trim() : null;
+    const protocol = forwardedProtocol || requestUrl.protocol.replace(":", "");
+    const host = forwardedHost || request.headers.get("host")?.trim() || requestUrl.host;
+    if (protocol !== "http" && protocol !== "https") return false;
+    const visibleOrigin = new URL(`${protocol}://${host}`).origin;
+    return originUrl.origin === visibleOrigin;
   } catch {
     return false;
   }

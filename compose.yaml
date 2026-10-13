@@ -3,14 +3,14 @@ services:
     build:
       context: .
       target: development
-    command: sh -c "npm run db:migrate:employee-numbers && npm run db:migrate:vehicle-numbers && npm run db:migrate:nfc-uids && npm run db:migrate:employee-normalization && npm run db:migrate:unified-nfc && npm run db:migrate:operation-ids && npm run db:generate && npm run db:push && npm run db:migrate:employee-numbers && npm run db:migrate:vehicle-numbers && npm run db:migrate:employee-normalization && npm run db:migrate:unified-nfc && npm run db:migrate:nfc-uids && npm run db:migrate:operation-ids && npm run db:seed && npm run dev"
+    command: sh -c "sh scripts/development/prepare-db.sh && npm run dev"
     environment:
       DATABASE_URL: postgresql://fleet:fleet@db:5432/fleet?schema=public
       WATCHPACK_POLLING: "true"
       FLEETFLOW_ADMIN_PIN: ${FLEETFLOW_ADMIN_PIN:-2468}
       FLEETFLOW_SESSION_SECRET: ${FLEETFLOW_SESSION_SECRET:-fleetflow-local-development-secret}
     ports:
-      - "3035:3000"
+      - "${FLEETFLOW_DEV_BIND_ADDRESS:-127.0.0.1}:3035:3000"
     volumes:
       - .:/app
       - node_modules:/app/node_modules
@@ -35,7 +35,7 @@ services:
       POSTGRES_USER: fleet
       POSTGRES_PASSWORD: fleet
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backups:/backups
