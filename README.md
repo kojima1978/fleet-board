@@ -1,27 +1,109 @@
 # FleetFlow
 
-NFCタグで社員と車両を識別し、社用車の予約・利用開始・返却、タイムライン、駐車位置を一画面で管理する社内向けWebアプリです。
+FleetFlowは、社用車の駐車位置、予約、利用開始、返却、利用履歴を一元管理する社内向けWebアプリです。社員証と車両のNFCタグを使った操作にも対応します。
+
+## 最初に読むところ
+
+このプロジェクトはDockerで動かします。通常運用には**本番環境**、開発・動作確認には**開発環境**を使用してください。
+
+| 用途 | 使用するファイル | データ |
+| --- | --- | --- |
+| 日常の業務運用 | `FleetFlow Production Start.cmd` | 本番DB |
+| 本番へ最新版を反映 | `FleetFlow Production Update.cmd` | 本番DBを保持 |
+| 開発・画面確認 | `FleetFlow Start.cmd` | 開発DB |
+
+本番環境と開発環境は別のDBを使用します。同時には起動せず、起動用ファイルが反対側のコンテナーを自動停止します。
 
 ## 必要なもの
 
-- Windows 10／11
+- Windows 10またはWindows 11
 - Docker Desktop
-- ブラウザー（ChromeまたはEdgeを推奨）
-- NFCを使用する場合：Sony RC-S300またはRC-S380とNFCポートソフトウェア
+- Git
+- ChromeまたはEdge
+- NFCを使う場合のみ：Sony RC-S300またはRC-S380、Sony NFCポートソフトウェア
 
-## 起動・停止
+Docker Desktopは起動用ファイルから起動できます。初回はDocker Desktopのセットアップを完了してから進めてください。
 
-初回起動または再ビルド：
+## 新しいPCへcloneした後の起動
+
+PowerShellを開き、保存したいフォルダーで次を実行します。
+
+```powershell
+cd C:\Users\ユーザー名\Desktop\apps
+git clone https://github.com/kojima1978/fleet-board.git
+cd fleet-board
+& '.\FleetFlow Production Start.cmd'
+```
+
+初回起動では次の処理を自動実行します。
+
+1. `.env.production`を作成
+2. 管理者PIN、DBパスワード、セッション秘密鍵を自動生成
+3. Dockerイメージと本番DBを準備
+4. DBスキーマと駐車区画の初期データを登録
+5. アプリを起動してブラウザーを開く
+
+画面に表示された管理者PINは、安全な場所へ保管してください。起動後のURLは[http://localhost:3035](http://localhost:3035)です。
+
+> Gitに保存されるのはプログラムだけです。既存PCの社員・車両・予約・履歴などのDBデータと`.env.production`は、cloneだけでは新しいPCへ移りません。データ移行には「バックアップと復元」を使用してください。
+
+## 既存フォルダーでpullした後の更新
+
+本番データを使っているPCでは、単純な再起動ではなく、検査と自動復帰機能を備えた本番更新を使用します。
+
+```powershell
+cd C:\Users\ユーザー名\Desktop\apps\fleet-board
+git status
+git pull origin main
+& '.\FleetFlow Production Update.cmd'
+```
+
+`git status`に自分で変更したファイルが表示された場合は、上書き事故を避けるため、pullする前に変更内容を確認してください。
+
+本番更新は、更新前バックアップ、型検査、ビルド、DB移行、ヘルスチェック、主要操作テストを順番に実行します。途中で失敗した場合は本番切替を中止し、切替後の検査で失敗した場合は直前のアプリイメージへ自動復帰します。
+
+更新後は次を実行して全体の状態を確認してください。
+
+```powershell
+& '.\FleetFlow Production Health Check.cmd'
+```
+
+## 日常の起動・停止・状態確認
+
+エクスプローラーから次のファイルをダブルクリックできます。PowerShellでは、ファイル名に空白があるため`&`と引用符を付けます。
+
+```powershell
+# 起動
+& '.\FleetFlow Production Start.cmd'
+
+# 状態確認
+& '.\FleetFlow Production Status.cmd'
+
+# 詳細な健全性確認
+& '.\FleetFlow Production Health Check.cmd'
+
+# 停止（DBとバックアップは残ります）
+& '.\FleetFlow Production Stop.cmd'
+```
+
+本番の通常起動は、最後に検証済みのイメージを再利用します。ソースをpullしただけでは本番へ反映されません。変更を反映するときだけ`FleetFlow Production Update.cmd`を実行してください。
+
+## 開発環境
+
+開発環境も必ずDockerで動かします。
+
+```powershell
+# Docker、開発用アプリ、DB、NFC Bridgeを確認して起動
+& '.\FleetFlow Start.cmd'
+
+# 状態確認
+& '.\FleetFlow Status.cmd'
+```
+
+Dockerコマンドを直接使う場合：
 
 ```powershell
 docker compose up --build -d
-```
-
-起動後に [http://localhost:3035](http://localhost:3035) を開きます。初回起動時にPrismaのスキーマ反映とサンプルデータ投入が自動実行されます。
-
-状態確認：
-
-```powershell
 docker compose ps
 docker compose logs -f app
 ```
@@ -33,80 +115,81 @@ docker compose stop
 docker compose start
 ```
 
-コンテナを作り直す場合：
+コンテナーを作り直す場合：
 
 ```powershell
 docker compose down
 docker compose up --build -d
 ```
 
-`docker compose down`だけではデータベースのDockerボリュームは削除されません。`docker compose down -v`は全データを削除するため、バックアップなしでは実行しないでください。
+`docker compose down`ではDBボリュームは消えません。`docker compose down -v`は開発DBを全削除するため、バックアップなしでは実行しないでください。
 
-## 画面
+開発用DockerはDBが空かどうかを自動判定し、初回は現行スキーマを作成してから補助マイグレーションとサンプルデータ投入を行います。既存DBでは旧データを移行してから現行スキーマへ同期します。アプリとDBのポートは初期状態で`127.0.0.1`だけへ公開されます。
+
+## 主な画面
 
 | URL | 用途 |
 | --- | --- |
 | `/` | 駐車場配置図、利用開始、返却、利用中車両一覧 |
 | `/timeline` | 車両タイムライン、予約、予定時間の変更 |
-| `/settings/employees` | 社員登録・NFC UID登録 |
-| `/settings/vehicles` | 車両登録・NFC UID登録 |
+| `/operations` | 操作履歴、バックアップ・復元確認の状態 |
 | `/settings` | 印刷などの設定 |
-| `/operations` | 操作履歴、DBバックアップ・復元確認の状態 |
-| `/print/parking` | A4横の駐車場配置図 |
-| `/print/timeline` | A4横の空タイムライン |
+| `/settings/employees` | 社員登録、JSON取込、NFC UID登録 |
+| `/settings/vehicles` | 車両登録、JSON取込、NFC UID登録 |
+| `/print/parking` | A4横の空の駐車場配置図 |
+| `/print/timeline` | A4横の空のタイムライン |
+
+### 状態の意味
+
+| 表示 | 意味 |
+| --- | --- |
+| 予約 | 将来の利用予定。まだ出庫していない |
+| 利用中 | 利用開始手続きが完了し、車両が出庫している |
+| 駐車中 | 車両が駐車区画にあり、配置図で位置を確認できる |
+| 完了 | 返却手続きが完了した利用履歴 |
+| 整備中 | 駐車位置と履歴を保持し、利用開始だけを一時停止している |
+
+画面は5秒ごとに更新されます。同時操作は`version`列による楽観的ロックで競合を検出します。利用開始や返却などには一意の操作IDが付き、同じ通信が再送されても二重登録されません。
+
+共用端末の駐車場・タイムライン画面では、10分間操作がないと社員選択と入力画面を解除し、駐車場画面へ戻ります。30秒前に警告され、操作すると継続できます。設定画面の編集中には適用されません。
 
 ## 基本操作
 
 ### 利用開始
 
 1. 駐車場配置図で利用する車両を選びます。
-2. 社員証のNFCタグを読み取ります。NFCが使用できない場合は社員を手動選択できます。
+2. 社員証をNFCで読むか、社員を手動選択します。
 3. 利用予定時間を選び、「この内容で利用開始」を押します。
-4. 登録後は車両が「利用中」になり、タイムラインへ反映されます。
+4. 車両が「利用中」になり、タイムラインへ反映されます。
 
 ### 予約
 
 1. 利用開始画面で「時刻指定」を選びます。
-2. 時間指定・終日・複数日から予定を登録します。
-3. 予約時刻になったら社員証を読み取り、「予約した車両を利用開始」を押します。時間の再入力は不要です。
+2. 時間指定、終日、または複数日で登録します。
+3. 予約時刻になったら社員証を読み、「予約した車両を利用開始」を押します。
 
-予約時刻だけでは自動的に利用中になりません。開始予定から30分以内に利用開始されなかった予約は自動取消され、監査履歴に「予約自動取消」として記録されます。使わないことが分かった時点で手動取消することもできます。
+予約時刻になっても自動では利用中になりません。利用開始の手続きが必要です。開始予定から30分以内に開始されなかった予約は自動取消され、履歴へ記録されます。使わないことが分かった時点で手動取消もできます。
 
 ### 返却
 
-1. 駐車場配置図で空き区画を選びます。
-2. 車両のNFCタグを読み取ります。NFCが使用できない場合は車両を手動選択できます。
-3. 返却内容を確認して確定します。
+1. 駐車場配置図で返却先の空き区画を選びます。
+2. 車両タグをNFCで読むか、利用中車両を手動選択します。
+3. 内容を確認して返却を確定します。
 
-予定より早い返却ではタイムラインが実際の返却時刻まで短縮されます。予定を超過している場合は、現在時刻まで利用中の表示が延長されます。誤って返却した場合は、画面に表示される取消操作から利用中へ戻せます。
+早期返却ではタイムラインが実際の返却時刻まで短縮され、超過時は現在時刻まで延長されます。誤って返却した場合は、画面の取消操作から利用中へ戻せます。
 
-## 状態の定義
-
-| 表示 | 意味 |
-| --- | --- |
-| 予約 | 将来の利用予定。まだ出庫していない状態 |
-| 利用中 | 利用開始手続きを行い、車両が出庫している状態 |
-| 駐車中 | 車両が駐車区画にあり、配置図上で位置を確認できる状態 |
-| 完了 | 返却手続きが完了した利用履歴 |
-| 整備中 | 駐車位置と履歴を保持したまま、利用開始だけを一時停止した車両 |
-
-画面は5秒ごとに自動更新されます。データ更新は`version`列を使った楽観的ロックで競合を検出します。
-
-共用端末の駐車場・タイムライン画面は、10分間操作がない場合に社員選択と開いている入力画面を解除して駐車場へ戻ります。30秒前に警告が表示され、画面を操作すると継続できます。設定画面で編集中の内容には適用されません。
-
-## 社員・車両の登録
+## 社員・車両データ
 
 - 社員は「設定 → 社員」、車両は「設定 → 車両」から登録します。
-- 各一覧の「JSON取込」から最大500件を一括登録できます。「ひな形を保存」で正しい形式を取得できます。
-- JSON取込は新規登録専用です。社員番号・車両番号・ナンバー、および指定されたNFC UIDの重複や不正な行が1件でもある場合、全件を登録せず元の状態を保ちます。
-- NFC UIDは省略または空欄でも取り込めます。取り込み後、社員・車両の編集画面からNFC読取で追加できます。
-- 車両はETC・ナビの有無を登録でき、車両一覧、利用開始画面、駐車場配置図に装備タグを表示します。
-- 車両JSONの`hasEtc`と`hasNavigation`は任意の真偽値です。省略時は`false`（なし）になります。
-- 指定されたNFC UIDは区切り文字の有無にかかわらず正規化して保存されます。
-- 同じNFC UIDを複数の社員・車両へ登録することはできません。
-- 社員番号・車両番号は再利用できる設計ですが、同じ番号を同時に有効化することはできません。
-- 過去履歴を残すため、入替時は旧データを無効化してから新しいデータを登録します。
-- 一時的に使用させない車両は、車両一覧の「整備」から整備中へ変更します。利用中・予約中の車両は変更できません。整備解除すると利用可能へ戻ります。
+- 「JSON取込」で最大500件を一括登録できます。「ひな形を保存」で正しい形式を取得できます。
+- JSON取込は新規登録専用です。重複や不正な行が1件でもある場合は全件を登録しません。
+- NFC UIDは省略でき、取込後に編集画面から追加できます。
+- UIDは区切り文字の有無にかかわらず正規化されます。
+- 同じUIDを複数の社員・車両へ同時に割り当てることはできません。
+- 社員番号と車両番号は将来再利用できますが、同じ番号を同時に有効化することはできません。
+- 入替時は過去履歴を保つため、旧データを無効化してから新データを登録します。
+- 車両にはETC・ナビの有無を登録できます。
+- 一時的に使わない車両は「整備中」にします。利用中・予約中の車両は変更できません。
 
 社員JSONの例：
 
@@ -122,169 +205,127 @@ docker compose up --build -d
 ```json
 [
   { "code": "C18", "name": "営業車18", "plateNumber": "品川 500 あ 12-34", "nfcUid": "04AABBCCDDEE11", "color": "#2563EB", "hasEtc": true, "hasNavigation": true },
-  { "code": "C19", "name": "営業車19", "plateNumber": "品川 500 い 56-78", "color": "#0891B2", "hasEtc": false, "hasNavigation": true }
+  { "code": "C19", "name": "営業車19", "plateNumber": "品川 500 い 56-78", "color": "#0891B2" }
 ]
 ```
 
-### 社員データの管理方針
+社員番号、部署、NFCタグと割当関係は正規化された別テーブルで管理します。NFCの交換・失効・再利用履歴を保持し、操作履歴には表示名と社員IDを保存するため、改名後も操作者を追跡できます。
 
-- 社員番号は`EmployeeNumber`、部署は`Department`として社員本体から分離しています。
-- 有効な社員へ同じ社員番号を重複割当できないDB制約があります。
-- NFC UIDは`NfcTag`、社員・車両との関係は共通の`NfcAssignment`で管理し、交換・失効・再利用の履歴を保持します。
-- 同じNFCタグを社員・車両をまたいで同時に複数へ割り当てることはできません。
-- 操作履歴は表示名に加えて社員IDも保存するため、改名後も操作者を追跡できます。
+## NFC連携（RC-S300／RC-S380）
 
-## RC-S300／RC-S380 NFC連携
+ブラウザーはPaSoRiと直接通信できないため、各利用PCでWindows用の「FleetFlow NFC Bridge」を動かします。NFC Tools KBCは不要です。
 
-ブラウザーとPaSoRiは直接通信せず、Windows専用のNFC Bridgeを介して読み取ります。NFC Tools KBCは不要です。
-
-ビルド：
+初回ビルドとインストール：
 
 ```powershell
 docker compose --profile tools run --rm nfc-bridge-build
-```
-
-インストール：
-
-```powershell
 powershell -ExecutionPolicy Bypass -File .\nfc-bridge\install.ps1
 ```
 
-Windowsログイン時に自動起動します。接続確認はブラウザーで [http://127.0.0.1:17831/health](http://127.0.0.1:17831/health) を開き、`readerConnected`が`true`になることを確認します。詳細は[NFC BridgeのREADME](nfc-bridge/README.md)を参照してください。
+インストール後はWindowsログイン時に自動起動します。接続確認は[http://127.0.0.1:17831/health](http://127.0.0.1:17831/health)を開き、`readerConnected`が`true`になることを確認します。詳細は[nfc-bridge/README.md](nfc-bridge/README.md)を参照してください。
 
-## FleetFlowの開発環境起動と状態確認
+LAN上のFleetFlowを使うPCでは、そのURLを許可Originに加えてインストールします。
 
-デスクトップショートカットは使用しません。開発フォルダー直下の次のファイルを使用します。
-
-- `FleetFlow Start.cmd`：Docker Desktop、本体、DB、NFC Bridgeを確認・起動し、準備完了後にブラウザーを開きます。
-- `FleetFlow Status.cmd`：本体、NFC Bridge、NFCリーダーの状態を表示します。
-
-通常は `FleetFlow Start.cmd` をダブルクリックするだけで起動できます。NFC BridgeだけはWindowsログイン時にも自動起動します。
-
-開発用Dockerは初回起動時にDBが空かどうかを判定します。空の場合はPrismaで現行スキーマを作成してから既存DB向けの補助マイグレーションを実行し、既存DBの場合は旧データを移行してから現行スキーマへ同期します。そのため、空のDockerボリュームでも`AuditLog`未作成エラーになりません。開発用のアプリとDBポートは初期状態で`127.0.0.1`だけへ公開され、社内LANへは公開されません。
-
-ファイル名の`FleetFlow`と`Start`の間には半角スペースがあります。PowerShellから起動する場合は `& '.\FleetFlow Start.cmd'` のように引用符で囲んでください。
-
-正常時は起動通知を表示しません。NFCだけ使用できない場合は「注意」として手動操作が可能なことと対処方法を表示します。DockerまたはFleetFlow本体を起動できない場合は「起動エラー」として原因と対処方法を日本語で表示し、Dockerの詳細エラーを`nfc-bridge\fleetflow-start.log`へ記録します。
-
-画面上部にはアプリの更新状態とNFC接続状態を表示します。データ更新に失敗した場合は、最終更新時刻と「再接続」を表示し、古い情報を正常な情報として見せないようにしています。Dockerの`app`と`db`にはヘルスチェックと自動再起動を設定しています。
-
-## 本番環境の起動
-
-本番環境は開発環境と別のコンテナー・DBボリューム・バックアップ先を使用します。開発フォルダー直下の次のファイルを使用します。
-
-- `FleetFlow Production Start.cmd`：本番設定を初回だけ自動生成し、本番イメージ、DB、バックアップ、NFC Bridgeを起動
-- `FleetFlow Production Update.cmd`：バックアップ、ビルド、型検査、DB移行、切替、主要操作テストを行い、失敗時は直前のアプリへ自動復帰
-- `FleetFlow Production Status.cmd`：本体、NFC Bridge、NFCリーダーの状態確認
-- `FleetFlow Production Health Check.cmd`：アプリ、DB、バックアップ、復元検証、再起動回数、ディスク、外部バックアップを一括確認
-- `FleetFlow Production Stop.cmd`：本番コンテナーを停止。DBとバックアップは保持
-- `FleetFlow Production Diagnostics.cmd`：コンテナー、アプリ、NFC、ディスク、直近ログを秘密情報なしのZIPへ保存
-- `FleetFlow Production Backup Setup.cmd`：NAS、USB、同期フォルダーへの毎日19時のバックアップ複製を設定
-
-初回は`FleetFlow Production Start.cmd`をダブルクリックします。ランダムな管理者PIN、DBパスワード、セッション秘密鍵を`.env.production`へ生成し、管理者PINだけを画面に表示します。`.env.production`はGit管理対象外です。表示されたPINは安全な場所へ保管してください。
-
-通常の起動では、最後に検証済みの本番イメージをそのまま使用するため、ソース変更や通信障害の影響を受けません。変更を本番へ反映するときだけ`FleetFlow Production Update.cmd`を使用します。更新前バックアップと復元検証に失敗した場合は更新を開始しません。ビルド、型検査、起動、ヘルスチェック、主要操作テストのいずれかが失敗した場合は、直前のアプリイメージへ自動復帰します。更新完了前には本番ヘルスチェックも自動実行します。
-
-本番と開発は同じ`3035`ポートを使用するため、本番起動時は開発コンテナーを停止し、開発起動時は本番コンテナーを停止します。DBデータはそれぞれ独立して保持されます。本番DBには駐車区画だけを初期登録し、デモ社員・デモ車両・デモ予定は登録しません。
-
-本番構成は次を適用します。
-
-- Next.jsのstandalone本番イメージを非rootユーザーで実行
-- DBポートをWindows側へ公開しない
-- ソースコード、`node_modules`、`.next`を本番コンテナーへマウントしない
-- DB準備完了後にのみアプリを起動
-- 自動再起動、ヘルスチェック、CPU・メモリ上限を設定
-- Dockerログを1ファイル10MB・最大3ファイルへ制限
-- 本番バックアップを`backups\production`へ保存し、毎回復元検証
-- Prismaマイグレーション履歴でDB変更を番号管理
-- 初期状態では`127.0.0.1`だけへ公開し、同じWindows PC以外からのアクセスを遮断
-
-設定画面にはアプリバージョン、実行環境、最終更新日時、バックアップ確認日時を表示します。障害調査時は`FleetFlow Production Diagnostics.cmd`で`diagnostics`フォルダーへ診断ZIPを作成してください。`.env.production`やDBパスワードは診断ZIPへ含めません。
-
-安定運用では、毎日または異常を感じたときに`FleetFlow Production Health Check.cmd`を実行してください。「異常」は起動・更新を停止する項目、「注意」は外部バックアップ未設定、空き容量不足、再起動回数増加など早めの確認を推奨する項目です。NFCだけが停止している場合は本体を止めず、手動選択で継続できます。
-
-## 管理者PIN
-
-社員・車両の設定画面は管理者PINで保護され、認証は8時間有効です。開発環境の初期PINは`2468`です。本番環境では初回起動時にランダムなPINと秘密鍵を`.env.production`へ生成します。
-
-```env
-FLEETFLOW_ADMIN_PIN=任意の4～12桁の数字
-FLEETFLOW_SESSION_SECRET=十分に長いランダム文字列
+```powershell
+powershell -ExecutionPolicy Bypass -File .\nfc-bridge\install.ps1 `
+  -AllowedOrigins "http://192.168.1.20:3035;http://localhost:3035"
 ```
 
-設定変更APIも同じ管理者セッションを検証するため、画面を迂回した未認証の登録・変更は拒否されます。PINを5回間違えると5分間ロックされます。
+NFC Bridgeやリーダーが停止しても、FleetFlow本体は社員・車両の手動選択で継続利用できます。
 
-## バックアップ
+## 管理者PINとセキュリティ
 
-`db-backup`コンテナが起動時と24時間ごとにDBを`backups`フォルダーへ自動保存し、直後に一時DBへ復元して社員・車両テーブルを検査します。30日を超えたファイルは削除します。バックアップと復元確認の最終成功日時は「履歴」画面で確認できます。
+社員・車両設定と操作履歴は管理者PINで保護され、認証は8時間有効です。設定変更APIも管理者セッションを検証します。PINを5回間違えると5分間ロックされます。
+
+- 開発環境の初期PIN：`2468`
+- 本番環境：初回起動時にランダム生成し`.env.production`へ保存
+
+本番は非rootユーザー、読み取り専用ファイルシステム、Linux capability全削除で実行します。DBポートはWindowsへ公開せず、アプリにはCSPなどのセキュリティヘッダーを設定しています。NFC UIDは通常画面の一覧データへ含めず、読取時にサーバーで1件ずつ照合します。
+
+## バックアップと復元
+
+`db-backup`コンテナーが起動時と24時間ごとにバックアップを作成し、一時DBへ復元して検査します。30日を超えたバックアップは削除します。最終成功日時は「履歴」画面で確認できます。
 
 手動バックアップ：
 
 ```powershell
+# 開発DB
 powershell -ExecutionPolicy Bypass -File .\scripts\database\Backup-Now.ps1
-```
 
-本番DBを手動バックアップする場合：
-
-```powershell
+# 本番DB
 powershell -ExecutionPolicy Bypass -File .\scripts\database\Backup-Now.ps1 -Production
 ```
 
-PC故障にも備える場合は`FleetFlow Production Backup Setup.cmd`を実行し、NAS、USBドライブ、OneDrive等の同期フォルダーを選択します。毎日19時にバックアップ作成、復元検証、SHA-256付き複製を行います。保存先では新しい30ファイルを保持します。USBを保存先にする場合は、実行時刻に接続されている必要があります。
-
-バックアップを一時DBへ復元し、社員・車両テーブルを検査します。本番DBは変更しません。
+復元できるかを検証：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\database\Verify-Backup.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\database\Verify-Backup.ps1 -Production
 ```
 
-本番バックアップは同じコマンドへ`-Production`を追加します。
-
-復元確認の成功日時も「履歴」画面へ表示されます。実DBの復元は現在の内容を置き換えるため、ファイル名指定と`RESTORE`の確認入力が必要です。
+本番DBを実際に復元：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\database\Restore-Backup.ps1 -FileName fleet-YYYYMMDD-HHMMSS.sql.gz
+powershell -ExecutionPolicy Bypass -File .\scripts\database\Restore-Backup.ps1 `
+  -Production -FileName fleet-YYYYMMDD-HHMMSS.sql.gz
 ```
 
-本番DBを復元する場合は、同じコマンドへ`-Production`を追加します。
+実DBの復元は現在の内容を置き換えるため、ファイル名指定と`RESTORE`の確認入力が必要です。
 
-操作更新には一意の操作IDを付けています。同じ通信を再送しても利用開始・返却・予約などは二重登録されません。通信は10秒で区切り、同じ操作IDで一度だけ自動再送した後、最新状態を取得します。オフライン中は警告を表示し、接続復旧時または画面へ戻った時に自動同期します。
+PC故障に備える場合は`FleetFlow Production Backup Setup.cmd`を実行し、NAS、USB、OneDriveなどの同期フォルダーへ毎日複製してください。複製にはSHA-256検証が付き、保存先では新しい30ファイルを保持します。
 
-## 開発時の確認
+## 社内LANで本番公開する場合
 
-TypeScriptチェック：
+初期設定では安全のため`127.0.0.1`だけへ公開され、同じPCからしか接続できません。LAN公開時は次をすべて実施してください。
+
+1. サーバーPCの固定LAN IPを決めます。
+2. `.env.production`の`FLEETFLOW_BIND_ADDRESS`へ、そのIPを指定します。`0.0.0.0`は避けてください。
+3. WindowsファイアウォールでTCP 3035を社内サブネットからだけ許可します。
+4. インターネットと来客用Wi-Fiから到達できないことを別端末で確認します。
+5. 可能なら社内証明書とリバースプロキシでHTTPS化し、`FLEETFLOW_COOKIE_SECURE=true`にします。
+6. 信頼するリバースプロキシが転送ヘッダーを上書きする場合だけ`FLEETFLOW_TRUST_PROXY=true`にします。直接公開は`false`のままにします。
+7. NFCを使う各PCへNFC Bridgeを入れ、LAN用Originを許可します。
+8. バックアップはBitLocker対応ドライブまたは権限制御済みNASへ複製します。
+
+通常の利用・返却には個人ログインを要求しない共用端末向け設計です。LANへ接続できる人は業務データを閲覧・操作できる前提なので、利用者ごとの権限管理が必要な環境では個別認証の追加が必要です。インターネットへ直接公開しないでください。
+
+## 開発時の検査
+
+すべてDocker内で実行します。
 
 ```powershell
+# TypeScript
 docker compose exec app npm run lint
-```
 
-主要操作（利用開始、同時二重送信、返却再送、予約、時間変更、予約取消）のAPI結合テスト：
-
-```powershell
+# 利用開始、二重送信、返却、予約、変更、取消
 docker compose exec app npm run test:integration
+
+# NFC UIDを省略したJSON取込
+docker compose exec app npm run test:integration:optional-nfc
+
+# Origin・プロキシ判定
+docker compose exec app npm run test:security
+
+# 依存関係
+docker compose exec app npm audit
 ```
 
-テスト専用の社員・車両・区画を一時作成し、終了時に削除します。実運用データは変更しません。
-
-本番更新の確認：
+本番更新を画面表示なしで検査する場合：
 
 ```powershell
 & '.\FleetFlow Production Update.cmd' -NoUi
 ```
 
-DBスキーマは`prisma\migrations`の番号付きSQLで管理します。既存DBは初回更新時に現在の構造をベースラインとして記録し、新規DBには同じベースラインを適用します。以後は`prisma db push`を本番更新に使用しません。
+DBスキーマは`prisma/migrations`の番号付きSQLで管理し、本番では`prisma db push`を使用しません。開発環境だけが現行スキーマへの同期に`db push`を使用します。
 
-### 依存関係のセキュリティ監査
+### 依存関係の監査方針
 
-本番依存関係の監査：
+2026年10月13日時点でNext.jsは`16.4.0`です。Prisma CLI 7.10.0が固定する推移依存も含め、既知の脆弱性を避けるため`package.json`の`overrides`で次を固定しています。
 
-```powershell
-docker compose exec app npm audit --omit=dev
-```
+- `deepmerge-ts` 8.0.2
+- `mysql2` 3.24.5
+- `source-map-js` 1.2.2
 
-2026年10月5日時点では、Prisma CLI 7.10.0が固定している推移依存の脆弱性を避けるため、`package.json`の`overrides`で`deepmerge-ts` 8.0.2と`mysql2` 3.24.5を使用します。`npm audit`は開発依存を含めて0件です。Prisma本体を6系へダウングレードする`npm audit fix --force`は使用しません。
-
-この上書きを変更・削除するときは、Docker内で`npm audit`、Prisma Client生成、本番ビルド、DBマイグレーション、統合テストを実行してください。Prismaが修正版の依存関係を正式採用した後は、Prismaを更新して`overrides`を削除できます。
+現在の`npm audit`は開発依存を含めて0件です。`npm audit fix --force`は互換性を壊す更新を含む可能性があるため使用しません。依存関係や`overrides`を変更した場合は、Docker内で監査、Prisma Client生成、本番ビルド、DB移行、統合テストを確認してください。
 
 ## トラブル対応
 
@@ -296,36 +337,33 @@ docker compose logs --tail 100 app
 docker compose restart app
 ```
 
+本番の場合は、先に`FleetFlow Production Status.cmd`と`FleetFlow Production Health Check.cmd`を実行してください。
+
+### 起動用cmdが動かない
+
+- Docker Desktopの初期設定が完了しているか確認します。
+- ファイル一式が同じプロジェクトフォルダーにあることを確認します。
+- PowerShellからは`& '.\FleetFlow Production Start.cmd'`のように実行します。
+- 詳細は`nfc-bridge/fleetflow-start.log`を確認します。
+
 ### NFC連携ソフトを起動するよう表示される
 
 1. RC-S300／RC-S380を接続し直します。
 2. [NFC Bridgeのヘルス画面](http://127.0.0.1:17831/health)を確認します。
-3. Windowsを再ログインするか、NFC Bridgeを再起動します。
-4. 復旧しない場合は画面の手動選択を使用します。
+3. Windowsへ再ログインするか、NFC Bridgeを再インストールします。
+4. 復旧するまでは社員・車両を手動選択します。
 
 ### データ更新が競合した
 
-別の端末で先に変更された可能性があります。画面を更新して最新状態を確認し、もう一度操作してください。
+別の端末で先に変更されています。最新状態を読み直し、内容を確認してからもう一度操作してください。
 
-## 本番公開時の注意
+### 本番障害の情報を保存したい
 
-`compose.production.yaml`は1台のWindows PCで安定運用する構成で、初期設定では`127.0.0.1`だけへ公開します。管理者PINは設定変更と操作履歴を保護しますが、共用端末で行う利用・返却操作には個別ログインを要求しません。NFC UIDは通常画面の一覧データへ含めず、読取時にサーバーで1件ずつ照合します。
+`FleetFlow Production Diagnostics.cmd`を実行します。コンテナー状態、アプリ、NFC、ディスク、直近ログを`diagnostics`フォルダーのZIPへ保存します。`.env.production`やDBパスワードは含みません。
 
-社内LANで公開するときは、次をすべて実施してください。
+## 補足
 
-1. サーバーPCの固定LAN IPを決め、`.env.production`の`FLEETFLOW_BIND_ADDRESS`へそのIPを指定する（`0.0.0.0`は避ける）。
-2. WindowsファイアウォールでTCP 3035の接続元を社内のプライベートサブネットだけに制限する。
-3. 可能なら社内証明書を設定したリバースプロキシでHTTPS化し、`FLEETFLOW_COOKIE_SECURE=true`にする。
-4. リバースプロキシが接続元ヘッダーを上書きする信頼済み構成の場合だけ`FLEETFLOW_TRUST_PROXY=true`にする。直接公開時は`false`のままにする。
-5. バックアップ先にはBitLocker対応ドライブ、アクセス制限済みNASなど暗号化・権限制御された保存先を使用する。
-6. インターネットや来客用Wi-Fiからは到達できないことを別端末で確認する。
-
-NFCを利用する各Windows端末では、その端末のNFC BridgeをLAN用URLのOrigin付きで再設定します。例えばFleetFlowを`http://192.168.1.20:3035`で開く場合は、NFC Bridgeのフォルダーで次を実行します。
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\nfc-bridge\install.ps1 -AllowedOrigins "http://192.168.1.20:3035;http://localhost:3035"
-```
-
-HTTPS化した場合は`https://`のOriginを指定してください。Originにはパスを含めません。NFC Bridgeはブラウザーを開く各PCの`127.0.0.1:17831`で動作するため、サーバーPCだけでなくNFCを使う端末ごとにインストール・起動が必要です。
-
-アプリはフレーム埋め込み禁止、MIME推測禁止、権限制限、CSPなどのHTTPセキュリティヘッダーを返します。Dockerのアプリコンテナーは非root・読み取り専用ファイルシステム・Linux capability全削除で実行します。LAN公開前後に`FleetFlow Production Health Check.cmd`とDocker内の`npm audit`を実行してください。インターネットへ直接公開しないでください。
+- `.env.production`、DBデータ、バックアップ、診断ZIPはGitへ登録しません。
+- 本番バックアップは`backups/production`、開発バックアップは`backups`へ保存します。
+- 更新前や異常を感じたときは`FleetFlow Production Health Check.cmd`を実行してください。
+- 「異常」は起動・更新を止める項目、「注意」は外部バックアップ未設定、空き容量不足、再起動回数増加など早めの確認が必要な項目です。
