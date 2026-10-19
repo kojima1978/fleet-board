@@ -6,6 +6,12 @@ const scriptSources = development ? "'self' 'unsafe-inline' 'unsafe-eval'" : "'s
 const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
+  // Docker Desktop のバインドマウントは一時的に EIO を返すことがあり、Turbopack の
+  // 開発用ディスクキャッシュがその失敗を記録して再起動後も 500 を返し続ける。
+  // キャッシュはメモリ上だけにして、一時的な失敗が残らないようにする。
+  experimental: {
+    turbopackFileSystemCacheForDev: false,
+  },
   async headers() {
     return [{
       source: "/:path*",
