@@ -134,7 +134,9 @@ docker compose up --build -d
 
 `docker compose down`ではDBボリュームは消えません。`docker compose down -v`は開発DBを全削除するため、バックアップなしでは実行しないでください。
 
-開発用DockerはDBが空かどうかを自動判定し、初回は現行スキーマを作成してから補助マイグレーションとサンプルデータ投入を行います。既存DBでは旧データを移行してから現行スキーマへ同期します。アプリは初期状態で`127.0.0.1`だけへ公開されます。DBはDocker内のアプリから接続し、Windowsへポート公開しないため、他環境のPostgreSQLともポートが競合しません。
+開発用DockerはDBが空かどうかを自動判定し、初回は現行スキーマを作成してから補助マイグレーションとサンプルデータ投入を行います。既存DBでは旧データを移行してから現行スキーマへ同期します。アプリは初期状態で`127.0.0.1`だけへ公開されます（他のPCから開く場合は「社内LANで本番公開する場合」の`-Development`を参照）。DBはDocker内のアプリから接続し、Windowsへポート公開しないため、他環境のPostgreSQLともポートが競合しません。
+
+開発サーバーはTurbopackのファイルシステムキャッシュを無効にしています（`next.config.ts`の`turbopackFileSystemCacheForDev: false`）。Windowsのフォルダーをコンテナーへ共有する構成では、キャッシュの読み書きが`EIO`エラーでビルドを止めることがあるためです。初回表示は少し遅くなりますが、通常の自動更新には影響しません。
 
 ## 主な画面
 
@@ -243,6 +245,8 @@ powershell -ExecutionPolicy Bypass -File .\nfc-bridge\install.ps1 `
   -AllowedOrigins "http://192.168.1.20:3035;http://localhost:3035"
 ```
 
+許可Originは完全一致で判定し、NFC Bridgeの起動時にだけ読み込みます。URLを変えた場合（サーバーのIP変更など）は、新しいURLを指定して再インストールしてください。LAN上の画面から初めて読み取るとき、ChromeやEdgeが「このデバイス上の他のアプリやサービスへのアクセス」の許可を求める場合があります。「許可」を選んでください。
+
 NFC Bridgeやリーダーが停止しても、FleetFlow本体は社員・車両の手動選択で継続利用できます。
 
 ## 管理者PINとセキュリティ
@@ -305,7 +309,7 @@ PC故障に備える場合は`FleetFlow Production Backup Setup.cmd`を実行し
 
 初期設定では安全のため`127.0.0.1`だけへ公開され、同じPCからしか接続できません。LAN公開時は次をすべて実施してください。
 
-1. サーバーPCへ固定LAN IPを設定します。
+1. サーバーPCのLAN IPを固定します。ルーターのDHCP予約（サーバーPCのMACアドレスへ同じIPを割り当てる）を推奨します。ルーターを操作できない場合はWindows側で固定IPを設定します。
 2. `FleetFlow Production Start.cmd`を一度実行して本番設定を作成します。
 3. `FleetFlow LAN Setup.cmd`をダブルクリックします。自動検出した固定LAN IPをアプリへ設定し、管理者権限の確認後、TCP 3035を同じ社内サブネットからだけ許可します。
 4. 表示された`http://LAN-IP:3035`を別PCで開きます。
@@ -334,7 +338,46 @@ LAN IPへ公開した後も、サーバーPC自身からは`http://localhost:303
 
 開発・本番ともに起動確認とブラウザー表示先は設定したLAN IPを使います。Windowsファイアウォール規則はプライベート／ドメインネットワーク用です。パブリックネットワークでは許可されません。サーバーのネットワークがパブリックと判定されている場合、LAN設定コマンドの完了画面と本番の事前診断で警告するので、Windowsの設定 > ネットワークとインターネット > 該当アダプター > ネットワーク プロファイルの種類 を「プライベート」にしてください。LAN設定コマンド自体はPCの固定IP設定を変更しないため、固定IPまたはDHCP予約は別途設定してください。
 
-開発環境ではNext.jsの`allowedDevOrigins`にも設定したLAN IPとサーバーのPC名を反映するため（`http://PC名:3035`でも開けます）、画面のJavaScript・フォント・開発時の自動更新がOrigin判定で拒否されません。公開先を変更した後はコンテナーの再作成が必要です（LAN設定コマンドは稼働中のアプリを自動再作成します）。
+開発環境ではNext.jsの`allowedDevOrigins`にも設定したLAN IPとサーバーのPC名を反映するため（`http://PC名:3035`でも開けます）、画面のJavaScript・フォント・開発時の自動更新がOrigin判定で拒否されません。公開先を変更した後はコンテナーの再作成が必要です（LAN設定コマンドは稼働中のアプリを自動再作成します）。PC名はWindowsの`COMPUTERNAME`（15文字までに切り詰められた名前）から自動設定されます。WSLから起動した場合は設定されず、PC名を変更した後はコンテナーの再作成が必要です。名前解決が環境に左右されるため、他のPCからはIPアドレスで開くことを推奨します。本番環境は`allowedDevOrigins`を使わず、アプリ自身が「画面のURLとAPIの接続先が同じか」を確認するため、IPでもPC名でも追加設定は不要です。
+
+### 利用PCで確認すること
+
+1. サーバー以外のPCのChromeまたはEdgeで`http://LAN-IP:3035`を開きます。
+2. NFCを使うPCでは、社員証または車両タグを読み取れることを確認します。
+3. 初回のNFC読取時に「このデバイス上の他のアプリやサービスへのアクセス」の許可を求められた場合は「許可」を選びます（LAN上の画面から同じPCのNFC Bridgeへ接続するため）。拒否した場合はアドレスバー左のサイト設定から許可へ戻せます。
+
+### サーバーのIPが変わった場合
+
+IPが変わると、古いIPを前提にした設定が次のように影響します。
+
+| 古いIPが残る場所 | 起きること |
+| --- | --- |
+| `.env.production`の`FLEETFLOW_BIND_ADDRESS` | PCに無いIPへは公開できないため、アプリ全体が起動しません（サーバー自身のlocalhostからも開けません）。自動起動は公開アドレスを最大5分待ってからエラーを表示します |
+| Windowsファイアウォール規則 | アプリが起動しても他のPCから接続できません |
+| 利用PCのブックマーク | 古いURLを開いて接続できません |
+| 利用PCのNFC Bridgeの許可Origin | 画面は開けますが、NFC読取だけが失敗します |
+
+対応手順：
+
+1. サーバーPCで`FleetFlow LAN Setup.cmd`をダブルクリックします。新しいIPを自動検出し、`.env.production`とファイアウォール規則（同じ名前の規則を置き換え）を更新します。アプリが稼働中なら自動で再作成します。停止中の場合は続けて`FleetFlow Production Start.cmd`を実行します。IPを自動検出できない場合は`-Address`で指定します。
+
+   ```powershell
+   & '.\FleetFlow LAN Setup.cmd' -Address 192.168.1.30
+   ```
+
+   開発環境も使っている場合は、同じコマンドに`-Development`を付けて開発用の`.env`も更新します。
+
+2. 利用PCのブックマークを新しいURL（`http://新しいIP:3035`）へ変更します。
+3. NFCを使う利用PCでは、新しいURLを許可Originにしてインストールし直します。NFC Bridgeは起動時にだけ設定を読むため、再インストールで再起動させます。
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\nfc-bridge\install.ps1 `
+     -AllowedOrigins "http://192.168.1.30:3035;http://localhost:3035"
+   ```
+
+4. 利用PCで画面表示とNFC読取を確認します（上記「利用PCで確認すること」）。
+
+自動起動の設定は毎回`.env.production`を読み直すため、登録し直す必要はありません。IPが変わらないよう、サーバーPCはDHCP予約か固定IPで運用してください。
 
 通常の利用・返却には個人ログインを要求しない共用端末向け設計です。LANへ接続できる人は業務データを閲覧・操作できる前提なので、利用者ごとの権限管理が必要な環境では個別認証の追加が必要です。インターネットへ直接公開しないでください。
 
@@ -361,7 +404,7 @@ docker compose exec app npm run test:integration:parking
 # Origin・プロキシ判定
 docker compose exec app npm run test:security
 
-# 本番LAN URL・サブネット計算（Windowsホスト）
+# 本番LAN URL・サブネット計算・ネットワーク種別・公開アドレス待機（Windowsホスト）
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\production-network.test.ps1
 
 # 依存関係
@@ -398,21 +441,33 @@ docker compose logs --tail 100 app
 docker compose restart app
 ```
 
-本番の場合は、先に`FleetFlow Production Status.cmd`と`FleetFlow Production Health Check.cmd`を実行してください。
+本番の場合は、先に`FleetFlow Production Status.cmd`と`FleetFlow Production Health Check.cmd`を実行してください。サーバー自身のlocalhostでも開けない場合は、`FleetFlow Production Preflight.cmd`で公開アドレスがこのPCに割り当てられているか確認します（IPが変わった場合は「サーバーのIPが変わった場合」を参照）。
+
+### 他のPCから開けない
+
+サーバー自身では開けるのに他のPCから開けない場合は、次を順に確認します。
+
+- サーバーのネットワークが「パブリック」になっていないか（`FleetFlow Production Preflight.cmd`で警告されます。プライベートへ変更します）。
+- 利用PCがサーバーと同じサブネットにいるか。ファイアウォール規則は同じサブネットからだけ許可します（来客用Wi-FiやVPN経由では開けません）。
+- 利用PCのブラウザーにプロキシが設定されている場合、ローカルアドレスがプロキシの例外になっているか。
+- Windowsファイアウォール以外のセキュリティソフトがTCP 3035を遮断していないか。
+- サーバーPCがスリープしていないか。サーバーPCは電源設定でスリープしないようにしてください。
+- 利用PCで`http://サーバーIP:3035`ではなく`https://`や別のポートを開いていないか。
 
 ### 起動用cmdが動かない
 
 - Docker Desktopの初期設定が完了しているか確認します。
 - ファイル一式が同じプロジェクトフォルダーにあることを確認します。
 - PowerShellからは`& '.\FleetFlow Production Start.cmd'`のように実行します。
-- 詳細は`nfc-bridge/fleetflow-start.log`を確認します。
+- 詳細は`nfc-bridge/fleetflow-start.log`を確認します。サインイン時の自動起動の経過は`Autostart:`で始まる行に記録されます。
 
 ### NFC連携ソフトを起動するよう表示される
 
 1. RC-S300／RC-S380を接続し直します。
 2. [NFC Bridgeのヘルス画面](http://127.0.0.1:17831/health)を確認します。
 3. Windowsへ再ログインするか、NFC Bridgeを再インストールします。
-4. 復旧するまでは社員・車両を手動選択します。
+4. ヘルス画面は正常なのにLAN上の画面でだけ読めない場合は、開いているURLがNFC Bridgeの許可Originに含まれているか、ブラウザーでローカルネットワークへのアクセスを拒否していないかを確認します。
+5. 復旧するまでは社員・車両を手動選択します。
 
 ### データ更新が競合した
 
