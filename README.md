@@ -14,6 +14,8 @@ FleetFlowは、社用車の駐車位置、予約、利用開始、返却、利�
 
 本番環境と開発環境は別のDBを使用します。同時には起動せず、起動用ファイルが反対側のコンテナーを自動停止します。
 
+Docker Desktop上では用途を判別しやすいよう、常設コンテナーを`fleetflow-production-*`または`fleetflow-development-*`という固定名で表示します。1台のPCで複数のFleetFlow環境を同時起動する構成には対応していません。
+
 ## 必要なもの
 
 - Windows 10またはWindows 11

@@ -8,6 +8,7 @@ x-logging: &default-logging
 
 services:
   app:
+    container_name: fleetflow-production-app
     image: fleetflow-production-app:current
     build:
       context: .
@@ -50,6 +51,7 @@ services:
       start_period: 30s
 
   migrate:
+    container_name: fleetflow-production-migrate
     image: fleetflow-production-migrate:current
     build:
       context: .
@@ -73,6 +75,7 @@ services:
     logging: *default-logging
 
   db:
+    container_name: fleetflow-production-db
     image: postgres:17-alpine
     environment:
       POSTGRES_DB: fleet
@@ -95,6 +98,7 @@ services:
     logging: *default-logging
 
   db-backup:
+    container_name: fleetflow-production-db-backup
     image: postgres:17-alpine
     command: sh /scripts/database/backup-db.sh loop
     environment:
