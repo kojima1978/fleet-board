@@ -45,7 +45,7 @@ try {
   if ($port -notmatch '^\d{2,5}$' -or [int]$port -gt 65535) { Add-Result $messages.preflightPort "error" $messages.preflightPortInvalid } else { Add-Result $messages.preflightPort "ok" $port }
   $bindAddress = Get-Setting "FLEETFLOW_BIND_ADDRESS"
   if ([string]::IsNullOrWhiteSpace($bindAddress)) { Add-Result $messages.preflightAddress "error" $messages.preflightAddressMissing }
-  elseif ($bindAddress -eq "0.0.0.0") { Add-Result $messages.preflightAddress "warning" $messages.preflightAddressAll }
+  elseif ($bindAddress -eq "0.0.0.0") { Add-Result $messages.preflightAddress "error" $messages.preflightAddressAll }
   else {
     $parsedAddress = $null
     if (-not [System.Net.IPAddress]::TryParse($bindAddress, [ref]$parsedAddress)) {
@@ -54,7 +54,12 @@ try {
     elseif ($bindAddress -ne "127.0.0.1" -and -not (Get-NetIPAddress -IPAddress $bindAddress -ErrorAction SilentlyContinue)) {
       Add-Result $messages.preflightAddress "error" $messages.preflightAddressNotLocal
     }
-    else { Add-Result $messages.preflightAddress "ok" $bindAddress }
+    else {
+      Add-Result $messages.preflightAddress "ok" $bindAddress
+      if ($bindAddress -ne "127.0.0.1" -and (Test-FleetFlowPublicNetwork -Address $bindAddress)) {
+        Add-Result $messages.preflightNetworkProfile "warning" $messages.preflightNetworkProfilePublic
+      }
+    }
   }
 
   $driveName = [System.IO.Path]::GetPathRoot($projectPath).TrimEnd('\').TrimEnd(':')

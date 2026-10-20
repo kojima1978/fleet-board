@@ -3,12 +3,18 @@ import type { NextConfig } from "next";
 const development = process.env.NODE_ENV === "development";
 const scriptSources = development ? "'self' 'unsafe-inline' 'unsafe-eval'" : "'self' 'unsafe-inline'";
 const developmentHost = process.env.FLEETFLOW_DEV_BIND_ADDRESS?.trim();
+const developmentHostName = process.env.FLEETFLOW_DEV_HOST_NAME?.trim().toLowerCase();
+// LANからは公開IPのほか、サーバーのPC名（http://pc-name:3035）でも開けるようにする。
+const allowedDevOrigins = [
+  ...(developmentHost && developmentHost !== "0.0.0.0" ? [developmentHost] : []),
+  ...(developmentHostName ? [developmentHostName] : []),
+];
 
 const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
-  // LANアクセス時にも開発用リソースとHMRを許可する。許可先は公開IPだけに限定する。
-  allowedDevOrigins: developmentHost && developmentHost !== "0.0.0.0" ? [developmentHost] : [],
+  // LANアクセス時にも開発用リソースとHMRを許可する。許可先は公開IPとPC名だけに限定する。
+  allowedDevOrigins,
   // Docker Desktop のバインドマウントは一時的に EIO を返すことがあり、Turbopack の
   // 開発用ディスクキャッシュがその失敗を記録して再起動後も 500 を返し続ける。
   // キャッシュはメモリ上だけにして、一時的な失敗が残らないようにする。

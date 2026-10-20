@@ -63,6 +63,16 @@ function Test-FleetFlowPrivateIPv4 {
     ($bytes[0] -eq 192 -and $bytes[1] -eq 168)
 }
 
+function Test-FleetFlowPublicNetwork {
+  param([Parameter(Mandatory = $true)][string]$Address)
+
+  # The firewall rule covers Private/Domain only, so other PCs cannot connect while this LAN is Public.
+  $ipAddress = Get-NetIPAddress -IPAddress $Address -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $ipAddress) { return $false }
+  $connectionProfile = Get-NetConnectionProfile -InterfaceIndex $ipAddress.InterfaceIndex -ErrorAction SilentlyContinue | Select-Object -First 1
+  return [bool]($connectionProfile -and $connectionProfile.NetworkCategory -eq "Public")
+}
+
 function Get-FleetFlowNetworkCidr {
   param(
     [Parameter(Mandatory = $true)][string]$Address,

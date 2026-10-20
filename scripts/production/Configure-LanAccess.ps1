@@ -94,12 +94,16 @@ try {
   }
 
   $firewallMessage = if ($NoFirewall) { "Windowsファイアウォール規則は変更していません。" } else { "Windowsファイアウォールは $networkCidr からのTCP $portだけを許可しました。" }
+  $networkProfileMessage = if (Test-FleetFlowPublicNetwork -Address $Address) {
+    "`n【要対応】このネットワークは「パブリック」のため、他のPCから接続できません。`nWindowsの設定 > ネットワークとインターネット > $($selectedAddress.InterfaceAlias) > ネットワーク プロファイルの種類 を「プライベート」にしてください。`n"
+  } else { "" }
   Show-Result @"
 ${modeName}環境のLANアクセスを設定しました。
 
 接続URL: $appUrl
 $firewallMessage
 $restartMessage
+$networkProfileMessage
 
 別PCのブラウザーで上記URLを開いてください。
 NFCを使う場合は、そのPCのNFC BridgeにもこのURLを許可Originとして設定してください。

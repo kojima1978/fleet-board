@@ -21,6 +21,7 @@ try {
   Assert-Equal "192.168.10.0/24" (Get-FleetFlowNetworkCidr -Address "192.168.10.25" -PrefixLength 24) "LAN CIDRを計算できる"
   Assert-Equal $true (Test-FleetFlowPrivateIPv4 "10.20.30.40") "プライベートIPv4を許可する"
   Assert-Equal $false (Test-FleetFlowPrivateIPv4 "8.8.8.8") "公開IPv4を拒否する"
+  Assert-Equal $false (Test-FleetFlowPublicNetwork "192.0.2.1") "このPCにないアドレスはパブリック判定しない"
   Write-Output "Production network tests passed"
 }
 finally {
