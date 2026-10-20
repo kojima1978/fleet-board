@@ -102,5 +102,14 @@
   "APP_TIMEOUT": "FleetFlow本体から応答がありません。Docker Desktopでコンテナーの状態を確認してください。",
   "PRODUCTION_HEALTH_CHECK_FAILED": "本番環境の安全確認で異常が見つかりました。FleetFlow Production Health Checkを実行して詳細を確認してください。",
   "PRODUCTION_PREFLIGHT_FAILED": "本番環境の起動前チェックで異常が見つかりました。FleetFlow Production Preflightを実行して詳細を確認してください。",
-  "UNKNOWN_ERROR": "予期しないエラーが発生しました。詳細ログを確認してください。"
+  "UNKNOWN_ERROR": "予期しないエラーが発生しました。詳細ログを確認してください。",
+  "autostartErrorTitle": "FleetFlow 自動起動エラー",
+  "autostartErrorIntro": "サインイン時にFleetFlow本番環境を自動起動できませんでした。FleetFlow Production Start.cmdを実行してください。",
+  "AUTOSTART_ADDRESS_TIMEOUT": "LANの公開アドレスが時間内にこのPCへ割り当てられませんでした。ネットワーク接続と固定IP設定を確認してください。",
+  "AUTOSTART_FAILED": "起動を3回試しましたが完了しませんでした。詳細ログを確認してください。",
+  "autostartSetupTitle": "FleetFlow 自動起動設定",
+  "autostartNotInitialized": "先にFleetFlow Production Start.cmdを実行して本番設定を作成してください。",
+  "autostartRegistered": "Windowsへサインインしたときに、FleetFlow本番環境を自動起動するよう設定しました。\n\nLANの公開アドレスとDocker Desktopの準備を待ってから起動します。起動に失敗した場合だけ画面に表示します。\n\nサーバーPCは再起動後に必ずサインインしてください（自動サインインも可）。\n解除する場合は、PowerShellで次を実行します。\n& '.\\FleetFlow Production Autostart Setup.cmd' -Remove",
+  "autostartRemoved": "サインイン時の自動起動を解除しました。",
+  "autostartSetupFailed": "自動起動を設定できませんでした。"
 }

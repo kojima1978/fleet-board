@@ -63,6 +63,22 @@ function Test-FleetFlowPrivateIPv4 {
     ($bytes[0] -eq 192 -and $bytes[1] -eq 168)
 }
 
+function Wait-FleetFlowLocalAddress {
+  param(
+    [Parameter(Mandatory = $true)][string]$Address,
+    [int]$TimeoutSeconds = 300,
+    [int]$IntervalSeconds = 5
+  )
+
+  # Docker cannot publish a port on an address the PC does not have yet, so wait for it after sign-in.
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  while ($true) {
+    if (Get-NetIPAddress -IPAddress $Address -AddressState Preferred -ErrorAction SilentlyContinue) { return $true }
+    if ((Get-Date) -ge $deadline) { return $false }
+    Start-Sleep -Seconds $IntervalSeconds
+  }
+}
+
 function Test-FleetFlowPublicNetwork {
   param([Parameter(Mandatory = $true)][string]$Address)
 

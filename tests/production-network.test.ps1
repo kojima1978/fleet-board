@@ -22,6 +22,8 @@ try {
   Assert-Equal $true (Test-FleetFlowPrivateIPv4 "10.20.30.40") "プライベートIPv4を許可する"
   Assert-Equal $false (Test-FleetFlowPrivateIPv4 "8.8.8.8") "公開IPv4を拒否する"
   Assert-Equal $false (Test-FleetFlowPublicNetwork "192.0.2.1") "このPCにないアドレスはパブリック判定しない"
+  Assert-Equal $true (Wait-FleetFlowLocalAddress -Address "127.0.0.1" -TimeoutSeconds 1 -IntervalSeconds 1) "割り当て済みのアドレスはすぐ使える"
+  Assert-Equal $false (Wait-FleetFlowLocalAddress -Address "192.0.2.1" -TimeoutSeconds 1 -IntervalSeconds 1) "割り当てられないアドレスは時間切れにする"
   Write-Output "Production network tests passed"
 }
 finally {

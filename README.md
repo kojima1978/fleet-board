@@ -89,7 +89,12 @@ git pull origin main
 
 # 停止（DBとバックアップは残ります）
 & '.\FleetFlow Production Stop.cmd'
+
+# Windowsへのサインイン時に自動起動する（解除は -Remove）
+& '.\FleetFlow Production Autostart Setup.cmd'
 ```
+
+サーバーPCでは`FleetFlow Production Autostart Setup.cmd`を一度実行しておくと、再起動後にサインインした時点で本番環境が自動起動します。LANの公開アドレスがPCへ割り当てられ、Docker Desktopの準備が終わるまで待ってから起動するため、ネットワークの準備前に起動して失敗することを防げます（公開アドレスが無いとDockerはポートを公開できず、アプリ全体が起動しません）。起動に失敗した場合だけ画面に表示し、経過は`nfc-bridge\fleetflow-start.log`に記録します。Docker Desktopはサインインしないと動かないため、再起動後は必ずサインインしてください（自動サインインも可）。同じPCで開発環境を使っている場合も、サインイン時には本番環境へ切り替わります。
 
 本番の通常起動は、最後に検証済みのイメージを再利用します。ソースをpullしただけでは本番へ反映されません。変更を反映するときだけ`FleetFlow Production Update.cmd`を実行してください。起動と更新の前には、Docker構成、秘密情報、公開アドレス、ポート、ディスク空きを自動点検します。NFC未接続や容量低下などは注意表示に留め、設定欠落など安全に起動できない場合だけ停止します。
 
@@ -309,6 +314,7 @@ PC故障に備える場合は`FleetFlow Production Backup Setup.cmd`を実行し
 7. 信頼するリバースプロキシが転送ヘッダーを上書きする場合だけ`FLEETFLOW_TRUST_PROXY=true`にします。直接公開は`false`のままにします。
 8. NFCを使う各PCへNFC Bridgeを入れ、LAN用Originを許可します。
 9. バックアップはBitLocker対応ドライブまたは権限制御済みNASへ複製します。
+10. `FleetFlow Production Autostart Setup.cmd`を実行し、再起動後にサインインするとLANから開けることを確認します。
 
 LAN IPを自動検出できない場合は、PowerShellで明示できます。
 
