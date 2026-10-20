@@ -17,7 +17,7 @@ function Set-FleetFlowEnvironmentValue {
     [Parameter(Mandatory = $true)][string]$Value
   )
 
-  $content = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8).TrimEnd()
+  $content = if (Test-Path -LiteralPath $Path) { [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8).TrimEnd() } else { "" }
   $line = "$Name=$Value"
   if ($content -match "(?m)^$([regex]::Escape($Name))=") {
     $content = [regex]::Replace($content, "(?m)^$([regex]::Escape($Name))=.*$", $line)
@@ -31,12 +31,16 @@ function Set-FleetFlowEnvironmentValue {
 function Get-FleetFlowAppUrl {
   param(
     [Parameter(Mandatory = $true)][string]$EnvironmentPath,
+    [switch]$Development,
     [string]$Path = "/"
   )
 
-  $address = Get-FleetFlowEnvironmentValue -Path $EnvironmentPath -Name "FLEETFLOW_BIND_ADDRESS"
+  $addressName = if ($Development) { "FLEETFLOW_DEV_BIND_ADDRESS" } else { "FLEETFLOW_BIND_ADDRESS" }
+  $address = [Environment]::GetEnvironmentVariable($addressName)
+  if ([string]::IsNullOrWhiteSpace($address)) { $address = Get-FleetFlowEnvironmentValue -Path $EnvironmentPath -Name $addressName }
   if ([string]::IsNullOrWhiteSpace($address) -or $address -eq "0.0.0.0") { $address = "127.0.0.1" }
-  $port = Get-FleetFlowEnvironmentValue -Path $EnvironmentPath -Name "FLEETFLOW_PORT"
+  $port = if ($Development) { "3035" } else { [Environment]::GetEnvironmentVariable("FLEETFLOW_PORT") }
+  if (-not $Development -and [string]::IsNullOrWhiteSpace($port)) { $port = Get-FleetFlowEnvironmentValue -Path $EnvironmentPath -Name "FLEETFLOW_PORT" }
   if ($port -notmatch '^\d{2,5}$' -or [int]$port -gt 65535) { $port = "3035" }
   if (-not $Path.StartsWith("/")) { $Path = "/$Path" }
 

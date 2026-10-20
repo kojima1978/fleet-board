@@ -1,6 +1,7 @@
-param(
+﻿param(
   [Parameter(Mandatory = $true)][string]$ProjectDirectory,
   [string]$Address,
+  [switch]$Development,
   [switch]$NoFirewall,
   [switch]$NoRestart,
   [switch]$NoUi
@@ -8,8 +9,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 $projectPath = [System.IO.Path]::GetFullPath($ProjectDirectory)
-$environmentPath = Join-Path $projectPath ".env.production"
-$composePath = Join-Path $projectPath "compose.production.yaml"
+$environmentPath = Join-Path $projectPath $(if ($Development) { ".env" } else { ".env.production" })
+$composePath = Join-Path $projectPath $(if ($Development) { "compose.yaml" } else { "compose.production.yaml" })
+$addressName = if ($Development) { "FLEETFLOW_DEV_BIND_ADDRESS" } else { "FLEETFLOW_BIND_ADDRESS" }
+$modeName = if ($Development) { "開発" } else { "本番" }
 . (Join-Path $PSScriptRoot "FleetFlow-Network.ps1")
 
 function Show-Result([string]$Message, [string]$Title = "FleetFlow LAN設定") {
@@ -25,8 +28,8 @@ function Test-Administrator {
 }
 
 try {
-  if (-not (Test-Path -LiteralPath $environmentPath)) { throw "先に FleetFlow Production Start.cmd を実行してください。" }
-  if (-not (Test-Path -LiteralPath $composePath)) { throw "compose.production.yaml が見つかりません。" }
+  if (-not $Development -and -not (Test-Path -LiteralPath $environmentPath)) { throw "先に FleetFlow Production Start.cmd を実行してください。" }
+  if (-not (Test-Path -LiteralPath $composePath)) { throw "$composePath が見つかりません。" }
 
   if (-not $NoFirewall -and -not (Test-Administrator)) {
     $arguments = @(
@@ -35,8 +38,9 @@ try {
     )
     if (-not [string]::IsNullOrWhiteSpace($Address)) { $arguments += @("-Address", $Address) }
     if ($NoRestart) { $arguments += "-NoRestart" }
+    if ($Development) { $arguments += "-Development" }
     if ($NoUi) { $arguments += "-NoUi" }
-    $process = Start-Process -FilePath "powershell.exe" -ArgumentList $arguments -Verb RunAs -Wait -PassThru
+    $process = Start-Process -FilePath "powershell.exe" -ArgumentList $arguments -Verb RunAs -WindowStyle Hidden -Wait -PassThru
     exit $process.ExitCode
   }
 
@@ -61,9 +65,11 @@ try {
   $selectedAddress = $candidates | Where-Object { $_.IPAddress -eq $Address } | Select-Object -First 1
   if (-not $selectedAddress) { throw "$Address はこのPCの有効なLANアドレスではありません。固定IP設定を確認してください。" }
 
-  $port = Get-FleetFlowEnvironmentValue -Path $environmentPath -Name "FLEETFLOW_PORT"
+  $port = if ($Development) { "3035" } else { Get-FleetFlowEnvironmentValue -Path $environmentPath -Name "FLEETFLOW_PORT" }
   if ($port -notmatch '^\d{2,5}$' -or [int]$port -gt 65535) { throw "FLEETFLOW_PORT が正しくありません。" }
   $networkCidr = Get-FleetFlowNetworkCidr -Address $Address -PrefixLength $selectedAddress.PrefixLength
+  $overrideAddress = [Environment]::GetEnvironmentVariable($addressName)
+  if ($overrideAddress -and $overrideAddress -ne $Address) { throw "$addressName が環境変数で上書きされています。環境変数を解除してから再実行してください。" }
 
   if (-not $NoFirewall) {
     $ruleName = "FleetFlow LAN (TCP $port)"
@@ -72,9 +78,9 @@ try {
       -Protocol TCP -LocalPort $port -LocalAddress $Address -RemoteAddress $networkCidr -Profile Private,Domain | Out-Null
   }
 
-  Set-FleetFlowEnvironmentValue -Path $environmentPath -Name "FLEETFLOW_BIND_ADDRESS" -Value $Address
-  $appUrl = Get-FleetFlowAppUrl -EnvironmentPath $environmentPath
-  $restartMessage = "次回の本番起動から設定が反映されます。"
+  Set-FleetFlowEnvironmentValue -Path $environmentPath -Name $addressName -Value $Address
+  $appUrl = Get-FleetFlowAppUrl -EnvironmentPath $environmentPath -Development:$Development
+  $restartMessage = "次回の${modeName}起動から設定が反映されます。"
 
   if (-not $NoRestart -and (Get-Command docker -ErrorAction SilentlyContinue)) {
     $composeArguments = @("compose", "--project-directory", $projectPath, "--env-file", $environmentPath, "-f", $composePath)
@@ -82,14 +88,14 @@ try {
     $containerRunning = if ($containerId) { (& docker inspect --format '{{.State.Running}}' $containerId 2>$null | Select-Object -First 1) } else { "false" }
     if ($containerRunning -eq "true") {
       & docker @composeArguments up -d --no-deps --force-recreate app
-      if ($LASTEXITCODE -ne 0) { throw "設定は保存しましたが、アプリの再起動に失敗しました。FleetFlow Production Start.cmd を実行してください。" }
+      if ($LASTEXITCODE -ne 0) { throw "設定は保存しましたが、${modeName}アプリの再起動に失敗しました。${modeName}用の起動コマンドを実行してください。" }
       $restartMessage = "稼働中のアプリを新しい設定で再起動しました。"
     }
   }
 
   $firewallMessage = if ($NoFirewall) { "Windowsファイアウォール規則は変更していません。" } else { "Windowsファイアウォールは $networkCidr からのTCP $portだけを許可しました。" }
   Show-Result @"
-LANアクセスを設定しました。
+${modeName}環境のLANアクセスを設定しました。
 
 接続URL: $appUrl
 $firewallMessage

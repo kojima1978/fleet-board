@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\scripts\production\FleetFlow-Network.ps1")
 
 function Assert-Equal($Expected, $Actual, [string]$Message) {
@@ -13,6 +13,11 @@ try {
   Assert-Equal "http://127.0.0.1:3035/api/health" (Get-FleetFlowAppUrl -EnvironmentPath $environmentPath -Path "/api/health") "ローカルURLを作成できる"
   Set-FleetFlowEnvironmentValue -Path $environmentPath -Name "FLEETFLOW_BIND_ADDRESS" -Value "192.168.10.25"
   Assert-Equal "http://192.168.10.25:3035/" (Get-FleetFlowAppUrl -EnvironmentPath $environmentPath) "LAN URLを作成できる"
+  $developmentEnvironmentPath = Join-Path $testDirectory ".env"
+  Assert-Equal "http://127.0.0.1:3035/" (Get-FleetFlowAppUrl -EnvironmentPath $developmentEnvironmentPath -Development) "開発設定がなくてもローカルへ接続する"
+  Set-FleetFlowEnvironmentValue -Path $developmentEnvironmentPath -Name "FLEETFLOW_DEV_BIND_ADDRESS" -Value "192.168.10.26"
+  Assert-Equal "http://192.168.10.26:3035/api/health" (Get-FleetFlowAppUrl -EnvironmentPath $developmentEnvironmentPath -Development -Path "/api/health") "開発LAN設定を起動確認にも使用する"
+  Assert-Equal "http://192.168.10.25:3035/" (Get-FleetFlowAppUrl -EnvironmentPath $environmentPath) "開発設定で本番設定が変更されない"
   Assert-Equal "192.168.10.0/24" (Get-FleetFlowNetworkCidr -Address "192.168.10.25" -PrefixLength 24) "LAN CIDRを計算できる"
   Assert-Equal $true (Test-FleetFlowPrivateIPv4 "10.20.30.40") "プライベートIPv4を許可する"
   Assert-Equal $false (Test-FleetFlowPrivateIPv4 "8.8.8.8") "公開IPv4を拒否する"

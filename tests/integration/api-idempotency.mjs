@@ -11,14 +11,14 @@ const ids = { department: `test-dept-${suffix}`, employeeNumber: `test-en-${suff
 const operationIds = [];
 
 async function post(body) {
-  const response = await fetch(`${appUrl}/api/dashboard`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const response = await fetch(`${appUrl}/api/dashboard`, { method: "POST", headers: { "Content-Type": "application/json", Origin: new URL(appUrl).origin }, body: JSON.stringify(body) });
   return { status: response.status, body: await response.json() };
 }
 
 async function authenticateAdmin() {
   const pin = process.env.FLEETFLOW_ADMIN_PIN;
   if (!pin) throw new Error("FLEETFLOW_ADMIN_PIN is required for maintenance integration test");
-  const response = await fetch(`${appUrl}/api/admin/session`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pin }) });
+  const response = await fetch(`${appUrl}/api/admin/session`, { method: "POST", headers: { "Content-Type": "application/json", Origin: new URL(appUrl).origin }, body: JSON.stringify({ pin }) });
   assert.equal(response.status, 200, await response.text());
   const cookie = response.headers.get("set-cookie")?.split(";", 1)[0];
   if (!cookie) throw new Error("Admin session cookie was not returned");
@@ -26,7 +26,7 @@ async function authenticateAdmin() {
 }
 
 async function postAdmin(body, cookie) {
-  const response = await fetch(`${appUrl}/api/dashboard`, { method: "POST", headers: { "Content-Type": "application/json", Cookie: cookie }, body: JSON.stringify(body) });
+  const response = await fetch(`${appUrl}/api/dashboard`, { method: "POST", headers: { "Content-Type": "application/json", Cookie: cookie, Origin: new URL(appUrl).origin }, body: JSON.stringify(body) });
   return { status: response.status, body: await response.json() };
 }
 

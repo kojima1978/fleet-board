@@ -95,14 +95,20 @@ try {
   }
 
   $composeArguments = @("compose", "--project-directory", $ProjectDirectory)
+  . (Join-Path $ProjectDirectory "scripts\production\FleetFlow-Network.ps1")
   if ($Production) {
     $productionComposePath = Join-Path $ProjectDirectory "compose.production.yaml"
     $productionEnvironmentPath = Join-Path $ProjectDirectory ".env.production"
     if (-not (Test-Path -LiteralPath $productionComposePath)) { throw "PRODUCTION_COMPOSE_NOT_FOUND" }
     if (-not (Test-Path -LiteralPath $productionEnvironmentPath)) { throw "PRODUCTION_CONFIG_NOT_FOUND" }
-    . (Join-Path $ProjectDirectory "scripts\production\FleetFlow-Network.ps1")
     $appUrl = Get-FleetFlowAppUrl -EnvironmentPath $productionEnvironmentPath
     $composeArguments += @("--env-file", $productionEnvironmentPath, "-f", $productionComposePath)
+  }
+  else {
+    $developmentEnvironmentPath = Join-Path $ProjectDirectory ".env"
+    $appUrl = Get-FleetFlowAppUrl -EnvironmentPath $developmentEnvironmentPath -Development
+    if (Test-Path -LiteralPath $developmentEnvironmentPath) { $composeArguments += @("--env-file", $developmentEnvironmentPath) }
+    $composeArguments += @("-f", (Join-Path $ProjectDirectory "compose.yaml"))
   }
 
   if ($StatusOnly) {
