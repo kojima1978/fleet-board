@@ -296,14 +296,23 @@ PC故障に備える場合は`FleetFlow Production Backup Setup.cmd`を実行し
 
 初期設定では安全のため`127.0.0.1`だけへ公開され、同じPCからしか接続できません。LAN公開時は次をすべて実施してください。
 
-1. サーバーPCの固定LAN IPを決めます。
-2. `.env.production`の`FLEETFLOW_BIND_ADDRESS`へ、そのIPを指定します。`0.0.0.0`は避けてください。
-3. WindowsファイアウォールでTCP 3035を社内サブネットからだけ許可します。
-4. インターネットと来客用Wi-Fiから到達できないことを別端末で確認します。
-5. 可能なら社内証明書とリバースプロキシでHTTPS化し、`FLEETFLOW_COOKIE_SECURE=true`にします。
-6. 信頼するリバースプロキシが転送ヘッダーを上書きする場合だけ`FLEETFLOW_TRUST_PROXY=true`にします。直接公開は`false`のままにします。
-7. NFCを使う各PCへNFC Bridgeを入れ、LAN用Originを許可します。
-8. バックアップはBitLocker対応ドライブまたは権限制御済みNASへ複製します。
+1. サーバーPCへ固定LAN IPを設定します。
+2. `FleetFlow Production Start.cmd`を一度実行して本番設定を作成します。
+3. `FleetFlow LAN Setup.cmd`をダブルクリックします。自動検出した固定LAN IPをアプリへ設定し、管理者権限の確認後、TCP 3035を同じ社内サブネットからだけ許可します。
+4. 表示された`http://LAN-IP:3035`を別PCで開きます。
+5. インターネットと来客用Wi-Fiから到達できないことを別端末で確認します。
+6. 可能なら社内証明書とリバースプロキシでHTTPS化し、`FLEETFLOW_COOKIE_SECURE=true`にします。
+7. 信頼するリバースプロキシが転送ヘッダーを上書きする場合だけ`FLEETFLOW_TRUST_PROXY=true`にします。直接公開は`false`のままにします。
+8. NFCを使う各PCへNFC Bridgeを入れ、LAN用Originを許可します。
+9. バックアップはBitLocker対応ドライブまたは権限制御済みNASへ複製します。
+
+LAN IPを自動検出できない場合は、PowerShellで明示できます。
+
+```powershell
+& '.\FleetFlow LAN Setup.cmd' -Address 192.168.1.20
+```
+
+この設定はアプリの公開ポートだけを変更します。PostgreSQLのポートはLANへ公開されません。ブラウザーとAPIは同じURLを使用するため、FleetFlow本体にCORSの追加設定は不要です。
 
 通常の利用・返却には個人ログインを要求しない共用端末向け設計です。LANへ接続できる人は業務データを閲覧・操作できる前提なので、利用者ごとの権限管理が必要な環境では個別認証の追加が必要です。インターネットへ直接公開しないでください。
 
@@ -326,6 +335,9 @@ docker compose exec app npm run test:integration:operations
 
 # Origin・プロキシ判定
 docker compose exec app npm run test:security
+
+# 本番LAN URL・サブネット計算（Windowsホスト）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\production-network.test.ps1
 
 # 依存関係
 docker compose exec app npm audit

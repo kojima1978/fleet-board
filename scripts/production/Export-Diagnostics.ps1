@@ -14,11 +14,12 @@ $diagnosticsRoot = Join-Path $projectPath "diagnostics"
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $workPath = Join-Path $diagnosticsRoot "fleetflow-$stamp"
 $archivePath = "$workPath.zip"
+. (Join-Path $PSScriptRoot "FleetFlow-Network.ps1")
 New-Item -ItemType Directory -Path $workPath -Force | Out-Null
 
 (& docker compose --project-directory $projectPath --env-file $environmentPath -f $composePath ps --all 2>&1 | Out-String) | Set-Content -LiteralPath (Join-Path $workPath "containers.txt") -Encoding UTF8
 (& docker compose --project-directory $projectPath --env-file $environmentPath -f $composePath logs --tail 500 2>&1 | Out-String) | Set-Content -LiteralPath (Join-Path $workPath "docker.log") -Encoding UTF8
-try { (Invoke-RestMethod -Uri "http://localhost:3035/api/health" -TimeoutSec 5 | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath (Join-Path $workPath "app-health.json") -Encoding UTF8 } catch { $_.Exception.Message | Set-Content -LiteralPath (Join-Path $workPath "app-health-error.txt") -Encoding UTF8 }
+try { (Invoke-RestMethod -Uri (Get-FleetFlowAppUrl -EnvironmentPath $environmentPath -Path "/api/health") -TimeoutSec 5 | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath (Join-Path $workPath "app-health.json") -Encoding UTF8 } catch { $_.Exception.Message | Set-Content -LiteralPath (Join-Path $workPath "app-health-error.txt") -Encoding UTF8 }
 try { (Invoke-RestMethod -Uri "http://127.0.0.1:17831/health" -TimeoutSec 5 | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath (Join-Path $workPath "nfc-health.json") -Encoding UTF8 } catch { $_.Exception.Message | Set-Content -LiteralPath (Join-Path $workPath "nfc-health-error.txt") -Encoding UTF8 }
 try { (& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $projectPath "scripts\production\Test-ProductionHealth.ps1") -ProjectDirectory $projectPath -NoUi 2>&1 | Out-String) | Set-Content -LiteralPath (Join-Path $workPath "production-health.txt") -Encoding UTF8 } catch { $_.Exception.Message | Set-Content -LiteralPath (Join-Path $workPath "production-health-error.txt") -Encoding UTF8 }
 Get-PSDrive -PSProvider FileSystem | Select-Object Name,Used,Free,Root | Format-Table -AutoSize | Out-String | Set-Content -LiteralPath (Join-Path $workPath "disk.txt") -Encoding UTF8

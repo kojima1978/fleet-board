@@ -11,6 +11,7 @@ $logPath = Join-Path $projectPath "nfc-bridge\health-check.log"
 $messagesPath = Join-Path $projectPath "nfc-bridge\messages.ja.json"
 $messages = ConvertFrom-Json ([System.IO.File]::ReadAllText($messagesPath, [System.Text.Encoding]::UTF8))
 $checks = [System.Collections.Generic.List[object]]::new()
+. (Join-Path $PSScriptRoot "FleetFlow-Network.ps1")
 
 function Add-Check([string]$name, [string]$status, [string]$detail) {
   $checks.Add([pscustomobject]@{ Name = $name; Status = $status; Detail = $detail })
@@ -42,10 +43,9 @@ try {
     Add-Check $service $status ($messages.healthContainerDetail -f $containerState, $healthState, $restarts)
   }
 
-  $port = Get-EnvironmentValue "FLEETFLOW_PORT"
-  if ($port -notmatch '^\d{2,5}$') { $port = "3035" }
   try {
-    $health = Invoke-RestMethod -Uri "http://localhost:$port/api/health" -TimeoutSec 5
+    $healthUrl = Get-FleetFlowAppUrl -EnvironmentPath $environmentPath -Path "/api/health"
+    $health = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 5
     $appOk = $health.status -eq "ok" -and $health.database -eq "ok"
     Add-Check $messages.healthAppResponse $(if ($appOk) { "ok" } else { "error" }) ($messages.healthAppDetail -f $health.status, $health.database)
     $now = Get-Date

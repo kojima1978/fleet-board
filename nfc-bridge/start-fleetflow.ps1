@@ -100,11 +100,8 @@ try {
     $productionEnvironmentPath = Join-Path $ProjectDirectory ".env.production"
     if (-not (Test-Path -LiteralPath $productionComposePath)) { throw "PRODUCTION_COMPOSE_NOT_FOUND" }
     if (-not (Test-Path -LiteralPath $productionEnvironmentPath)) { throw "PRODUCTION_CONFIG_NOT_FOUND" }
-    $portSetting = Get-Content -LiteralPath $productionEnvironmentPath | Where-Object { $_ -match '^FLEETFLOW_PORT=' } | Select-Object -First 1
-    if ($portSetting) {
-      $productionPort = ($portSetting -split '=', 2)[1].Trim()
-      if ($productionPort -match '^\d{2,5}$') { $appUrl = "http://localhost:$productionPort/" }
-    }
+    . (Join-Path $ProjectDirectory "scripts\production\FleetFlow-Network.ps1")
+    $appUrl = Get-FleetFlowAppUrl -EnvironmentPath $productionEnvironmentPath
     $composeArguments += @("--env-file", $productionEnvironmentPath, "-f", $productionComposePath)
   }
 

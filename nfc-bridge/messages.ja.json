@@ -72,6 +72,8 @@
   "preflightPortInvalid": "正しいポート番号ではありません",
   "preflightAddress": "公開アドレス",
   "preflightAddressMissing": "未設定です",
+  "preflightAddressInvalid": "IPアドレスの形式ではありません",
+  "preflightAddressNotLocal": "このPCに割り当てられていません。固定LAN IPを確認してください",
   "preflightAddressAll": "全ネットワークへ公開されます。固定LAN IPを推奨します",
   "preflightCheck": "事前診断",
   "migrationDestinationPrompt": "移行パッケージの保存先フォルダーを入力してください",

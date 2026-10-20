@@ -14,6 +14,7 @@ $messages = ConvertFrom-Json ([System.IO.File]::ReadAllText($messagesPath, [Syst
 $composeArguments = @("compose", "--project-directory", $projectPath, "--env-file", $environmentPath, "-f", $composePath)
 $rollbackAvailable = $false
 $previousEnvironment = $null
+. (Join-Path $PSScriptRoot "FleetFlow-Network.ps1")
 
 function Write-UpdateLog([string]$message) {
   Add-Content -LiteralPath $logPath -Value ("{0} Production update: {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $message) -Encoding UTF8
@@ -60,9 +61,10 @@ try {
   Invoke-Docker ($composeArguments + @("up", "-d", "--no-deps", "--force-recreate", "app"))
 
   $ready = $false
+  $healthUrl = Get-FleetFlowAppUrl -EnvironmentPath $environmentPath -Path "/api/health"
   foreach ($attempt in 1..60) {
     try {
-      if ((Invoke-WebRequest -Uri "http://localhost:3035/api/health" -UseBasicParsing -TimeoutSec 3).StatusCode -eq 200) { $ready = $true; break }
+      if ((Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 3).StatusCode -eq 200) { $ready = $true; break }
     }
     catch { }
     Start-Sleep -Seconds 2
