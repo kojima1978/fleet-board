@@ -4,6 +4,9 @@ FleetFlowは、社用車の駐車位置、予約、利用開始、返却、利�
 
 ## 最初に読むところ
 
+- リポジトリ：[https://github.com/kojima1978/fleet-board](https://github.com/kojima1978/fleet-board)
+- clone用URL：`https://github.com/kojima1978/fleet-board.git`（ブランチは`main`）
+
 このプロジェクトはDockerで動かします。通常運用には**本番環境**、開発・動作確認には**開発環境**を使用してください。
 
 | 用途 | 使用するファイル | データ |
@@ -15,6 +18,62 @@ FleetFlowは、社用車の駐車位置、予約、利用開始、返却、利�
 本番環境と開発環境は別のDBを使用します。同時には起動せず、起動用ファイルが反対側のコンテナーを自動停止します。
 
 Docker Desktop上では用途を判別しやすいよう、常設コンテナーを`fleetflow-production-*`または`fleetflow-development-*`という固定名で表示します。1台のPCで複数のFleetFlow環境を同時起動する構成には対応していません。
+
+## AIエージェントで操作する場合
+
+Claude CodeなどのAIエージェントにこのREADMEを読ませると、cloneからDockerの起動、状態確認までを任せられます。AIエージェントは、この章の規則に従って操作してください。
+
+### 環境の選び方
+
+- 依頼に「本番」「業務で使う」「サーバー」とあれば本番環境を使います。「開発」「動作確認」「画面確認」とあれば開発環境を使います。判断できない場合は利用者に確認します。
+- 本番と開発は同時に起動できず、起動用ファイルが反対側を自動停止します。`.env.production`があるPCで開発環境を起動する前には、本番が止まってよいか利用者に確認します。
+
+### 実行方法
+
+- コマンドはPowerShellで、プロジェクトフォルダー（`compose.yaml`がある場所）から実行します。Git Bashではコンテナー内のパスが書き換わるため使いません。
+- 起動用cmdに`-NoUi`を付けると、ダイアログやブラウザーを開かずに結果を標準出力へ書きます。成否は終了コード（0が成功）で判断します。
+- Docker Desktopが停止中なら起動用cmdが自動で起動します。Docker Desktop自体が入っていない場合は、インストールせずに利用者へ伝えます。
+
+```powershell
+# 初回だけ：取得
+git clone https://github.com/kojima1978/fleet-board.git
+cd fleet-board
+```
+
+| 目的 | コマンド |
+| --- | --- |
+| 本番を起動（初回は設定も作成） | `& '.\FleetFlow Production Start.cmd' -NoUi` |
+| 本番の状態確認 | `& '.\FleetFlow Production Status.cmd' -NoUi` |
+| 本番の詳細な健全性確認 | `& '.\FleetFlow Production Health Check.cmd' -NoUi` |
+| 本番の起動前診断 | `& '.\FleetFlow Production Preflight.cmd' -NoUi` |
+| 本番を停止 | `& '.\FleetFlow Production Stop.cmd' -NoUi` |
+| 本番の障害情報を保存 | `& '.\FleetFlow Production Diagnostics.cmd' -NoUi` |
+| 開発を起動 | `& '.\FleetFlow Start.cmd' -NoUi` |
+| 開発の状態確認 | `& '.\FleetFlow Status.cmd' -NoUi` |
+| 開発のログ確認 | `docker compose logs --tail 100 app` |
+| 開発の検査 | 「開発時の検査」のコマンド（すべて`docker compose exec app …`でDocker内実行） |
+
+起動後の確認は、サーバー自身から次を実行してHTTP 200が返ることで行います（本番・開発とも同じポート）。
+
+```powershell
+(Invoke-WebRequest http://localhost:3035/api/health -UseBasicParsing).StatusCode
+```
+
+### 利用者の確認が必要な操作
+
+次の操作は、内容を説明して利用者の明示的な了承を得てから実行します。
+
+- 本番更新（`FleetFlow Production Update.cmd`）と、本番PCでの`git pull`（先に`git status`で未コミットの変更を確認）
+- バックアップの復元と移行パッケージの取込。`RESTORE`の確認入力は利用者自身が行い、AIエージェントが代わりに入力しません。
+- LAN公開（`FleetFlow LAN Setup.cmd`）。ファイアウォールを変更し、管理者権限の承認画面が出ます。
+- サインイン時の自動起動の登録・解除（`FleetFlow Production Autostart Setup.cmd`）
+- `.env.production`の編集・削除
+- DBボリュームを消す操作（`docker compose down -v`、`docker volume rm`など）。バックアップが無い状態では実行しません。
+
+### 秘密情報の扱い
+
+- 本番の初回起動は、出力に管理者PINを含みます。PINを会話や作業記録へ書き写さず、`.env.production`の`FLEETFLOW_ADMIN_PIN`に保存されたことだけを利用者へ伝えます。
+- `.env.production`、DBデータ、バックアップ、診断ZIPはGitへ登録しません（`.gitignore`済み）。
 
 ## 必要なもの
 
