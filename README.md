@@ -194,6 +194,8 @@ docker compose up --build -d
 - 社員番号と車両番号は将来再利用できますが、同じ番号を同時に有効化することはできません。
 - 入替時は過去履歴を保つため、旧データを無効化してから新データを登録します。
 - 車両にはETC・ナビの有無を登録できます。
+- 車両の新規登録時に駐車区画を選択すると、登録と同時に駐車場配置図へ表示されます。「後で設定」を選んだ車両やJSON取込した車両は、車両一覧の「駐車位置を設定」から空き区画へ配置できます。使用中・無効な区画とサクラ専用区画の制限はサーバー側でも確認します。
+- 車両の通常登録・編集でもNFC UIDは任意です。NFC未登録のまま手動選択で利用できます。
 - 一時的に使わない車両は「整備中」にします。利用中・予約中の車両は変更できません。
 
 社員JSONの例：
@@ -344,6 +346,9 @@ docker compose exec app npm run test:integration:optional-nfc
 
 # 履歴検索・状態表示・CSV出力
 docker compose exec app npm run test:integration:operations
+
+# 車両登録時の配置・未配置車両の後設定・区画重複防止
+docker compose exec app npm run test:integration:parking
 
 # Origin・プロキシ判定
 docker compose exec app npm run test:security

@@ -74,9 +74,9 @@ const employeeImportItemSchema = z.object({ code: z.string().trim().min(1).max(2
 const vehicleImportItemSchema = z.object({ code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#2563eb"), hasEtc: z.boolean().default(false), hasNavigation: z.boolean().default(false) });
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("createEmployee"), code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), department: z.string().trim().min(1).max(50), nfcUid: nfcUidSchema }),
-  z.object({ action: z.literal("createVehicle"), code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: nfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().default(false), hasNavigation: z.boolean().default(false) }),
+  z.object({ action: z.literal("createVehicle"), code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, spotId: idSchema.optional(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().default(false), hasNavigation: z.boolean().default(false) }),
   z.object({ action: z.literal("updateEmployee"), id: idSchema, version: z.number().int().nonnegative(), name: z.string().trim().min(1).max(50), department: z.string().trim().min(1).max(50), nfcUid: nfcUidSchema }),
-  z.object({ action: z.literal("updateVehicle"), id: idSchema, version: z.number().int().nonnegative(), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: nfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().optional(), hasNavigation: z.boolean().optional() }),
+  z.object({ action: z.literal("updateVehicle"), id: idSchema, version: z.number().int().nonnegative(), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().optional(), hasNavigation: z.boolean().optional() }),
   z.object({ action: z.literal("setEmployeeActive"), id: idSchema, version: z.number().int().nonnegative(), active: z.boolean() }),
   z.object({ action: z.literal("setVehicleActive"), id: idSchema, version: z.number().int().nonnegative(), active: z.boolean() }),
   z.object({ action: z.literal("setVehicleMaintenance"), id: idSchema, version: z.number().int().nonnegative(), maintenance: z.boolean() }),
@@ -182,14 +182,23 @@ export async function POST(request: Request) {
       });
     }
     if (input.action === "createVehicle") {
-      await assertNfcAvailable(input.nfcUid);
+      if (input.nfcUid) await assertNfcAvailable(input.nfcUid);
       await prisma.$transaction(async (tx) => {
+        if (input.spotId) {
+          await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-spot:${input.spotId}`}))::text AS spot_lock`;
+          const spot = await tx.parkingSpot.findUnique({ where: { id: input.spotId }, include: { vehicle: true } });
+          if (!spot || !spot.enabled) throw new Error("選択した駐車区画は利用できません");
+          if (spot.vehicle) throw new Error(`区画${spot.code}は使用中です`);
+          if (spot.code === SAKURA_SPOT_CODE && input.code !== SAKURA_VEHICLE_CODE) throw new Error("区画19はサクラ専用です");
+        }
         const vehicleNumber = await tx.vehicleNumber.upsert({ where: { code: input.code }, update: {}, create: { code: input.code } });
         const assigned = await tx.vehicle.findFirst({ where: { vehicleNumberId: vehicleNumber.id, active: true }, select: { name: true } });
         if (assigned) throw new Error(`車両番号${input.code}は「${assigned.name}」で使用中です。旧車両を無効化してから登録してください`);
-        const vehicle = await tx.vehicle.create({ data: { vehicleNumberId: vehicleNumber.id, name: input.name, plateNumber: input.plateNumber, color: input.color, hasEtc: input.hasEtc, hasNavigation: input.hasNavigation } });
-        const nfcTag = await tx.nfcTag.upsert({ where: { uid: input.nfcUid }, update: {}, create: { uid: input.nfcUid } });
-        await tx.nfcAssignment.create({ data: { vehicleId: vehicle.id, nfcTagId: nfcTag.id } });
+        const vehicle = await tx.vehicle.create({ data: { vehicleNumberId: vehicleNumber.id, name: input.name, plateNumber: input.plateNumber, color: input.color, hasEtc: input.hasEtc, hasNavigation: input.hasNavigation, parkingSpotId: input.spotId } });
+        if (input.nfcUid) {
+          const nfcTag = await tx.nfcTag.upsert({ where: { uid: input.nfcUid }, update: {}, create: { uid: input.nfcUid } });
+          await tx.nfcAssignment.create({ data: { vehicleId: vehicle.id, nfcTagId: nfcTag.id } });
+        }
         await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "車両登録", targetType: "Vehicle", targetId: vehicle.id, description: `${input.code} ${vehicle.name}を登録` } });
       });
     }
@@ -212,7 +221,7 @@ export async function POST(request: Request) {
       });
     }
     if (input.action === "updateVehicle") {
-      await assertNfcAvailable(input.nfcUid, { vehicleId: input.id });
+      if (input.nfcUid) await assertNfcAvailable(input.nfcUid, { vehicleId: input.id });
       await prisma.$transaction(async (tx) => {
         const vehicle = await tx.vehicle.findUniqueOrThrow({ where: { id: input.id }, include: { nfcAssignments: { where: { validTo: null }, include: { nfcTag: true }, take: 1 } } });
         const updated = await tx.vehicle.updateMany({ where: { id: input.id, version: input.version }, data: { name: input.name, plateNumber: input.plateNumber, color: input.color, ...(input.hasEtc === undefined ? {} : { hasEtc: input.hasEtc }), ...(input.hasNavigation === undefined ? {} : { hasNavigation: input.hasNavigation }), version: { increment: 1 } } });
@@ -222,8 +231,10 @@ export async function POST(request: Request) {
           if (!vehicle.active) throw new Error("無効な車両のNFCタグは変更できません。先に車両を再有効化してください");
           const changedAt = new Date();
           await tx.nfcAssignment.updateMany({ where: { vehicleId: vehicle.id, validTo: null }, data: { validTo: changedAt } });
-          const nfcTag = await tx.nfcTag.upsert({ where: { uid: input.nfcUid }, update: {}, create: { uid: input.nfcUid } });
-          await tx.nfcAssignment.create({ data: { vehicleId: vehicle.id, nfcTagId: nfcTag.id, validFrom: changedAt } });
+          if (input.nfcUid) {
+            const nfcTag = await tx.nfcTag.upsert({ where: { uid: input.nfcUid }, update: {}, create: { uid: input.nfcUid } });
+            await tx.nfcAssignment.create({ data: { vehicleId: vehicle.id, nfcTagId: nfcTag.id, validFrom: changedAt } });
+          }
         }
         await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "車両情報修正", targetType: "Vehicle", targetId: input.id, description: `${input.name}の登録情報を修正` } });
       });
@@ -539,6 +550,7 @@ export async function POST(request: Request) {
           tx.vehicle.findUniqueOrThrow({ where: { id: input.vehicleId }, select: { status: true, vehicleNumber: { select: { code: true } } } }),
         ]);
         if (movingVehicle.status !== "AVAILABLE") throw new Error("利用中の車両には駐車位置を設定できません");
+        if (!target.enabled) throw new Error("選択した駐車区画は利用できません");
         if (target.vehicle && target.vehicle.id !== input.vehicleId) throw new Error(`区画${target.code}は使用中です`);
         if (target.code === SAKURA_SPOT_CODE && movingVehicle.vehicleNumber.code !== SAKURA_VEHICLE_CODE) throw new Error("区画19はサクラ専用です");
         const updated = await tx.vehicle.updateMany({ where: { id: input.vehicleId, version: input.version }, data: { parkingSpotId: input.spotId, version: { increment: 1 } } });

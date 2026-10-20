@@ -73,6 +73,7 @@ try {
   Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "-e", "APP_URL=http://app:3000", "migrate", "npm", "run", "test:integration"))
   Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "-e", "APP_URL=http://app:3000", "migrate", "npm", "run", "test:integration:optional-nfc"))
   Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "-e", "APP_URL=http://app:3000", "migrate", "npm", "run", "test:integration:operations"))
+  Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "-e", "APP_URL=http://app:3000", "migrate", "npm", "run", "test:integration:parking"))
   Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "migrate", "npm", "run", "test:security"))
   & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $projectPath "scripts\production\Test-ProductionHealth.ps1") -ProjectDirectory $projectPath -NoUi
   if ($LASTEXITCODE -ne 0) { throw "Post-update production health check failed." }
