@@ -1,6 +1,9 @@
 node_modules
 .next
 .git
+.backups
+backups
+diagnostics
 *.log
 .env*
 !.env.example

@@ -14,6 +14,8 @@ FleetFlowは、社用車の駐車位置、予約、利用開始、返却、利�
 
 本番環境と開発環境は別のDBを使用します。同時には起動せず、起動用ファイルが反対側のコンテナーを自動停止します。
 
+Docker Desktop上では用途を判別しやすいよう、常設コンテナーを`fleetflow-production-*`または`fleetflow-development-*`という固定名で表示します。1台のPCで複数のFleetFlow環境を同時起動する構成には対応していません。
+
 ## 必要なもの
 
 - Windows 10またはWindows 11
@@ -127,7 +129,7 @@ docker compose up --build -d
 
 `docker compose down`ではDBボリュームは消えません。`docker compose down -v`は開発DBを全削除するため、バックアップなしでは実行しないでください。
 
-開発用DockerはDBが空かどうかを自動判定し、初回は現行スキーマを作成してから補助マイグレーションとサンプルデータ投入を行います。既存DBでは旧データを移行してから現行スキーマへ同期します。アプリとDBのポートは初期状態で`127.0.0.1`だけへ公開されます。
+開発用DockerはDBが空かどうかを自動判定し、初回は現行スキーマを作成してから補助マイグレーションとサンプルデータ投入を行います。既存DBでは旧データを移行してから現行スキーマへ同期します。アプリは初期状態で`127.0.0.1`だけへ公開されます。DBはDocker内のアプリから接続し、Windowsへポート公開しないため、他環境のPostgreSQLともポートが競合しません。
 
 ## 主な画面
 
@@ -192,6 +194,8 @@ docker compose up --build -d
 - 社員番号と車両番号は将来再利用できますが、同じ番号を同時に有効化することはできません。
 - 入替時は過去履歴を保つため、旧データを無効化してから新データを登録します。
 - 車両にはETC・ナビの有無を登録できます。
+- 車両の新規登録時に駐車区画を選択すると、登録と同時に駐車場配置図へ表示されます。「後で設定」を選んだ車両やJSON取込した車両は、車両一覧の「駐車位置を設定」から空き区画へ配置できます。使用中・無効な区画とサクラ専用区画の制限はサーバー側でも確認します。
+- 車両の通常登録・編集でもNFC UIDは任意です。NFC未登録のまま手動選択で利用できます。
 - 一時的に使わない車両は「整備中」にします。利用中・予約中の車両は変更できません。
 
 社員JSONの例：
@@ -296,14 +300,33 @@ PC故障に備える場合は`FleetFlow Production Backup Setup.cmd`を実行し
 
 初期設定では安全のため`127.0.0.1`だけへ公開され、同じPCからしか接続できません。LAN公開時は次をすべて実施してください。
 
-1. サーバーPCの固定LAN IPを決めます。
-2. `.env.production`の`FLEETFLOW_BIND_ADDRESS`へ、そのIPを指定します。`0.0.0.0`は避けてください。
-3. WindowsファイアウォールでTCP 3035を社内サブネットからだけ許可します。
-4. インターネットと来客用Wi-Fiから到達できないことを別端末で確認します。
-5. 可能なら社内証明書とリバースプロキシでHTTPS化し、`FLEETFLOW_COOKIE_SECURE=true`にします。
-6. 信頼するリバースプロキシが転送ヘッダーを上書きする場合だけ`FLEETFLOW_TRUST_PROXY=true`にします。直接公開は`false`のままにします。
-7. NFCを使う各PCへNFC Bridgeを入れ、LAN用Originを許可します。
-8. バックアップはBitLocker対応ドライブまたは権限制御済みNASへ複製します。
+1. サーバーPCへ固定LAN IPを設定します。
+2. `FleetFlow Production Start.cmd`を一度実行して本番設定を作成します。
+3. `FleetFlow LAN Setup.cmd`をダブルクリックします。自動検出した固定LAN IPをアプリへ設定し、管理者権限の確認後、TCP 3035を同じ社内サブネットからだけ許可します。
+4. 表示された`http://LAN-IP:3035`を別PCで開きます。
+5. インターネットと来客用Wi-Fiから到達できないことを別端末で確認します。
+6. 可能なら社内証明書とリバースプロキシでHTTPS化し、`FLEETFLOW_COOKIE_SECURE=true`にします。
+7. 信頼するリバースプロキシが転送ヘッダーを上書きする場合だけ`FLEETFLOW_TRUST_PROXY=true`にします。直接公開は`false`のままにします。
+8. NFCを使う各PCへNFC Bridgeを入れ、LAN用Originを許可します。
+9. バックアップはBitLocker対応ドライブまたは権限制御済みNASへ複製します。
+
+LAN IPを自動検出できない場合は、PowerShellで明示できます。
+
+```powershell
+& '.\FleetFlow LAN Setup.cmd' -Address 192.168.1.20
+```
+
+この設定はアプリの公開ポートだけを変更します。PostgreSQLのポートはLANへ公開されません。ブラウザーとAPIは同じURLを使用するため、FleetFlow本体にCORSの追加設定は不要です。
+
+開発環境をLAN公開する場合は、同じコマンドに`-Development`を付けます。本番の`.env.production`ではなく、開発用の`.env`に`FLEETFLOW_DEV_BIND_ADDRESS`を保存します。稼働中ならアプリだけを再作成し、停止中なら次回の`FleetFlow Start.cmd`で反映します。
+
+```powershell
+& '.\FleetFlow LAN Setup.cmd' -Development -Address 192.168.1.20
+```
+
+開発・本番ともに起動確認とブラウザー表示先は設定したLAN IPを使います。Windowsファイアウォール規則はプライベート／ドメインネットワーク用です。パブリックネットワークでは許可されません。LAN設定コマンド自体はPCの固定IP設定を変更しないため、固定IPまたはDHCP予約は別途設定してください。
+
+開発環境ではNext.jsの`allowedDevOrigins`にも設定したLAN IPを反映するため、画面のJavaScript・フォント・開発時の自動更新がOrigin判定で拒否されません。公開先を変更した後はコンテナーの再作成が必要です（LAN設定コマンドは稼働中のアプリを自動再作成します）。
 
 通常の利用・返却には個人ログインを要求しない共用端末向け設計です。LANへ接続できる人は業務データを閲覧・操作できる前提なので、利用者ごとの権限管理が必要な環境では個別認証の追加が必要です。インターネットへ直接公開しないでください。
 
@@ -324,8 +347,14 @@ docker compose exec app npm run test:integration:optional-nfc
 # 履歴検索・状態表示・CSV出力
 docker compose exec app npm run test:integration:operations
 
+# 車両登録時の配置・未配置車両の後設定・区画重複防止
+docker compose exec app npm run test:integration:parking
+
 # Origin・プロキシ判定
 docker compose exec app npm run test:security
+
+# 本番LAN URL・サブネット計算（Windowsホスト）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\production-network.test.ps1
 
 # 依存関係
 docker compose exec app npm audit

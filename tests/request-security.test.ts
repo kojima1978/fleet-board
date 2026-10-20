@@ -7,6 +7,8 @@ try {
   assert.equal(isSameOriginRequest(new Request("http://app:3000/api/dashboard")), true, "Originがないサーバー間通信は許可する");
   assert.equal(isSameOriginRequest(new Request("http://app:3000/api/dashboard", { headers: { Host: "localhost:3035", Origin: "http://localhost:3035" } })), true, "Docker内部URLと公開Hostが異なる正規リクエストを許可する");
   assert.equal(isSameOriginRequest(new Request("http://app:3000/api/dashboard", { headers: { Host: "localhost:3035", Origin: "http://evil.example" } })), false, "外部Originを拒否する");
+  assert.equal(isSameOriginRequest(new Request("http://app:3000/api/dashboard", { headers: { Host: "192.168.0.134:3035", Origin: "http://192.168.0.134:3035" } })), true, "LAN IPと公開ポートが一致するブラウザー操作を許可する");
+  assert.equal(isSameOriginRequest(new Request("http://app:3000/api/dashboard", { headers: { Host: "192.168.0.134:3035", Origin: "http://192.168.0.135:3035" } })), false, "別のLANホストからのOriginを拒否する");
   assert.equal(isSameOriginRequest(new Request("http://app:3000/api/dashboard", { headers: { Host: "app:3000", Origin: "https://fleetflow.example", "X-Forwarded-Proto": "https", "X-Forwarded-Host": "fleetflow.example" } })), false, "未信頼プロキシの転送ヘッダーを使用しない");
 
   process.env.FLEETFLOW_TRUST_PROXY = "true";

@@ -1,5 +1,6 @@
 services:
   app:
+    container_name: fleetflow-development-app
     build:
       context: .
       target: development
@@ -7,6 +8,7 @@ services:
     environment:
       DATABASE_URL: postgresql://fleet:fleet@db:5432/fleet?schema=public
       WATCHPACK_POLLING: "true"
+      FLEETFLOW_DEV_BIND_ADDRESS: ${FLEETFLOW_DEV_BIND_ADDRESS:-127.0.0.1}
       FLEETFLOW_ADMIN_PIN: ${FLEETFLOW_ADMIN_PIN:-2468}
       FLEETFLOW_SESSION_SECRET: ${FLEETFLOW_SESSION_SECRET:-fleetflow-local-development-secret}
     ports:
@@ -29,13 +31,12 @@ services:
       start_period: 60s
 
   db:
+    container_name: fleetflow-development-db
     image: postgres:17-alpine
     environment:
       POSTGRES_DB: fleet
       POSTGRES_USER: fleet
       POSTGRES_PASSWORD: fleet
-    ports:
-      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backups:/backups
@@ -48,6 +49,7 @@ services:
     restart: unless-stopped
 
   db-backup:
+    container_name: fleetflow-development-db-backup
     image: postgres:17-alpine
     command: sh /scripts/database/backup-db.sh loop
     environment:
@@ -71,6 +73,7 @@ services:
       start_period: 2m
 
   nfc-bridge-build:
+    container_name: fleetflow-nfc-bridge-builder
     image: mcr.microsoft.com/dotnet/sdk:8.0
     profiles: ["tools"]
     working_dir: /src

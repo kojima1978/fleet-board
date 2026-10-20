@@ -10,6 +10,7 @@ $composePath = Join-Path $projectPath "compose.production.yaml"
 $messagesPath = Join-Path $projectPath "nfc-bridge\messages.ja.json"
 $messages = ConvertFrom-Json ([System.IO.File]::ReadAllText($messagesPath, [System.Text.Encoding]::UTF8))
 $results = [System.Collections.Generic.List[object]]::new()
+. (Join-Path $PSScriptRoot "FleetFlow-Network.ps1")
 
 function Add-Result([string]$Name, [string]$Status, [string]$Detail) {
   $results.Add([pscustomobject]@{ Name = $Name; Status = $Status; Detail = $Detail })
@@ -45,7 +46,16 @@ try {
   $bindAddress = Get-Setting "FLEETFLOW_BIND_ADDRESS"
   if ([string]::IsNullOrWhiteSpace($bindAddress)) { Add-Result $messages.preflightAddress "error" $messages.preflightAddressMissing }
   elseif ($bindAddress -eq "0.0.0.0") { Add-Result $messages.preflightAddress "warning" $messages.preflightAddressAll }
-  else { Add-Result $messages.preflightAddress "ok" $bindAddress }
+  else {
+    $parsedAddress = $null
+    if (-not [System.Net.IPAddress]::TryParse($bindAddress, [ref]$parsedAddress)) {
+      Add-Result $messages.preflightAddress "error" $messages.preflightAddressInvalid
+    }
+    elseif ($bindAddress -ne "127.0.0.1" -and -not (Get-NetIPAddress -IPAddress $bindAddress -ErrorAction SilentlyContinue)) {
+      Add-Result $messages.preflightAddress "error" $messages.preflightAddressNotLocal
+    }
+    else { Add-Result $messages.preflightAddress "ok" $bindAddress }
+  }
 
   $driveName = [System.IO.Path]::GetPathRoot($projectPath).TrimEnd('\').TrimEnd(':')
   $freeGb = (Get-PSDrive -Name $driveName -PSProvider FileSystem).Free / 1GB
