@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AlertTriangle, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Nfc, Pencil, Plus, Power, Printer, RefreshCw, Settings, UserRound, X } from "lucide-react";
 import type { DashboardData, Employee, ParkingSpot, Trip, Vehicle } from "@/lib/types";
 import { normalizeNfcUid } from "@/lib/nfc";
+import { createOperationId } from "@/lib/operation-id";
 import { resolveNfcUid } from "@/lib/resolve-nfc";
 import { CUSTOMER_SPOT_CODES, formatSpotLabel, HOLDING_SPOT_CODES, SAKURA_SPOT_CODE, TEMPORARY_SPOT_CODES } from "@/lib/parking-spots";
 import { RESERVATION_GRACE_MINUTES } from "@/lib/reservations";
@@ -250,17 +251,17 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
     if (pendingRef.current) return false;
     pendingRef.current = true;
     setPendingAction(true);
-    const operationId = crypto.randomUUID();
-    const send = async () => {
-      const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 10_000);
-      try {
-        return await fetch("/api/dashboard", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operationId, actorEmployeeId: employee?.id, ...body }), signal: controller.signal });
-      } finally {
-        window.clearTimeout(timeout);
-      }
-    };
     try {
+      const operationId = createOperationId();
+      const send = async () => {
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 10_000);
+        try {
+          return await fetch("/api/dashboard", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operationId, actorEmployeeId: employee?.id, ...body }), signal: controller.signal });
+        } finally {
+          window.clearTimeout(timeout);
+        }
+      };
       let response: Response;
       try {
         response = await send();
