@@ -56,7 +56,7 @@ const canUseSpot = (vehicle: Vehicle, spot: ParkingSpot) => !isSakuraSpot(spot) 
 const parkingSpotClass = (spot: ParkingSpot) => {
   const auxiliary = HOLDING_SPOT_CODES.has(spot.code) || TEMPORARY_SPOT_CODES.has(spot.code);
   if (spot.vehicle?.status === "MAINTENANCE") return cn("border-slate-400 bg-slate-100", auxiliary && "border-[3px] border-dashed");
-  if (spot.vehicle) return cn("border-rose-500 bg-rose-50", auxiliary && "border-[3px] border-dashed");
+  if (spot.vehicle) return cn("border-emerald-400 bg-emerald-50", auxiliary && "border-[3px] border-dashed");
   return auxiliary ? "border-[3px] border-dashed border-slate-300/70 bg-slate-50/70" : "border-slate-300 bg-white/90";
 };
 const tokyoDayStart = (value = new Date()) => {
@@ -362,7 +362,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
           {setupIncomplete ? <InitialSetupGuide hasEmployees={activeEmployees.length > 0} hasVehicles={activeVehicles.length > 0} /> : null}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm md:px-4">
             <div className="mr-auto min-w-64"><h2 className="text-sm font-black">{parkingMode === "map" ? "社屋隣接駐車場 配置図" : "利用中の車両"}</h2><p className="text-[11px] text-slate-500">{parkingMode === "map" ? "駐車中の車をタップして詳細を確認 ・ 空き区画をタップして返却" : "利用者・開始時刻・返却予定を確認し、予定変更や返却登録ができます"}</p></div>
-            <div aria-live="polite" className="flex flex-wrap items-center gap-2 text-xs font-bold"><span className="text-rose-700">駐車中 {parkedCount}台</span><span className="text-slate-300">｜</span><span className="text-blue-700">利用中 {activeTrips.length}台</span><span className="px-1 font-normal text-slate-500">{jpDate.format(new Date())} ・ 自動更新 5秒</span></div>
+            <div aria-live="polite" className="flex flex-wrap items-center gap-2 text-xs font-bold"><span className="text-emerald-700">駐車中 {parkedCount}台</span><span className="text-slate-300">｜</span><span className="text-blue-700">利用中 {activeTrips.length}台</span><span className="px-1 font-normal text-slate-500">{jpDate.format(new Date())} ・ 自動更新 5秒</span></div>
             <ViewSwitch value={parkingMode} onChange={setParkingMode} first={{ value: "map", label: "配置図", icon: <MapIcon className="size-4" /> }} second={{ value: "active", label: "利用中一覧", icon: <CarFront className="size-4" /> }} compact />
           </div>
           {parkingMode === "map" ? <ParkingMap data={data} changedVehicleIds={changedVehicleIds} mutate={mutate} openStart={openStart} openReturn={openParkingReturn} openMove={openMoveVehicle} actorName={employee?.name ?? "共用端末"} /> : <ActiveVehicleList trips={activeTrips} openEdit={openEdit} openEnd={openEnd} />}
