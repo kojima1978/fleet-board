@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { normalizeNfcUid } from "@/lib/nfc";
 import { RESERVATION_GRACE_MINUTES } from "@/lib/reservations";
+import { FUEL_LEVEL_MAX, formatFuelLevel } from "@/lib/fuel-level";
 import { adminTokenFromRequest, verifyAdminToken } from "@/lib/admin-auth";
 import { getBackupStatus } from "@/lib/backup-status";
 import { isSameOriginRequest, readJsonBody } from "@/lib/request-security";
@@ -14,8 +15,8 @@ const SAKURA_VEHICLE_CODE = "C07";
 const activeOperationIds = new Set<string>();
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-function withVehicleCode<T extends { id: string; name: string; plateNumber: string; color: string; hasEtc: boolean; hasNavigation: boolean; status: "AVAILABLE" | "RESERVED" | "IN_USE" | "MAINTENANCE"; parkingSpotId: string | null; active: boolean; version: number; vehicleNumber: { code: string }; nfcAssignments: { nfcTag: { uid: string } }[] }>(vehicle: T, includeNfc = false) {
-  return { id: vehicle.id, code: vehicle.vehicleNumber.code, name: vehicle.name, plateNumber: vehicle.plateNumber, nfcUid: includeNfc ? vehicle.nfcAssignments[0]?.nfcTag.uid ?? "" : "", color: vehicle.color, hasEtc: vehicle.hasEtc, hasNavigation: vehicle.hasNavigation, status: vehicle.status, parkingSpotId: vehicle.parkingSpotId, active: vehicle.active, version: vehicle.version };
+function withVehicleCode<T extends { id: string; name: string; plateNumber: string; color: string; hasEtc: boolean; hasNavigation: boolean; fuelLevel: number | null; status: "AVAILABLE" | "RESERVED" | "IN_USE" | "MAINTENANCE"; parkingSpotId: string | null; active: boolean; version: number; vehicleNumber: { code: string }; nfcAssignments: { nfcTag: { uid: string } }[] }>(vehicle: T, includeNfc = false) {
+  return { id: vehicle.id, code: vehicle.vehicleNumber.code, name: vehicle.name, plateNumber: vehicle.plateNumber, nfcUid: includeNfc ? vehicle.nfcAssignments[0]?.nfcTag.uid ?? "" : "", color: vehicle.color, hasEtc: vehicle.hasEtc, hasNavigation: vehicle.hasNavigation, fuelLevel: vehicle.fuelLevel, status: vehicle.status, parkingSpotId: vehicle.parkingSpotId, active: vehicle.active, version: vehicle.version };
 }
 
 function withEmployeeCode<T extends { id: string; name: string; active: boolean; version: number; employeeNumber: { code: string }; department: { name: string }; nfcAssignments: { nfcTag: { uid: string } }[] }>(employee: T, includeNfc = false) {
@@ -84,7 +85,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("importVehicles"), items: z.array(vehicleImportItemSchema).min(1).max(500) }),
   z.object({ action: z.literal("start"), employeeId: idSchema, vehicleId: idSchema, minutes: z.number().int().min(15).max(10_080), ...actorSchema }),
   z.object({ action: z.literal("reserve"), employeeId: idSchema, vehicleId: idSchema, plannedStart: z.string().datetime(), minutes: z.number().int().min(15).max(10_080), ...actorSchema }),
-  z.object({ action: z.literal("end"), tripId: idSchema, tripVersion: z.number().int().nonnegative(), vehicleId: idSchema, vehicleVersion: z.number().int().nonnegative(), spotId: idSchema, ...actorSchema }),
+  z.object({ action: z.literal("end"), tripId: idSchema, tripVersion: z.number().int().nonnegative(), vehicleId: idSchema, vehicleVersion: z.number().int().nonnegative(), spotId: idSchema, fuelLevel: z.number().int().min(0).max(FUEL_LEVEL_MAX).nullable().optional(), ...actorSchema }),
   z.object({ action: z.literal("undoReturn"), tripId: idSchema, vehicleId: idSchema, ...actorSchema }),
   z.object({ action: z.literal("moveTrip"), tripId: idSchema, version: z.number().int().nonnegative(), plannedStart: z.string().datetime(), plannedEnd: z.string().datetime(), ...actorSchema }),
   z.object({ action: z.literal("adjustTrip"), tripId: idSchema, version: z.number().int().nonnegative(), minutes: z.union([z.literal(-60), z.literal(-30), z.literal(-15), z.literal(15), z.literal(30), z.literal(60), z.literal(180), z.literal(300)]), ...actorSchema }),
@@ -429,18 +430,19 @@ export async function POST(request: Request) {
       });
     }
     if (input.action === "end") {
+      const fuelLevel = input.fuelLevel ?? null;
       await prisma.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-spot:${input.spotId}`}))::text AS spot_lock, pg_advisory_xact_lock(hashtext(${`fleet-vehicle:${input.vehicleId}`}))::text AS vehicle_lock`;
         const [target, returningVehicle] = await Promise.all([
           tx.parkingSpot.findUniqueOrThrow({ where: { id: input.spotId }, include: { vehicle: true } }),
-          tx.vehicle.findUniqueOrThrow({ where: { id: input.vehicleId }, select: { vehicleNumber: { select: { code: true } } } }),
+          tx.vehicle.findUniqueOrThrow({ where: { id: input.vehicleId }, select: { fuelLevel: true, vehicleNumber: { select: { code: true } } } }),
         ]);
         if (target.vehicle && target.vehicle.id !== input.vehicleId) throw new Error(`区画${target.code}は使用中です`);
         if (target.code === SAKURA_SPOT_CODE && returningVehicle.vehicleNumber.code !== SAKURA_VEHICLE_CODE) throw new Error("区画19はサクラ専用です");
-        const trip = await tx.trip.updateMany({ where: { id: input.tripId, vehicleId: input.vehicleId, version: input.tripVersion, status: "IN_USE" }, data: { status: "COMPLETED", actualEnd: new Date(), returnSpotCode: target.code, version: { increment: 1 } } });
-        const vehicle = await tx.vehicle.updateMany({ where: { id: input.vehicleId, version: input.vehicleVersion }, data: { status: "AVAILABLE", parkingSpotId: input.spotId, version: { increment: 1 } } });
+        const trip = await tx.trip.updateMany({ where: { id: input.tripId, vehicleId: input.vehicleId, version: input.tripVersion, status: "IN_USE" }, data: { status: "COMPLETED", actualEnd: new Date(), returnSpotCode: target.code, returnFuelLevel: fuelLevel, previousFuelLevel: fuelLevel === null ? null : returningVehicle.fuelLevel, version: { increment: 1 } } });
+        const vehicle = await tx.vehicle.updateMany({ where: { id: input.vehicleId, version: input.vehicleVersion }, data: { status: "AVAILABLE", parkingSpotId: input.spotId, ...(fuelLevel === null ? {} : { fuelLevel }), version: { increment: 1 } } });
         if (trip.count !== 1 || vehicle.count !== 1) throw new Error("CONFLICT");
-        await tx.auditLog.create({ data: { operationId, ...auditActor, action: "返却", targetType: "Trip", targetId: input.tripId, description: `区画${target.code}へ返却` } });
+        await tx.auditLog.create({ data: { operationId, ...auditActor, action: "返却", targetType: "Trip", targetId: input.tripId, description: `区画${target.code}へ返却${fuelLevel === null ? "" : `（残量 ${formatFuelLevel(fuelLevel)}）`}` } });
       });
     }
     if (input.action === "undoReturn") {
@@ -457,8 +459,8 @@ export async function POST(request: Request) {
           tx.auditLog.findFirst({ where: { targetType: "Vehicle", targetId: trip.vehicleId, createdAt: { gt: trip.actualEnd } } }),
         ]);
         if (vehicle.status !== "AVAILABLE" || employeeConflict || subsequentTrip || laterVehicleAction) throw new Error("返却後に車両または利用者の状態が変更されたため取り消せません");
-        const restoredTrip = await tx.trip.updateMany({ where: { id: trip.id, status: "COMPLETED", version: trip.version }, data: { status: "IN_USE", actualEnd: null, returnSpotCode: null, version: { increment: 1 } } });
-        const restoredVehicle = await tx.vehicle.updateMany({ where: { id: vehicle.id, status: "AVAILABLE", version: vehicle.version }, data: { status: "IN_USE", parkingSpotId: null, version: { increment: 1 } } });
+        const restoredTrip = await tx.trip.updateMany({ where: { id: trip.id, status: "COMPLETED", version: trip.version }, data: { status: "IN_USE", actualEnd: null, returnSpotCode: null, returnFuelLevel: null, previousFuelLevel: null, version: { increment: 1 } } });
+        const restoredVehicle = await tx.vehicle.updateMany({ where: { id: vehicle.id, status: "AVAILABLE", version: vehicle.version }, data: { status: "IN_USE", parkingSpotId: null, ...(trip.returnFuelLevel === null ? {} : { fuelLevel: trip.previousFuelLevel }), version: { increment: 1 } } });
         if (restoredTrip.count !== 1 || restoredVehicle.count !== 1) throw new Error("CONFLICT");
         await tx.auditLog.create({ data: { operationId, ...auditActor, action: "返却取消", targetType: "Trip", targetId: trip.id, description: `${trip.vehicle.name}の返却を取り消して利用中へ復元` } });
       });

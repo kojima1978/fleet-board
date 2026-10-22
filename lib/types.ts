@@ -2,7 +2,7 @@ export type Employee = { id: string; code: string; name: string; department: str
 export type Department = { id: string; name: string; active: boolean };
 export type Vehicle = {
   id: string; code: string; name: string; plateNumber: string; nfcUid: string;
-  hasEtc: boolean; hasNavigation: boolean;
+  hasEtc: boolean; hasNavigation: boolean; fuelLevel: number | null;
   color: string; status: "AVAILABLE" | "RESERVED" | "IN_USE" | "MAINTENANCE";
   parkingSpotId: string | null; active: boolean; version: number;
 };
@@ -13,7 +13,7 @@ export type ParkingSpot = {
 export type Trip = {
   id: string; employeeId: string; vehicleId: string; plannedStart: string; plannedEnd: string;
   actualStart: string | null; actualEnd: string | null; status: "RESERVED" | "IN_USE" | "COMPLETED" | "CANCELLED";
-  purpose: string | null; returnSpotCode: string | null; version: number;
+  purpose: string | null; returnSpotCode: string | null; returnFuelLevel: number | null; version: number;
   employee: Employee; vehicle: Vehicle;
 };
 export type DashboardData = { employees: Employee[]; departments: Department[]; vehicles: Vehicle[]; spots: ParkingSpot[]; trips: Trip[]; system: { backupLatestAt: string | null; backupVerifiedAt: string | null; appVersion: string; environment: string; deployedAt: string | null; schemaVersion: string } };

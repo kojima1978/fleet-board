@@ -48,7 +48,7 @@ try {
   await client.query('INSERT INTO "EmployeeNumber" (id,code,"createdAt","updatedAt") VALUES ($1,$2,$3,$3)', [ids.employeeNumber, `TE${suffix}`, now]);
   await client.query('INSERT INTO "Employee" (id,"employeeNumberId","departmentId",name,active,version,"createdAt","updatedAt") VALUES ($1,$2,$3,$4,true,1,$5,$5)', [ids.employee, ids.employeeNumber, ids.department, `テスト社員${suffix}`, now]);
   await client.query('INSERT INTO "VehicleNumber" (id,code,"createdAt","updatedAt") VALUES ($1,$2,$3,$3)', [ids.vehicleNumber, `TV${suffix}`, now]);
-  await client.query('INSERT INTO "Vehicle" (id,"vehicleNumberId",name,"plateNumber",color,active,status,version,"createdAt","updatedAt") VALUES ($1,$2,$3,$4,$5,true,\'AVAILABLE\',1,$6,$6)', [ids.vehicle, ids.vehicleNumber, `テスト車両${suffix}`, `TEST-${suffix}`, "#2563eb", now]);
+  await client.query('INSERT INTO "Vehicle" (id,"vehicleNumberId",name,"plateNumber",color,"fuelLevel",active,status,version,"createdAt","updatedAt") VALUES ($1,$2,$3,$4,$5,3,true,\'AVAILABLE\',1,$6,$6)', [ids.vehicle, ids.vehicleNumber, `テスト車両${suffix}`, `TEST-${suffix}`, "#2563eb", now]);
   await client.query('INSERT INTO "ParkingSpot" (id,code,x,y,width,height,orientation,enabled,version) VALUES ($1,$2,0,0,5,5,\'horizontal\',true,1)', [ids.spot, `T${suffix}`]);
 
   const startOperationId = crypto.randomUUID(); operationIds.push(startOperationId);
@@ -65,14 +65,34 @@ try {
 
   const vehicle = await client.query('SELECT version FROM "Vehicle" WHERE id=$1', [ids.vehicle]);
   const endOperationId = crypto.randomUUID(); operationIds.push(endOperationId);
-  const endBody = { operationId: endOperationId, action: "end", tripId: started.rows[0].id, tripVersion: started.rows[0].version, vehicleId: ids.vehicle, vehicleVersion: vehicle.rows[0].version, spotId: ids.spot, actorName: "自動テスト", actorEmployeeId: ids.employee };
+  const endBody = { operationId: endOperationId, action: "end", tripId: started.rows[0].id, tripVersion: started.rows[0].version, vehicleId: ids.vehicle, vehicleVersion: vehicle.rows[0].version, spotId: ids.spot, fuelLevel: 1, actorName: "自動テスト", actorEmployeeId: ids.employee };
   const ended = await post(endBody);
   const replayedEnd = await post(endBody);
   assert.equal(ended.status, 200, JSON.stringify(ended.body));
   assert.equal(replayedEnd.status, 200, JSON.stringify(replayedEnd.body));
   assert.equal(replayedEnd.body.replayed, true, "返却の再送がreplayedとして処理されていません");
-  const completed = await client.query('SELECT status FROM "Trip" WHERE id=$1', [started.rows[0].id]);
+  const completed = await client.query('SELECT status,"returnFuelLevel","previousFuelLevel" FROM "Trip" WHERE id=$1', [started.rows[0].id]);
   assert.equal(completed.rows[0].status, "COMPLETED");
+  assert.equal(completed.rows[0].returnFuelLevel, 1, "返却時の残量が記録されていません");
+  assert.equal(completed.rows[0].previousFuelLevel, 3, "返却前の残量が記録されていません");
+  const fueledVehicle = await client.query('SELECT "fuelLevel" FROM "Vehicle" WHERE id=$1', [ids.vehicle]);
+  assert.equal(fueledVehicle.rows[0].fuelLevel, 1, "車両の残量が更新されていません");
+  const endLog = await client.query('SELECT description FROM "AuditLog" WHERE "operationId"=$1', [endOperationId]);
+  assert.match(endLog.rows[0].description, /残量 1\/4/, "操作履歴に残量が記録されていません");
+
+  const undoOperationId = crypto.randomUUID(); operationIds.push(undoOperationId);
+  const undone = await post({ operationId: undoOperationId, action: "undoReturn", tripId: started.rows[0].id, vehicleId: ids.vehicle, actorName: "自動テスト", actorEmployeeId: ids.employee });
+  assert.equal(undone.status, 200, JSON.stringify(undone.body));
+  const restoredVehicle = await client.query('SELECT "fuelLevel",version FROM "Vehicle" WHERE id=$1', [ids.vehicle]);
+  assert.equal(restoredVehicle.rows[0].fuelLevel, 3, "返却取消で残量が元に戻っていません");
+  const restoredTrip = await client.query('SELECT status,version,"returnFuelLevel" FROM "Trip" WHERE id=$1', [started.rows[0].id]);
+  assert.equal(restoredTrip.rows[0].status, "IN_USE");
+  assert.equal(restoredTrip.rows[0].returnFuelLevel, null);
+  const unfueledEndOperationId = crypto.randomUUID(); operationIds.push(unfueledEndOperationId);
+  const unfueledEnd = await post({ operationId: unfueledEndOperationId, action: "end", tripId: started.rows[0].id, tripVersion: restoredTrip.rows[0].version, vehicleId: ids.vehicle, vehicleVersion: restoredVehicle.rows[0].version, spotId: ids.spot, actorName: "自動テスト", actorEmployeeId: ids.employee });
+  assert.equal(unfueledEnd.status, 200, JSON.stringify(unfueledEnd.body));
+  const keptFuel = await client.query('SELECT "fuelLevel" FROM "Vehicle" WHERE id=$1', [ids.vehicle]);
+  assert.equal(keptFuel.rows[0].fuelLevel, 3, "残量未選択の返却で残量が変わりました");
 
   const reserveOperationId = crypto.randomUUID(); operationIds.push(reserveOperationId);
   const plannedStart = new Date(Date.now() + 2 * 60 * 60_000);
@@ -111,7 +131,7 @@ try {
   assert.equal(released.status, 200, JSON.stringify(released.body));
   const releasedVehicle = await client.query('SELECT status FROM "Vehicle" WHERE id=$1', [ids.vehicle]);
   assert.equal(releasedVehicle.rows[0].status, "AVAILABLE");
-  console.log("API integration passed: start, duplicate suppression, return replay, reservation, edit, cancellation and maintenance safety");
+  console.log("API integration passed: start, duplicate suppression, return replay, fuel level, undo, reservation, edit, cancellation and maintenance safety");
 } finally {
   await cleanup().catch((error) => console.error("cleanup failed", error));
   await client.end();

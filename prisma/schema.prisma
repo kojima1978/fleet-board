@@ -91,6 +91,7 @@ model Vehicle {
   color         String        @default("#2563eb")
   hasEtc        Boolean       @default(false)
   hasNavigation Boolean       @default(false)
+  fuelLevel     Int?
   active        Boolean       @default(true)
   status        VehicleStatus @default(AVAILABLE)
   parkingSpotId String?       @unique
@@ -136,6 +137,8 @@ model Trip {
   actualStart   DateTime?
   actualEnd     DateTime?
   returnSpotCode String?
+  returnFuelLevel Int?
+  previousFuelLevel Int?
   purpose       String?
   status        TripStatus @default(RESERVED)
   version       Int        @default(1)

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getApplicationSystemStatus } from "@/lib/system-status";
+import { FUEL_LEVEL_MAX } from "@/lib/fuel-level";
 
 export const JSON_BACKUP_FORMAT_VERSION = 1;
 export const JSON_BACKUP_MAX_BYTES = 50 * 1024 * 1024;
@@ -16,9 +17,10 @@ const vehicleNumberSchema = z.object({ id, code: z.string().min(1).max(100), cre
 const parkingSpotSchema = z.object({ id, code: z.string().min(1).max(100), x: z.number().finite(), y: z.number().finite(), width: z.number().finite().positive(), height: z.number().finite().positive(), orientation: z.string().min(1).max(50), enabled: z.boolean(), version: z.number().int().nonnegative() }).strict();
 const nfcTagSchema = z.object({ id, uid: z.string().min(1).max(100), createdAt: dateTime, updatedAt: dateTime }).strict();
 const employeeSchema = z.object({ id, employeeNumberId: id, departmentId: id, name: z.string().min(1).max(100), active: z.boolean(), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
-const vehicleSchema = z.object({ id, vehicleNumberId: id, name: z.string().min(1).max(100), plateNumber: z.string().min(1).max(100), color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean(), hasNavigation: z.boolean(), active: z.boolean(), status: z.enum(["AVAILABLE", "RESERVED", "IN_USE", "MAINTENANCE"]), parkingSpotId: id.nullable(), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
+const fuelLevelSchema = z.number().int().min(0).max(FUEL_LEVEL_MAX).nullable().optional();
+const vehicleSchema = z.object({ id, vehicleNumberId: id, name: z.string().min(1).max(100), plateNumber: z.string().min(1).max(100), color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean(), hasNavigation: z.boolean(), fuelLevel: fuelLevelSchema, active: z.boolean(), status: z.enum(["AVAILABLE", "RESERVED", "IN_USE", "MAINTENANCE"]), parkingSpotId: id.nullable(), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
 const nfcAssignmentSchema = z.object({ id, employeeId: id.nullable(), vehicleId: id.nullable(), nfcTagId: id, validFrom: dateTime, validTo: nullableDateTime, createdAt: dateTime }).strict();
-const tripSchema = z.object({ id, employeeId: id, vehicleId: id, plannedStart: dateTime, plannedEnd: dateTime, actualStart: nullableDateTime, actualEnd: nullableDateTime, returnSpotCode: z.string().max(100).nullable(), purpose: z.string().max(500).nullable(), status: z.enum(["RESERVED", "IN_USE", "COMPLETED", "CANCELLED"]), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
+const tripSchema = z.object({ id, employeeId: id, vehicleId: id, plannedStart: dateTime, plannedEnd: dateTime, actualStart: nullableDateTime, actualEnd: nullableDateTime, returnSpotCode: z.string().max(100).nullable(), returnFuelLevel: fuelLevelSchema, previousFuelLevel: fuelLevelSchema, purpose: z.string().max(500).nullable(), status: z.enum(["RESERVED", "IN_USE", "COMPLETED", "CANCELLED"]), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
 const auditLogSchema = z.object({ id, operationId: z.string().max(100).nullable(), actorEmployeeId: id.nullable(), actorName: z.string().max(100), action: z.string().max(100), targetType: z.string().max(100), targetId: z.string().max(100), description: z.string().max(1000), createdAt: dateTime }).strict();
 
 export const fleetBackupSchema = z.object({
