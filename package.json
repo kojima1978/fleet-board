@@ -12,6 +12,7 @@
     "test:integration:operations": "node tests/integration/operations-export.mjs",
     "test:integration:parking": "node tests/integration/vehicle-parking.mjs",
     "test:security": "tsx tests/request-security.test.ts",
+    "test:operation-id": "tsx tests/operation-id.test.ts",
     "db:migrate:employee-numbers": "node scripts/migrations/migrate-employee-numbers.mjs",
     "db:migrate:employee-normalization": "node scripts/migrations/migrate-employee-normalization.mjs",
     "db:migrate:unified-nfc": "node scripts/migrations/migrate-unified-nfc-assignments.mjs",

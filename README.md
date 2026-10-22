@@ -463,6 +463,9 @@ docker compose exec app npm run test:integration:parking
 # Origin・プロキシ判定
 docker compose exec app npm run test:security
 
+# HTTPのLAN接続でも利用できる操作ID生成
+docker compose exec app npm run test:operation-id
+
 # 本番LAN URL・サブネット計算・ネットワーク種別・公開アドレス待機（Windowsホスト）
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\production-network.test.ps1
 

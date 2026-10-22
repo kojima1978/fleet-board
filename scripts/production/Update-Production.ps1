@@ -53,6 +53,7 @@ try {
   Invoke-Docker ($composeArguments + @("build", "app", "migrate"))
   Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "migrate", "npm", "audit", "--audit-level=high"))
   Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "migrate", "npm", "run", "lint"))
+  Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "migrate", "npm", "run", "test:operation-id"))
   Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "migrate", "sh", "scripts/production/prepare-db.sh"))
   $previousEnvironment = [System.IO.File]::ReadAllText($environmentPath, [System.Text.Encoding]::UTF8)
   $deployedAt = (Get-Date).ToUniversalTime().ToString("o")
