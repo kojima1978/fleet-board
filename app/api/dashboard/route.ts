@@ -92,6 +92,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("setTripEnd"), tripId: idSchema, version: z.number().int().nonnegative(), plannedEnd: z.string().datetime(), ...actorSchema }),
   z.object({ action: z.literal("cancelTrip"), tripId: idSchema, version: z.number().int().nonnegative(), ...actorSchema }),
   z.object({ action: z.literal("moveVehicle"), vehicleId: idSchema, version: z.number().int().nonnegative(), spotId: idSchema, ...actorSchema }),
+  z.object({ action: z.literal("setFuelLevel"), vehicleId: idSchema, version: z.number().int().nonnegative(), fuelLevel: z.number().int().min(0).max(FUEL_LEVEL_MAX), ...actorSchema }),
 ]);
 const adminActions = new Set(["createEmployee", "createVehicle", "updateEmployee", "updateVehicle", "setEmployeeActive", "setVehicleActive", "setVehicleMaintenance", "importEmployees", "importVehicles"]);
 
@@ -558,6 +559,17 @@ export async function POST(request: Request) {
         const updated = await tx.vehicle.updateMany({ where: { id: input.vehicleId, version: input.version }, data: { parkingSpotId: input.spotId, version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
         await tx.auditLog.create({ data: { operationId, ...auditActor, action: "駐車位置修正", targetType: "Vehicle", targetId: input.vehicleId, description: `区画${target.code}へ変更` } });
+      });
+    }
+    if (input.action === "setFuelLevel") {
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-vehicle:${input.vehicleId}`}))::text AS vehicle_lock`;
+        const vehicle = await tx.vehicle.findUniqueOrThrow({ where: { id: input.vehicleId }, select: { name: true, active: true, parkingSpotId: true, fuelLevel: true } });
+        if (!vehicle.active || !vehicle.parkingSpotId) throw new Error("駐車中の車両だけ残量を変更できます");
+        if (vehicle.fuelLevel === input.fuelLevel) throw new Error("残量は変更されていません");
+        const updated = await tx.vehicle.updateMany({ where: { id: input.vehicleId, version: input.version }, data: { fuelLevel: input.fuelLevel, version: { increment: 1 } } });
+        if (updated.count !== 1) throw new Error("CONFLICT");
+        await tx.auditLog.create({ data: { operationId, ...auditActor, action: "残量修正", targetType: "Vehicle", targetId: input.vehicleId, description: `${vehicle.name}の残量を${vehicle.fuelLevel === null ? "未登録" : formatFuelLevel(vehicle.fuelLevel)}から${formatFuelLevel(input.fuelLevel)}へ修正` } });
       });
     }
     return NextResponse.json({ ok: true });

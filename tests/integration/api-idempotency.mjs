@@ -93,6 +93,21 @@ try {
   assert.equal(unfueledEnd.status, 200, JSON.stringify(unfueledEnd.body));
   const keptFuel = await client.query('SELECT "fuelLevel" FROM "Vehicle" WHERE id=$1', [ids.vehicle]);
   assert.equal(keptFuel.rows[0].fuelLevel, 3, "残量未選択の返却で残量が変わりました");
+  const parkedVehicle = await client.query('SELECT version FROM "Vehicle" WHERE id=$1', [ids.vehicle]);
+  const fuelFixOperationId = crypto.randomUUID(); operationIds.push(fuelFixOperationId);
+  const fuelFixed = await post({ operationId: fuelFixOperationId, action: "setFuelLevel", vehicleId: ids.vehicle, version: parkedVehicle.rows[0].version, fuelLevel: 2, actorName: "自動テスト" });
+  assert.equal(fuelFixed.status, 200, JSON.stringify(fuelFixed.body));
+  const fixedVehicle = await client.query('SELECT "fuelLevel",version FROM "Vehicle" WHERE id=$1', [ids.vehicle]);
+  assert.equal(fixedVehicle.rows[0].fuelLevel, 2, "駐車後の残量修正が反映されていません");
+  const fuelFixAudit = await client.query('SELECT action,description FROM "AuditLog" WHERE "operationId"=$1', [fuelFixOperationId]);
+  assert.equal(fuelFixAudit.rows[0]?.action, "残量修正");
+  assert.match(fuelFixAudit.rows[0]?.description ?? "", /3\/4から1\/2へ修正/);
+  const staleFuelOperationId = crypto.randomUUID(); operationIds.push(staleFuelOperationId);
+  const staleFuel = await post({ operationId: staleFuelOperationId, action: "setFuelLevel", vehicleId: ids.vehicle, version: parkedVehicle.rows[0].version, fuelLevel: 4, actorName: "自動テスト" });
+  assert.notEqual(staleFuel.status, 200, "古い版での残量修正が通りました");
+  const sameFuelOperationId = crypto.randomUUID(); operationIds.push(sameFuelOperationId);
+  const sameFuel = await post({ operationId: sameFuelOperationId, action: "setFuelLevel", vehicleId: ids.vehicle, version: fixedVehicle.rows[0].version, fuelLevel: 2, actorName: "自動テスト" });
+  assert.notEqual(sameFuel.status, 200, "同じ残量への修正が通りました");
 
   const reserveOperationId = crypto.randomUUID(); operationIds.push(reserveOperationId);
   const plannedStart = new Date(Date.now() + 2 * 60 * 60_000);
