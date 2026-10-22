@@ -20,6 +20,7 @@ const nextConfig: NextConfig = {
   // キャッシュはメモリ上だけにして、一時的な失敗が残らないようにする。
   experimental: {
     turbopackFileSystemCacheForDev: false,
+    agentUpgrade: "security",
   },
   async headers() {
     return [{
