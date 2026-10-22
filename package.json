@@ -11,6 +11,7 @@
     "test:integration:optional-nfc": "node tests/integration/optional-nfc-import.mjs",
     "test:integration:operations": "node tests/integration/operations-export.mjs",
     "test:integration:parking": "node tests/integration/vehicle-parking.mjs",
+    "test:integration:json-backup": "node tests/integration/json-backup.mjs",
     "test:security": "tsx tests/request-security.test.ts",
     "test:operation-id": "tsx tests/operation-id.test.ts",
     "db:migrate:employee-numbers": "node scripts/migrations/migrate-employee-numbers.mjs",

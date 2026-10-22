@@ -207,6 +207,7 @@ docker compose up --build -d
 | `/settings` | 印刷などの設定 |
 | `/settings/employees` | 社員登録、JSON取込、NFC UID登録 |
 | `/settings/vehicles` | 車両登録、JSON取込、NFC UID登録 |
+| `/settings/data` | 全データのJSON書き出し・一括復元 |
 | `/print/parking` | A4横の空の駐車場配置図 |
 | `/print/timeline` | A4横の空のタイムライン |
 
@@ -283,6 +284,14 @@ docker compose up --build -d
 ```
 
 社員番号、部署、NFCタグと割当関係は正規化された別テーブルで管理します。NFCの交換・失効・再利用履歴を保持し、操作履歴には表示名と社員IDを保存するため、改名後も操作者を追跡できます。
+
+## 全データのJSON保存・復元
+
+管理者として「設定 → データ保存・復元」を開くと、社員・車両・駐車区画・NFC割当・利用予定・利用履歴・操作履歴を1つのJSONファイルへ書き出せます。JSONには個人情報とNFC UIDが含まれるため、安全な場所へ保存してください。
+
+復元する場合は、FleetFlowが書き出したJSONファイルを画面へドラッグ＆ドロップします。形式、重複、データ間の参照関係を検査した後、確認欄へ`RESTORE`と入力すると現在の全データを置き換えます。復元処理は1つのDBトランザクションで行われるため、途中で失敗した場合は変更前の状態へ戻ります。
+
+このJSON機能は日常的な手動退避やデータ移行を補助するものです。自動DBバックアップは履歴、検証状態、障害復旧手順を含むため、引き続き有効にして併用してください。
 
 ## NFC連携（RC-S300／RC-S380）
 
@@ -459,6 +468,9 @@ docker compose exec app npm run test:integration:operations
 
 # 車両登録時の配置・未配置車両の後設定・区画重複防止
 docker compose exec app npm run test:integration:parking
+
+# JSON一括書き出し・検査・トランザクション復元（開発DBでのみ実行）
+docker compose exec app npm run test:integration:json-backup
 
 # Origin・プロキシ判定
 docker compose exec app npm run test:security

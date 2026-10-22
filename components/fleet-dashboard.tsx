@@ -12,6 +12,7 @@ import { RESERVATION_GRACE_MINUTES } from "@/lib/reservations";
 import { nfcBridgeStatusText, useNfcBridge, useNfcBridgeHealth } from "@/lib/use-nfc-bridge";
 import { useKioskIdle } from "@/lib/use-kiosk-idle";
 import { SettingsPanelV2 } from "./settings-panel-v2";
+import { DataBackupPanel } from "./data-backup-panel";
 import { AdminGate } from "./admin-gate";
 import { Button, Card, cn } from "./ui";
 import { AppHeader, HeaderSystemStatus, Navigation, type HeaderSyncState } from "./app-header";
@@ -21,7 +22,7 @@ const DAY_VIEW_START_MINUTE = 6 * 60;
 const DAY_VIEW_END_MINUTE = 22 * 60;
 const SAKURA_VEHICLE_CODE = "C07";
 type Dialog = "start" | "end" | "parkingReturn" | "moveVehicle" | "edit" | "nfc" | null;
-type DashboardView = "parking" | "timeline" | "settingsEmployees" | "settingsVehicles";
+type DashboardView = "parking" | "timeline" | "settingsEmployees" | "settingsVehicles" | "settingsData";
 type SyncState = HeaderSyncState;
 type StartContext = { vehicleId: string; employeeId: string };
 type UndoReturn = { tripId: string; vehicleId: string; vehicleName: string; expiresAt: number };
@@ -379,12 +380,11 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
           </section>}
         </> : null}
 
-        {view === "settingsEmployees" || view === "settingsVehicles" ? <AdminGate onAuthenticated={async () => { await load(true); }} onLogout={async () => { await load(true); }}>
+        {view === "settingsEmployees" || view === "settingsVehicles" || view === "settingsData" ? <AdminGate onAuthenticated={async () => { await load(true); }} onLogout={async () => { await load(true); }}>
           <div className="space-y-5">
-            <PageHeading eyebrow="管理設定" title={view === "settingsEmployees" ? "社員登録" : "車両登録"} description={view === "settingsEmployees" ? "利用者となる社員と社員証のNFCタグを登録します。" : "利用する社用車と車両のNFCタグを登録します。"} />
+            <PageHeading eyebrow="管理設定" title={view === "settingsEmployees" ? "社員登録" : view === "settingsVehicles" ? "車両登録" : "データ保存・復元"} description={view === "settingsEmployees" ? "利用者となる社員と社員証のNFCタグを登録します。" : view === "settingsVehicles" ? "利用する社用車と車両のNFCタグを登録します。" : "FleetFlowの全データをJSONで保存し、必要なときに一括復元します。"} />
             <SettingsNavigation view={view} />
-            <div className="flex flex-wrap items-end justify-between gap-2"><div><p className="text-xs font-bold text-blue-600">日常管理</p><h3 className="mt-0.5 text-lg font-black">{view === "settingsEmployees" ? "社員情報" : "車両情報"}</h3></div><p className="text-xs text-slate-500">検索・登録・変更をこの一覧から行えます</p></div>
-            <SettingsPanelV2 kind={view === "settingsEmployees" ? "employee" : "vehicle"} data={data} mutate={mutate} />
+            {view === "settingsData" ? <DataBackupPanel /> : <><div className="flex flex-wrap items-end justify-between gap-2"><div><p className="text-xs font-bold text-blue-600">日常管理</p><h3 className="mt-0.5 text-lg font-black">{view === "settingsEmployees" ? "社員情報" : "車両情報"}</h3></div><p className="text-xs text-slate-500">検索・登録・変更をこの一覧から行えます</p></div><SettingsPanelV2 kind={view === "settingsEmployees" ? "employee" : "vehicle"} data={data} mutate={mutate} /></>}
             <AdminToolsPanel />
           </div>
         </AdminGate> : null}
@@ -488,8 +488,8 @@ function TimelineList({ trips, openEdit, mode, onChange }: { trips: Trip[]; open
   })}</div>}</Card>;
 }
 
-function SettingsNavigation({ view }: { view: "settingsEmployees" | "settingsVehicles" }) {
-  return <nav aria-label="設定メニュー" className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm"><Link href="/settings/employees" className={cn("rounded-lg px-5 py-2 text-sm font-bold transition", view === "settingsEmployees" ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50")}>社員登録</Link><Link href="/settings/vehicles" className={cn("rounded-lg px-5 py-2 text-sm font-bold transition", view === "settingsVehicles" ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50")}>車両登録</Link></nav>;
+function SettingsNavigation({ view }: { view: "settingsEmployees" | "settingsVehicles" | "settingsData" }) {
+  return <nav aria-label="設定メニュー" className="inline-flex max-w-full overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm"><Link href="/settings/employees" className={cn("whitespace-nowrap rounded-lg px-5 py-2 text-sm font-bold transition", view === "settingsEmployees" ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50")}>社員登録</Link><Link href="/settings/vehicles" className={cn("whitespace-nowrap rounded-lg px-5 py-2 text-sm font-bold transition", view === "settingsVehicles" ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50")}>車両登録</Link><Link href="/settings/data" className={cn("whitespace-nowrap rounded-lg px-5 py-2 text-sm font-bold transition", view === "settingsData" ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50")}>データ保存・復元</Link></nav>;
 }
 
 function AdminToolsPanel() {
