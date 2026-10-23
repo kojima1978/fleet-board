@@ -7,7 +7,7 @@ const appUrl = process.env.APP_URL || "http://127.0.0.1:3000";
 if (!databaseUrl) throw new Error("DATABASE_URL is required");
 
 const suffix = String(Date.now()).slice(-9);
-const employeeCodes = [`IEA${suffix}`, `IEB${suffix}`];
+const employeeCodes = [`IEA${suffix}`, `IEB${suffix}`, `IEC${suffix}`];
 const vehicleCodes = [`IVA${suffix}`, `IVB${suffix}`];
 const departmentName = `取込テスト${suffix}`;
 const plateNumbers = [`TEST-A-${suffix}`, `TEST-B-${suffix}`];
@@ -16,7 +16,7 @@ const vehicleUids = [`C0A0${suffix}00`, `C0B0${suffix}00`];
 const operationIds = [];
 const client = new Client({ connectionString: databaseUrl });
 
-async function postAdmin(body) {
+async function postAdmin(body, expectedStatus = 200) {
   const operationId = crypto.randomUUID();
   operationIds.push(operationId);
   const response = await fetch(`${appUrl}/api/dashboard`, {
@@ -25,7 +25,8 @@ async function postAdmin(body) {
     body: JSON.stringify({ operationId, ...body }),
   });
   const responseBody = await response.json();
-  assert.equal(response.status, 200, JSON.stringify(responseBody));
+  assert.equal(response.status, expectedStatus, JSON.stringify(responseBody));
+  return responseBody;
 }
 
 async function dashboard() {
@@ -96,7 +97,18 @@ try {
   assert.equal(data.vehicles.find((item) => item.code === vehicleCodes[0])?.nfcUid, vehicleUids[0]);
   assert.equal(data.vehicles.find((item) => item.code === vehicleCodes[0])?.hasEtc, true);
   assert.equal(data.vehicles.find((item) => item.code === vehicleCodes[0])?.hasNavigation, true);
-  console.log("Optional NFC and vehicle equipment import passed: equipment survives later NFC registration");
+
+  // 社員番号を変更でき、有効な他の社員と同じ番号には変更できない。
+  const renamed = data.employees.find((item) => item.code === employeeCodes[0]);
+  await postAdmin({ action: "updateEmployee", id: renamed.id, version: renamed.version, code: employeeCodes[2], name: renamed.name, department: renamed.department, nfcUid: renamed.nfcUid });
+  data = await dashboard();
+  assert.equal(data.employees.find((item) => item.id === renamed.id)?.code, employeeCodes[2]);
+  const other = data.employees.find((item) => item.code === employeeCodes[1]);
+  const rejected = await postAdmin({ action: "updateEmployee", id: other.id, version: other.version, code: employeeCodes[2], name: other.name, department: other.department, nfcUid: other.nfcUid }, 400);
+  assert.match(rejected.message, /使用中/);
+  data = await dashboard();
+  assert.equal(data.employees.find((item) => item.id === other.id)?.code, employeeCodes[1]);
+  console.log("Optional NFC and vehicle equipment import passed: equipment survives later NFC registration, employee number can be changed");
 } finally {
   await cleanup().catch((error) => console.error("cleanup failed", error));
   await client.end();

@@ -75,7 +75,7 @@ const vehicleImportItemSchema = z.object({ code: z.string().trim().min(1).max(20
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("createEmployee"), code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), department: z.string().trim().min(1).max(50), nfcUid: nfcUidSchema }),
   z.object({ action: z.literal("createVehicle"), code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, spotId: idSchema.optional(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().default(false), hasNavigation: z.boolean().default(false) }),
-  z.object({ action: z.literal("updateEmployee"), id: idSchema, version: z.number().int().nonnegative(), name: z.string().trim().min(1).max(50), department: z.string().trim().min(1).max(50), nfcUid: nfcUidSchema }),
+  z.object({ action: z.literal("updateEmployee"), id: idSchema, version: z.number().int().nonnegative(), code: z.string().trim().min(1).max(20).optional(), name: z.string().trim().min(1).max(50), department: z.string().trim().min(1).max(50), nfcUid: nfcUidSchema }),
   z.object({ action: z.literal("updateVehicle"), id: idSchema, version: z.number().int().nonnegative(), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().optional(), hasNavigation: z.boolean().optional() }),
   z.object({ action: z.literal("setEmployeeActive"), id: idSchema, version: z.number().int().nonnegative(), active: z.boolean() }),
   z.object({ action: z.literal("setVehicleActive"), id: idSchema, version: z.number().int().nonnegative(), active: z.boolean() }),
@@ -217,9 +217,20 @@ export async function POST(request: Request) {
     if (input.action === "updateEmployee") {
       await assertNfcAvailable(input.nfcUid, { employeeId: input.id });
       await prisma.$transaction(async (tx) => {
-        const employee = await tx.employee.findUniqueOrThrow({ where: { id: input.id }, include: { nfcAssignments: { where: { validTo: null }, include: { nfcTag: true }, take: 1 } } });
+        const employee = await tx.employee.findUniqueOrThrow({ where: { id: input.id }, include: { employeeNumber: true, nfcAssignments: { where: { validTo: null }, include: { nfcTag: true }, take: 1 } } });
         const department = await tx.department.upsert({ where: { name: input.department }, update: { active: true }, create: { name: input.department } });
-        const updated = await tx.employee.updateMany({ where: { id: input.id, version: input.version }, data: { name: input.name, departmentId: department.id, version: { increment: 1 } } });
+        // 社員番号は他の（無効な）社員と共有され得るため、番号の行は書き換えず付け替える。
+        const codeChanged = input.code !== undefined && input.code !== employee.employeeNumber.code;
+        let employeeNumberId = employee.employeeNumberId;
+        if (codeChanged) {
+          const employeeNumber = await tx.employeeNumber.upsert({ where: { code: input.code! }, update: {}, create: { code: input.code! } });
+          if (employee.active) {
+            const assigned = await tx.employee.findFirst({ where: { employeeNumberId: employeeNumber.id, active: true, id: { not: employee.id } }, select: { name: true } });
+            if (assigned) throw new Error(`社員番号${input.code}は「${assigned.name}」で使用中です`);
+          }
+          employeeNumberId = employeeNumber.id;
+        }
+        const updated = await tx.employee.updateMany({ where: { id: input.id, version: input.version }, data: { name: input.name, departmentId: department.id, employeeNumberId, version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
         const currentUid = employee.nfcAssignments[0]?.nfcTag.uid;
         if (currentUid !== input.nfcUid) {
@@ -229,7 +240,7 @@ export async function POST(request: Request) {
           const nfcTag = await tx.nfcTag.upsert({ where: { uid: input.nfcUid }, update: {}, create: { uid: input.nfcUid } });
           await tx.nfcAssignment.create({ data: { employeeId: employee.id, nfcTagId: nfcTag.id, validFrom: changedAt } });
         }
-        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "社員情報修正", targetType: "Employee", targetId: input.id, description: `${input.name}の登録情報を修正` } });
+        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "社員情報修正", targetType: "Employee", targetId: input.id, description: codeChanged ? `${input.name}の登録情報を修正（社員番号 ${employee.employeeNumber.code}→${input.code}）` : `${input.name}の登録情報を修正` } });
       });
     }
     if (input.action === "updateVehicle") {
