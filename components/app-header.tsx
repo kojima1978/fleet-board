@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import Link from "next/link";
 import { Archive, CarFront, ChevronDown, ChevronUp, Clock3, LayoutGrid, LoaderCircle, Nfc, RefreshCw, Settings, X } from "lucide-react";
 import type { NfcBridgeStatus } from "@/lib/use-nfc-bridge";
@@ -11,18 +11,27 @@ export type AppView = "parking" | "timeline" | "settingsEmployees" | "settingsVe
 export type HeaderSyncState = "loading" | "healthy" | "stale";
 
 const jpTimeSeconds = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+const jpClockDate = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", month: "long", day: "numeric", weekday: "short" });
+const jpClockTime = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false });
 
 export function AppHeader({ view, actions }: { view: AppView; actions?: ReactNode }) {
   return <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
     <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-5 px-4 py-3 md:px-8">
       <div className="flex min-w-0 items-center gap-3">
         <div className="grid size-11 place-items-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-200"><CarFront /></div>
-        <div className="min-w-0 max-[360px]:hidden"><h1 className="text-lg font-black tracking-tight">FleetFlow</h1><p className="hidden text-xs text-slate-500 sm:block">社用車 利用・駐車管理</p></div>
+        <div className="min-w-0 max-[360px]:hidden"><h1 className="text-lg font-black tracking-tight">FleetFlow</h1><HeaderClock /></div>
       </div>
       <Navigation view={view} className="hidden md:flex" />
       {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
     </div>
   </header>;
+}
+
+// どの画面でも今日の日付と現在時刻が分かるよう、ロゴの下に出す。分の切り替わりに遅れないよう10秒ごとに更新する。
+function HeaderClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => { const timer = window.setInterval(() => setNow(new Date()), 10_000); return () => window.clearInterval(timer); }, []);
+  return <time suppressHydrationWarning dateTime={now.toISOString()} className="block whitespace-nowrap text-xs text-slate-500">{jpClockDate.format(now)} <span className="font-bold tabular-nums text-slate-700">{jpClockTime.format(now)}</span></time>;
 }
 
 export function Navigation({ view, className }: { view: AppView; className?: string }) {
