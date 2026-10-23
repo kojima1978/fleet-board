@@ -71,6 +71,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
   const [returnTrip, setReturnTrip] = useState<Trip | null>(null);
   const [returnSpot, setReturnSpot] = useState<ParkingSpot | null>(null);
+  const [returnSpotId, setReturnSpotId] = useState("");
   const [fuelVehicle, setFuelVehicle] = useState<Vehicle | null>(null);
   const [editTrip, setEditTrip] = useState<Trip | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: "success" | "error" } | null>(null);
@@ -292,7 +293,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   const parkedCount = data.spots.reduce((count, spot) => count + (spot.vehicle ? 1 : 0), 0);
   const confirmedTrip = startContext ? data.trips.find((trip) => trip.vehicleId === startContext.vehicleId && trip.employeeId === startContext.employeeId && trip.status === "IN_USE") : undefined;
   const openStart = (vehicle?: Vehicle) => { setSelectedVehicleId(vehicle?.id ?? ""); setDialog("start"); };
-  const openEnd = (trip: Trip) => { setReturnTrip(trip); setDialog("end"); };
+  const openEnd = (trip: Trip, spotId = "") => { setReturnTrip(trip); setReturnSpotId(spotId); setDialog("end"); };
   const openParkingReturn = (spot: ParkingSpot) => { setReturnSpot(spot); setDialog("parkingReturn"); };
   const openFuel = (vehicle: Vehicle) => { setFuelVehicle(vehicle); setDialog("fuel"); };
   const openEdit = (trip: Trip) => { if (view === "timeline" && startContext) setStayOnTimeline(true); setEditTrip(trip); setDialog("edit"); };
@@ -372,8 +373,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
             <div aria-hidden className="hidden flex-1 basis-0 md:block" />
           </div>
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_240px]">
-            <ParkingMap data={data} changedVehicleIds={changedVehicleIds} mutate={mutate} openStart={openStart} openReturn={openParkingReturn} openFuel={openFuel} actorName={employee?.name ?? "共用端末"} />
-            <ActiveVehicleSidebar trips={activeTrips} openEdit={openEdit} openEnd={openEnd} />
+            <ParkingMap data={data} trips={activeTrips} changedVehicleIds={changedVehicleIds} mutate={mutate} openStart={openStart} openReturn={openParkingReturn} openFuel={openFuel} openEdit={openEdit} openEnd={openEnd} actorName={employee?.name ?? "共用端末"} />
           </div>
         </section> : null}
 
@@ -401,7 +401,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
 
       {dialog === "nfc" && <NfcDialog employees={activeEmployees} vehicles={activeVehicles} onEmployee={(person) => { selectEmployee(person); setToast({ message: `${person.name}さんを認証しました`, tone: "success" }); setDialog(null); }} onVehicle={(vehicle) => { setDialog(null); if (vehicle.status === "MAINTENANCE") { setToast({ message: `${vehicle.name}は整備中のため利用開始できません`, tone: "error" }); return; } const trip = activeTrips.find((item) => item.vehicleId === vehicle.id); if (trip) openEnd(trip); else openStart(vehicle); }} onClose={() => setDialog(null)} />}
       {dialog === "start" && <StartDialog submitting={pendingAction} employees={activeEmployees} vehicles={available} trips={data.trips} initialEmployee={employee?.active ? employee : null} initialVehicleId={selectedVehicleId} onClose={() => setDialog(null)} onSubmit={async (values) => { const identifiedEmployee = activeEmployees.find((person) => person.id === values.employeeId) ?? null; const scheduled = values.plannedStart !== null; const ok = await mutate(scheduled ? { action: "reserve", employeeId: values.employeeId, vehicleId: values.vehicleId, plannedStart: values.plannedStart!, minutes: values.minutes, actorName: values.employeeName, actorEmployeeId: values.employeeId } : { action: "start", employeeId: values.employeeId, vehicleId: values.vehicleId, minutes: values.minutes, actorName: values.employeeName, actorEmployeeId: values.employeeId }, scheduled ? "予約を登録しました" : "利用を開始しました"); if (ok && identifiedEmployee) { selectEmployee(identifiedEmployee); setDialog(null); if (!scheduled) window.location.assign(`/timeline?started=1&vehicleId=${encodeURIComponent(values.vehicleId)}&employeeId=${encodeURIComponent(values.employeeId)}`); } }} />}
-      {dialog === "end" && returnTrip && <EndDialog submitting={pendingAction} trip={returnTrip} spots={data.spots} onClose={() => setDialog(null)} onSubmit={async (spotId, fuelLevel) => { const ok = await completeReturn(returnTrip, spotId, fuelLevel); if (ok) setDialog(null); }} />}
+      {dialog === "end" && returnTrip && <EndDialog submitting={pendingAction} trip={returnTrip} spots={data.spots} initialSpotId={returnSpotId} onClose={() => setDialog(null)} onSubmit={async (spotId, fuelLevel) => { const ok = await completeReturn(returnTrip, spotId, fuelLevel); if (ok) setDialog(null); }} />}
       {dialog === "parkingReturn" && returnSpot && <ParkingReturnDialog submitting={pendingAction} spot={returnSpot} trips={activeTrips} vehicles={data.vehicles} onClose={() => setDialog(null)} onSubmit={async (trip, fuelLevel) => { const ok = await completeReturn(trip, returnSpot.id, fuelLevel); if (ok) { setDialog(null); setReturnSpot(null); } }} />}
       {dialog === "fuel" && fuelVehicle && <FuelLevelDialog submitting={pendingAction} vehicle={fuelVehicle} onClose={() => setDialog(null)} onSubmit={async (fuelLevel) => { const ok = await mutate({ action: "setFuelLevel", vehicleId: fuelVehicle.id, version: fuelVehicle.version, fuelLevel, actorName: employee?.name ?? "共用端末" }, `${fuelVehicle.name}の残量を${formatFuelLevel(fuelLevel)}へ変更しました`); if (ok) setDialog(null); }} />}
       {dialog === "edit" && editTrip && <EditTripDialog submitting={pendingAction} trip={editTrip} onClose={() => setDialog(null)} onAdjust={async (minutes) => { const direction = minutes > 0 ? "延長" : "短縮"; const ok = await mutate({ action: "adjustTrip", tripId: editTrip.id, version: editTrip.version, minutes, actorName: employee?.name ?? "共用端末" }, `${Math.abs(minutes)}分${direction}しました`); if (ok) { setDialog(null); if (startContext) setStayOnTimeline(false); } }} onSetEnd={async (plannedEnd) => { const ok = await mutate({ action: "setTripEnd", tripId: editTrip.id, version: editTrip.version, plannedEnd, actorName: employee?.name ?? "共用端末" }, `終了日時を${formatDateTime(plannedEnd)}へ変更しました`); if (ok) { setDialog(null); if (startContext) setStayOnTimeline(false); } }} onCancel={async () => { const ok = await mutate({ action: "cancelTrip", tripId: editTrip.id, version: editTrip.version, actorName: employee?.name ?? "共用端末" }, "予約を取り消しました"); if (ok) setDialog(null); }} />}
@@ -466,20 +466,19 @@ function TimelinePanelHeader({ mode, onChange }: { mode: "chart" | "list"; onCha
   return <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-100 px-4 py-2.5"><ViewSwitch value={mode} onChange={onChange} first={{ value: "chart", label: "タイムライン", icon: <Clock3 className="size-4" /> }} second={{ value: "list", label: "予定一覧", icon: <List className="size-4" /> }} compact /><p className="mr-auto text-xs text-slate-500">{mode === "chart" ? "ドラッグまたは予定をタップして時間を変更" : "予定を選ぶと終了時間の変更や取消ができます"}</p><div className="flex shrink-0 gap-3 text-xs"><Legend color="bg-blue-500" label="利用中" /><Legend color="bg-violet-500" label="予約" /><Legend color="bg-slate-400" label="完了" /></div></div>;
 }
 
-// 配置図の右に常時表示する利用中の車両。返却予定と最低限の操作だけを並べる。
-function ActiveVehicleSidebar({ trips, openEdit, openEnd }: { trips: Trip[]; openEdit: (trip: Trip) => void; openEnd: (trip: Trip) => void }) {
+// 配置図の右に常時表示する利用中の車両。タップで詳細を開き、配置図の空き区画へドラッグすると返却できる。
+function ActiveVehicleSidebar({ trips, selectedTripId, returningTripId, onSelect, onDragStart, onDragEnd }: { trips: Trip[]; selectedTripId: string | null; returningTripId: string | null; onSelect: (trip: Trip) => void; onDragStart: (trip: Trip) => void; onDragEnd: () => void }) {
   const now = Date.now();
   return <Card className="overflow-hidden lg:relative">
     <div className="flex flex-col lg:absolute lg:inset-0">
       <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2"><h3 className="text-xs font-black">利用中の車両</h3><span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-black text-blue-700">{trips.length}台</span></div>
       {trips.length === 0 ? <p className="px-3 py-6 text-center text-xs text-slate-400">現在利用中の車両はありません</p> : <ul className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto">{trips.map((trip) => {
         const overdue = new Date(trip.plannedEnd).getTime() < now;
-        return <li key={trip.id} className={cn("flex items-center gap-2 px-3 py-2", overdue && "bg-rose-50/70")}>
+        return <li key={trip.id}><button type="button" draggable aria-pressed={trip.id === selectedTripId} title={`${trip.vehicle.name}の詳細を表示（空き区画へドラッグすると返却）`} onClick={() => onSelect(trip)} onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", trip.vehicle.name); onDragStart(trip); }} onDragEnd={onDragEnd} className={cn("flex w-full cursor-grab items-center gap-2 px-3 py-2 text-left transition hover:bg-slate-50 active:cursor-grabbing", overdue && "bg-rose-50/70", (trip.id === selectedTripId || trip.id === returningTripId) && "bg-blue-50 ring-2 ring-inset ring-blue-300")}>
           <CarFront className="size-4 shrink-0" style={{ color: trip.vehicle.color }} />
           <div className="min-w-0 flex-1"><p className="truncate text-xs font-black">{trip.vehicle.name}</p><p className="truncate text-[10px] text-slate-500">{trip.employee.name} ・ <span className={cn(overdue && "font-black text-rose-700")}>{formatTime(trip.plannedEnd)}{overdue ? " 超過" : "まで"}</span></p></div>
-          <button type="button" title="予定変更" aria-label={`${trip.vehicle.name}の予定を変更`} onClick={() => openEdit(trip)} className="grid size-7 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800"><Pencil className="size-3.5" /></button>
-          <Button className="min-h-7 shrink-0 px-2 text-[11px]" onClick={() => openEnd(trip)}>返却</Button>
-        </li>;
+          <GripVertical aria-hidden className="size-4 shrink-0 text-slate-300" />
+        </button></li>;
       })}</ul>}
     </div>
   </Card>;
@@ -682,7 +681,7 @@ function VehicleEquipmentBadges({ vehicle, compact = false }: { vehicle: Pick<Ve
   </span>;
 }
 
-function ParkingMap({ data, changedVehicleIds, mutate, openStart, openReturn, openFuel, actorName }: { data: DashboardData; changedVehicleIds: string[]; mutate: (body: object, success: string) => Promise<boolean>; openStart: (vehicle?: Vehicle) => void; openReturn: (spot: ParkingSpot) => void; openFuel: (vehicle: Vehicle) => void; actorName: string }) {
+function ParkingMap({ data, trips, changedVehicleIds, mutate, openStart, openReturn, openFuel, openEdit, openEnd, actorName }: { data: DashboardData; trips: Trip[]; changedVehicleIds: string[]; mutate: (body: object, success: string) => Promise<boolean>; openStart: (vehicle?: Vehicle) => void; openReturn: (spot: ParkingSpot) => void; openFuel: (vehicle: Vehicle) => void; openEdit: (trip: Trip) => void; openEnd: (trip: Trip, spotId?: string) => void; actorName: string }) {
   // 車両移動モードでドラッグ中、またはタップで選んだ移動元の車両。
   const [movingVehicleId, setMovingVehicleId] = useState<string | null>(null);
   const movingVehicle = movingVehicleId ? data.spots.find((spot) => spot.vehicle?.id === movingVehicleId)?.vehicle ?? null : null;
@@ -693,11 +692,20 @@ function ParkingMap({ data, changedVehicleIds, mutate, openStart, openReturn, op
   const selectedVehicle = selectedSpot?.vehicle ?? null;
   // 選んだ時点の版を覚えておき、位置変更・残量変更などで車両が更新されたら詳細を閉じる。
   const selectedVersion = useRef<number | null>(null);
-  const selectVehicle = (vehicle: Vehicle | null) => { selectedVersion.current = vehicle?.version ?? null; setSelectedVehicleId(vehicle?.id ?? null); };
+  const selectVehicle = (vehicle: Vehicle | null) => { selectedVersion.current = vehicle?.version ?? null; setSelectedVehicleId(vehicle?.id ?? null); if (vehicle) { setSelectedTripId(null); setReturningTripId(null); } };
+  // 利用中の車両の詳細。駐車中の車両の詳細とは同時に開かない。
+  const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
+  const selectedTrip = selectedTripId ? trips.find((trip) => trip.id === selectedTripId) ?? null : null;
+  // 返却する利用中の車両。一覧からドラッグ中、または詳細の「返却」で選んだ車両。
+  const [returningTripId, setReturningTripId] = useState<string | null>(null);
+  const returningTrip = returningTripId ? trips.find((trip) => trip.id === returningTripId) ?? null : null;
+  const [extending, setExtending] = useState(false);
   useEffect(() => {
     if (selectedVehicleId && selectedVehicle?.version !== selectedVersion.current) setSelectedVehicleId(null);
   }, [selectedVehicleId, selectedVehicle?.version]);
-  const startMove = (vehicle: Vehicle) => { setSelectedVehicleId(null); setMovingVehicleId(vehicle.id); };
+  const startMove = (vehicle: Vehicle) => { setSelectedVehicleId(null); setSelectedTripId(null); setReturningTripId(null); setMovingVehicleId(vehicle.id); };
+  const selectTrip = (trip: Trip) => { setSelectedVehicleId(null); setMovingVehicleId(null); setReturningTripId(null); setSelectedTripId((current) => current === trip.id ? null : trip.id); };
+  const startReturn = (trip: Trip) => { setSelectedVehicleId(null); setSelectedTripId(null); setMovingVehicleId(null); setReturningTripId(trip.id); };
   const wavingVehicleIds = useFuelChangeWave(data.spots);
   const canDropOn = (spot: ParkingSpot) => !!movingVehicle && !spot.vehicle && canUseSpot(movingVehicle, spot);
   const moveTo = (spot: ParkingSpot) => {
@@ -705,20 +713,40 @@ function ParkingMap({ data, changedVehicleIds, mutate, openStart, openReturn, op
     setMovingVehicleId(null);
     void mutate({ action: "moveVehicle", vehicleId: movingVehicle.id, version: movingVehicle.version, spotId: spot.id, actorName }, `${formatSpotLabel(spot)}へ移動しました`);
   };
-  return <Card className="overflow-hidden">
+  // 返却先の区画を決めたら、燃料残量を入力する返却画面を開く。
+  const canReturnTo = (spot: ParkingSpot) => !!returningTrip && !spot.vehicle && canUseSpot(returningTrip.vehicle, spot);
+  const returnTo = (spot: ParkingSpot) => {
+    if (!returningTrip || !canReturnTo(spot)) return;
+    setReturningTripId(null);
+    openEnd(returningTrip, spot.id);
+  };
+  const isTarget = (spot: ParkingSpot) => canDropOn(spot) || canReturnTo(spot);
+  const pickingVehicle = movingVehicle ?? returningTrip?.vehicle ?? null;
+  const canExtend = (trip: Trip, minutes: number) => new Date(trip.plannedEnd).getTime() + minutes * 60_000 <= new Date(trip.plannedStart).getTime() + 7 * 24 * 60 * 60_000;
+  const extend = async (trip: Trip, minutes: number) => {
+    setExtending(true);
+    try {
+      await mutate({ action: "adjustTrip", tripId: trip.id, version: trip.version, minutes, actorName }, `${trip.vehicle.name}の利用を${minutes >= 60 ? `${minutes / 60}時間` : `${minutes}分`}延長しました`);
+    } finally { setExtending(false); }
+  };
+  return <><Card className="overflow-hidden">
     <div className="p-3 md:p-4">
       <div className="@container relative mx-auto aspect-[950/525] max-w-[1180px] overflow-hidden rounded-xl border border-slate-200 bg-white" style={{ width: "min(100%, calc((100vh - 270px) * 1.81))" }}>
         <img src="/parking-layout.svg" alt="" className="pointer-events-none absolute inset-0 size-full select-none" draggable={false} />
-        {data.spots.map((spot) => <div key={spot.id} onDragOver={(e) => { if (canDropOn(spot)) e.preventDefault(); }} onDrop={(e) => { e.preventDefault(); moveTo(spot); }} className={cn("absolute grid place-items-center rounded-[4px] border-2 transition", parkingSpotClass(spot), canDropOn(spot) && "border-dashed border-blue-400 bg-blue-50", movingVehicle && !spot.vehicle && !canUseSpot(movingVehicle, spot) && "cursor-not-allowed opacity-60", (spot.vehicle?.id === selectedVehicleId || spot.vehicle?.id === movingVehicleId) && "z-20 ring-4 ring-blue-300", spot.vehicle && changedVehicleIds.includes(spot.vehicle.id) && "z-10 ring-4 ring-amber-300 animate-pulse")} style={{ left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.width}%`, height: `${spot.height}%` }}>
+        {data.spots.map((spot) => <div key={spot.id} onDragOver={(e) => { if (isTarget(spot)) e.preventDefault(); }} onDrop={(e) => { e.preventDefault(); if (returningTrip) returnTo(spot); else moveTo(spot); }} className={cn("absolute grid place-items-center rounded-[4px] border-2 transition", parkingSpotClass(spot), isTarget(spot) && "border-dashed border-blue-400 bg-blue-50", pickingVehicle && !spot.vehicle && !canUseSpot(pickingVehicle, spot) && "cursor-not-allowed opacity-60", (spot.vehicle?.id === selectedVehicleId || spot.vehicle?.id === movingVehicleId) && "z-20 ring-4 ring-blue-300", spot.vehicle && changedVehicleIds.includes(spot.vehicle.id) && "z-10 ring-4 ring-amber-300 animate-pulse")} style={{ left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.width}%`, height: `${spot.height}%` }}>
           {spot.vehicle && spot.vehicle.fuelLevel !== null ? <FuelFill level={spot.vehicle.fuelLevel} waving={wavingVehicleIds.includes(spot.vehicle.id)} /> : null}
           <span className="absolute left-1 top-0.5 z-[1] text-[9px] font-black text-slate-500">{spot.code}{spot.role === "HOLDING" ? <small className="ml-0.5 text-[7px]">仮置き</small> : spot.role !== "REGULAR" ? <small className={cn("ml-0.5 hidden text-[7px] @2xl:inline", spot.role === "TEMPORARY" && "text-slate-400")}>{spotRoleTag(spot)}</small> : null}</span>
-          {spot.vehicle ? <div className="relative size-full">{moveMode ? <button type="button" draggable aria-pressed={spot.vehicle.id === movingVehicleId} title={`${spot.vehicle.name}を移動`} onClick={() => setMovingVehicleId((current) => current === spot.vehicle?.id ? null : spot.vehicle?.id ?? null)} onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setMovingVehicleId(spot.vehicle?.id ?? null); }} className="grid size-full cursor-grab place-content-center overflow-hidden text-center active:cursor-grabbing">{vehicleTileContent(spot.vehicle, spot.orientation === "horizontal")}<GripVertical aria-hidden className="pointer-events-none absolute right-0.5 top-0.5 size-3.5 text-slate-400" /></button> : <button type="button" aria-pressed={spot.vehicle.id === selectedVehicleId} title={`${spot.vehicle.name}の詳細を表示`} onClick={() => selectVehicle(spot.vehicle?.id === selectedVehicleId ? null : spot.vehicle ?? null)} className="grid size-full place-content-center overflow-hidden text-center">{vehicleTileContent(spot.vehicle, spot.orientation === "horizontal")}</button>}{spot.vehicle.fuelLevel !== null ? <span className={cn("pointer-events-none absolute bottom-0.5 right-1 text-[7px] font-black leading-none @2xl:text-[8px]", isLowFuel(spot.vehicle.fuelLevel) ? "text-amber-800" : "text-emerald-800")}>残量 {formatFuelLevel(spot.vehicle.fuelLevel)}</span> : null}</div> : <button type="button" title={`${formatSpotLabel(spot)}へ返却`} onClick={() => { if (moveMode) moveTo(spot); else openReturn(spot); }} className={cn("grid size-full place-content-center text-center transition", moveMode ? !canDropOn(spot) && "cursor-default" : "hover:bg-slate-100/70")}><span className="block text-[9px] font-bold leading-tight text-slate-500 @2xl:text-[11px] @5xl:text-[13px]"><MapPin className="mx-auto mb-0.5 size-3" />{spot.role === "HOLDING" ? "仮置き" : spot.role === "TEMPORARY" ? "一時" : spot.role === "DEDICATED" ? spot.dedicatedVehicleName ?? "専用" : "空き"}<span className="hidden @2xl:block">{spot.role === "HOLDING" ? "実在なし" : spot.role === "TEMPORARY" ? "駐車可" : spot.role === "DEDICATED" ? "専用" : "返却"}</span></span></button>}
+          {spot.vehicle ? <div className="relative size-full">{moveMode ? <button type="button" draggable aria-pressed={spot.vehicle.id === movingVehicleId} title={`${spot.vehicle.name}を移動`} onClick={() => setMovingVehicleId((current) => current === spot.vehicle?.id ? null : spot.vehicle?.id ?? null)} onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setMovingVehicleId(spot.vehicle?.id ?? null); }} className="grid size-full cursor-grab place-content-center overflow-hidden text-center active:cursor-grabbing">{vehicleTileContent(spot.vehicle, spot.orientation === "horizontal")}<GripVertical aria-hidden className="pointer-events-none absolute right-0.5 top-0.5 size-3.5 text-slate-400" /></button> : <button type="button" aria-pressed={spot.vehicle.id === selectedVehicleId} title={`${spot.vehicle.name}の詳細を表示`} onClick={() => selectVehicle(spot.vehicle?.id === selectedVehicleId ? null : spot.vehicle ?? null)} className="grid size-full place-content-center overflow-hidden text-center">{vehicleTileContent(spot.vehicle, spot.orientation === "horizontal")}</button>}{spot.vehicle.fuelLevel !== null ? <span className={cn("pointer-events-none absolute bottom-0.5 right-1 text-[7px] font-black leading-none @2xl:text-[8px]", isLowFuel(spot.vehicle.fuelLevel) ? "text-amber-800" : "text-emerald-800")}>残量 {formatFuelLevel(spot.vehicle.fuelLevel)}</span> : null}</div> : <button type="button" title={`${formatSpotLabel(spot)}へ返却`} onClick={() => { if (returningTrip) returnTo(spot); else if (moveMode) moveTo(spot); else openReturn(spot); }} className={cn("grid size-full place-content-center text-center transition", pickingVehicle ? !isTarget(spot) && "cursor-default" : "hover:bg-slate-100/70")}><span className="block text-[9px] font-bold leading-tight text-slate-500 @2xl:text-[11px] @5xl:text-[13px]"><MapPin className="mx-auto mb-0.5 size-3" />{spot.role === "HOLDING" ? "仮置き" : spot.role === "TEMPORARY" ? "一時" : spot.role === "DEDICATED" ? spot.dedicatedVehicleName ?? "専用" : "空き"}<span className="hidden @2xl:block">{spot.role === "HOLDING" ? "実在なし" : spot.role === "TEMPORARY" ? "駐車可" : spot.role === "DEDICATED" ? "専用" : "返却"}</span></span></button>}
         </div>)}
         {selectedVehicle && selectedSpot ? <div role="region" aria-label={`${selectedVehicle.name}の詳細`} className="absolute inset-x-2 bottom-2 z-30 mx-auto flex max-w-xl flex-wrap items-center gap-2 rounded-2xl border border-blue-200 bg-white/95 p-2.5 pr-4 shadow-2xl backdrop-blur"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-blue-50"><CarFront className="size-5" style={{ color: selectedVehicle.color }} /></span><div className="mr-auto min-w-28 flex-1"><div className="flex flex-wrap items-center gap-1.5"><b className="text-sm">{selectedVehicle.name}</b>{selectedVehicle.status === "MAINTENANCE" ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-800">整備中</span> : null}<VehicleEquipmentBadges vehicle={selectedVehicle} /></div><p className="text-[10px] font-bold text-slate-500">{selectedVehicle.plateNumber} ・ {selectedVehicle.code} ・ 駐車位置 {selectedSpot.code}{selectedVehicle.fuelLevel !== null ? ` ・ 残量 ${formatFuelLevel(selectedVehicle.fuelLevel)}` : ""}</p></div><Button className="min-h-9 px-3 text-xs" disabled={selectedVehicle.status !== "AVAILABLE"} onClick={() => openStart(selectedVehicle)}><CarFront className="size-3.5" />{selectedVehicle.status === "MAINTENANCE" ? "利用不可" : "利用開始"}</Button><Button variant="ghost" className="min-h-9 px-3 text-xs" onClick={() => startMove(selectedVehicle)}><MapPin className="size-3.5" />位置変更</Button><Button variant="ghost" className="min-h-9 px-3 text-xs" onClick={() => openFuel(selectedVehicle)}><Fuel className="size-3.5" />残量変更</Button><button type="button" aria-label="車両詳細を閉じる" onClick={() => setSelectedVehicleId(null)} className="absolute -right-2.5 -top-2.5 grid size-8 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-md hover:bg-slate-100 hover:text-slate-800"><X className="size-4" /></button></div> : null}
+        {selectedTrip ? <div role="region" aria-label={`${selectedTrip.vehicle.name}の利用状況`} className="absolute inset-x-2 bottom-2 z-30 mx-auto flex max-w-xl flex-wrap items-center gap-2 rounded-2xl border border-blue-200 bg-white/95 p-2.5 pr-4 shadow-2xl backdrop-blur"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-blue-50"><CarFront className="size-5" style={{ color: selectedTrip.vehicle.color }} /></span><div className="mr-auto min-w-32 flex-1"><div className="flex flex-wrap items-center gap-1.5"><b className="text-sm">{selectedTrip.vehicle.name}</b><span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-black text-blue-700">利用中</span></div><p className="text-[10px] font-bold text-slate-500">{selectedTrip.employee.name} ・ <span className={cn(new Date(selectedTrip.plannedEnd).getTime() < Date.now() && "text-rose-700")}>{formatDateTime(selectedTrip.plannedEnd)}{new Date(selectedTrip.plannedEnd).getTime() < Date.now() ? " 超過" : " 返却予定"}</span></p></div><Button className="min-h-9 px-3 text-xs" onClick={() => startReturn(selectedTrip)}><LogOut className="size-3.5" />返却</Button>{[15, 30, 60].map((minutes) => <Button key={minutes} variant="ghost" className="min-h-9 px-2 text-xs" disabled={extending || !canExtend(selectedTrip, minutes)} onClick={() => void extend(selectedTrip, minutes)}>＋{minutes >= 60 ? `${minutes / 60}時間` : `${minutes}分`}</Button>)}<Button variant="ghost" className="min-h-9 px-3 text-xs" onClick={() => openEdit(selectedTrip)}><Pencil className="size-3.5" />予定変更</Button><button type="button" aria-label="利用状況を閉じる" onClick={() => setSelectedTripId(null)} className="absolute -right-2.5 -top-2.5 grid size-8 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-md hover:bg-slate-100 hover:text-slate-800"><X className="size-4" /></button></div> : null}
       </div>
+      {returningTrip ? <div role="status" className="mx-auto mt-2 flex max-w-md items-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 p-2"><LogOut className="size-4 shrink-0 text-blue-600" /><p className="mr-auto text-xs font-bold"><b>{returningTrip.vehicle.name}</b>を返却する区画をタップ（ドラッグも可）</p><Button variant="ghost" className="min-h-8 shrink-0 whitespace-nowrap px-3 text-xs" onClick={() => setReturningTripId(null)}>やめる</Button></div> : null}
       {movingVehicle ? <div role="status" className="mx-auto mt-2 flex max-w-md items-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 p-2"><Move className="size-4 shrink-0 text-blue-600" /><p className="mr-auto text-xs font-bold"><b>{movingVehicle.name}</b>の移動先をタップ（ドラッグも可）</p><Button variant="ghost" className="min-h-8 shrink-0 whitespace-nowrap px-3 text-xs" onClick={() => setMovingVehicleId(null)}>やめる</Button></div> : null}
     </div>
-  </Card>;
+  </Card>
+  <ActiveVehicleSidebar trips={trips} selectedTripId={selectedTripId} returningTripId={returningTripId} onSelect={selectTrip} onDragStart={startReturn} onDragEnd={() => setReturningTripId(null)} />
+  </>;
 }
 
 function DialogShell({ title, subtitle, onClose, children, wide = false, busy = false }: { title: string; subtitle: string; onClose: () => void; children: React.ReactNode; wide?: boolean; busy?: boolean }) {
@@ -901,8 +929,8 @@ function ParkingReturnDialog({ spot, trips: allTrips, vehicles, submitting, onCl
     <p className="text-center text-[11px] text-slate-400">確認ボタンを押すまで返却は確定しません。</p>
   </div></DialogShell>;
 }
-function EndDialog({ trip, spots, submitting, onClose, onSubmit }: { trip: Trip; spots: ParkingSpot[]; submitting: boolean; onClose: () => void; onSubmit: (spotId: string, fuelLevel: number | null) => void }) {
-  const free = spots.filter((spot) => !spot.vehicle && canUseSpot(trip.vehicle, spot)); const [spotId, setSpotId] = useState(""); const [fuelLevel, setFuelLevel] = useState(trip.vehicle.fuelLevel);
+function EndDialog({ trip, spots, initialSpotId = "", submitting, onClose, onSubmit }: { trip: Trip; spots: ParkingSpot[]; initialSpotId?: string; submitting: boolean; onClose: () => void; onSubmit: (spotId: string, fuelLevel: number | null) => void }) {
+  const free = spots.filter((spot) => !spot.vehicle && canUseSpot(trip.vehicle, spot)); const [spotId, setSpotId] = useState(initialSpotId); const [fuelLevel, setFuelLevel] = useState(trip.vehicle.fuelLevel);
   const selected = free.find((spot) => spot.id === spotId);
   const holdingCodes = free.filter((spot) => spot.role === "HOLDING").map((spot) => spot.code);
   return <DialogShell busy={submitting} title="返却・駐車位置を登録" subtitle={`${trip.vehicle.name} の返却先を選択してください${holdingCodes.length ? `（${holdingCodes.join("・")}は実在しない仮置き）` : ""}`} onClose={onClose}><div className="space-y-4"><OperationProgress labels={["車両確認", "返却先", "内容確定"]} current={selected ? 3 : 2} /><div className="grid grid-cols-3 gap-2">{free.map((spot) => <button key={spot.id} onClick={() => setSpotId(spot.id)} className={cn("min-h-14 rounded-xl border text-sm font-black", spotId === spot.id ? "border-emerald-500 bg-emerald-50 text-emerald-700 ring-2 ring-emerald-200" : spot.role === "HOLDING" ? "border-dotted border-zinc-400 bg-zinc-100 text-zinc-700" : "border-slate-200")}>{formatSpotLabel(spot)}</button>)}</div>{selected ? <div className={cn("rounded-xl p-3 text-sm font-bold", selected.role === "HOLDING" ? "bg-zinc-200 text-zinc-800" : "bg-emerald-50 text-emerald-800")}>{trip.vehicle.name}を{formatSpotLabel(selected)}へ返却します</div> : <p className="text-center text-xs font-bold text-amber-700">返却した区画を選択してください</p>}<FuelLevelPicker value={fuelLevel} onChange={setFuelLevel} /><Button className="w-full bg-emerald-600 hover:bg-emerald-700" disabled={!spotId || submitting} onClick={() => onSubmit(spotId, fuelLevel)}>{submitting ? <LoaderCircle className="size-4 animate-spin" /> : <Check className="size-4" />}{submitting ? "返却登録中…" : "返却を完了"}</Button></div></DialogShell>;
