@@ -19,4 +19,4 @@ export type Trip = {
   purpose: string | null; returnSpotCode: string | null; returnFuelLevel: number | null; version: number;
   employee: Employee; vehicle: Vehicle;
 };
-export type DashboardData = { employees: Employee[]; departments: Department[]; vehicles: Vehicle[]; spots: ParkingSpot[]; trips: Trip[]; system: { backupLatestAt: string | null; backupVerifiedAt: string | null; appVersion: string; environment: string; deployedAt: string | null; schemaVersion: string } };
+export type DashboardData = { employees: Employee[]; departments: Department[]; vehicles: Vehicle[]; spots: ParkingSpot[]; trips: Trip[]; nextReservations: Trip[]; system: { backupLatestAt: string | null; backupVerifiedAt: string | null; appVersion: string; environment: string; deployedAt: string | null; schemaVersion: string } };

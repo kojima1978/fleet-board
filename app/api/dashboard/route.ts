@@ -114,7 +114,7 @@ export async function GET(request: Request) {
   const requestedDays = Number(url.searchParams.get("days"));
   const days = requestedDays === 1 || requestedDays === 3 ? requestedDays : 3;
   const dayEnd = new Date(dayStart.getTime() + days * 24 * 60 * 60_000);
-  const [employees, departments, vehicles, spots, trips, backup, system] = await Promise.all([
+  const [employees, departments, vehicles, spots, trips, nextReservations, backup, system] = await Promise.all([
     prisma.employee.findMany({ include: { employeeNumber: true, department: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } }, orderBy: { employeeNumber: { code: "asc" } } }),
     prisma.department.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
     prisma.vehicle.findMany({ include: { vehicleNumber: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } }, orderBy: { vehicleNumber: { code: "asc" } } }),
@@ -128,6 +128,11 @@ export async function GET(request: Request) {
       ] },
       include: { employee: { include: { employeeNumber: true, department: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } } }, vehicle: { include: { vehicleNumber: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } } } }, orderBy: { plannedStart: "asc" },
     }),
+    // 利用中の車両の予約は表示範囲に関係なく返す。延長できる上限と、超過が次の人へ響くかの表示に使う。
+    prisma.trip.findMany({
+      where: { status: "RESERVED", vehicle: { trips: { some: { status: "IN_USE" } } } },
+      include: { employee: { include: { employeeNumber: true, department: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } } }, vehicle: { include: { vehicleNumber: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } } } }, orderBy: { plannedStart: "asc" },
+    }),
     getBackupStatus(),
     getApplicationSystemStatus(),
   ]);
@@ -138,6 +143,7 @@ export async function GET(request: Request) {
     vehicles: vehicles.map((vehicle) => withVehicleCode(vehicle, includeNfc)),
     spots: spots.map((spot) => ({ ...spot, dedicatedVehicleName: vehicles.find((vehicle) => vehicle.id === spot.dedicatedVehicleId)?.name ?? null, vehicle: spot.vehicle ? withVehicleCode(spot.vehicle, includeNfc) : null })),
     trips: trips.map((trip) => ({ ...trip, employee: withEmployeeCode(trip.employee, includeNfc), vehicle: withVehicleCode(trip.vehicle, includeNfc) })),
+    nextReservations: nextReservations.map((trip) => ({ ...trip, employee: withEmployeeCode(trip.employee, includeNfc), vehicle: withVehicleCode(trip.vehicle, includeNfc) })),
     system: {
       backupLatestAt: backup.latestAt,
       backupVerifiedAt: backup.verifiedAt,

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Fuel, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Move, Nfc, Pencil, Plus, Power, Printer, RefreshCw, Settings, UserRound, X } from "lucide-react";
+import { AlertTriangle, CalendarClock, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Fuel, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Move, Nfc, Pencil, Plus, Power, Printer, RefreshCw, Settings, UserRound, X } from "lucide-react";
 import type { DashboardData, Employee, ParkingSpot, Trip, Vehicle } from "@/lib/types";
 import { normalizeNfcUid } from "@/lib/nfc";
 import { createOperationId } from "@/lib/operation-id";
@@ -34,6 +34,11 @@ const jpShortDate = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", m
 const jpDateTime = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
 const formatTime = (value: string | Date) => jpTime.format(new Date(value));
 const formatDateTime = (value: string | Date) => jpDateTime.format(new Date(value));
+const formatMinutes = (minutes: number) => minutes >= 60 ? `${Math.floor(minutes / 60)}時間${minutes % 60 ? `${minutes % 60}分` : ""}` : `${minutes}分`;
+// 同じ車両の次の予約。延長できる上限と、超過が次の人へ響くかの判断に使う。
+const nextReservationFor = (trip: Trip, reservations: Trip[]) => reservations.filter((item) => item.vehicleId === trip.vehicleId).sort((a, b) => a.plannedStart.localeCompare(b.plannedStart))[0] ?? null;
+// 超過中は予定終了から延ばしても超過のままなので、今から指定時間後（5分単位で切り上げ）を新しい返却予定にする。
+const extendedEnd = (trip: Trip, minutes: number, now: number) => { const end = new Date(trip.plannedEnd).getTime(); return end >= now ? end + minutes * 60_000 : Math.ceil((now + minutes * 60_000) / 300_000) * 300_000; };
 const nextQuarterHour = (value = Date.now()) => new Date(Math.ceil((value + 1) / (15 * 60_000)) * 15 * 60_000);
 const toLocalDateTimeInput = (value: Date) => new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 const nextAllDayStart = () => {
@@ -386,7 +391,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
           </Card> : null}
           {activeVehicles.length === 0 ? <TimelineEmptyState /> : <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
             {timelineMode === "chart" ? <Card className="min-w-0 overflow-hidden"><TimelinePanelHeader mode={timelineMode} onChange={setTimelineMode} /><Timeline data={data} mutate={mutate} openStart={openStart} openEdit={openEdit} actorName={employee?.name ?? "共用端末"} highlightTripId={confirmedTrip?.id} timelineDate={timelineDate} timelineDays={timelineDays} setTimelineDate={setTimelineDate} setTimelineDays={setTimelineDays} /></Card> : <TimelineList trips={data.trips} openEdit={openEdit} mode={timelineMode} onChange={setTimelineMode} />}
-            <ActiveTripsPanel trips={activeTrips} openEnd={openEnd} />
+            <ActiveTripsPanel trips={activeTrips} reservations={data.nextReservations} mutate={mutate} actorName={employee?.name ?? "共用端末"} openEdit={openEdit} />
           </section>}
         </> : null}
 
@@ -453,8 +458,44 @@ function TimelineEmptyState() {
   return <Card className="grid min-h-72 place-items-center p-6 text-center"><div><span className="mx-auto grid size-14 place-items-center rounded-2xl bg-blue-50 text-blue-600"><Clock3 className="size-7" /></span><h2 className="mt-4 text-lg font-black">表示する車両がありません</h2><p className="mt-1 text-sm text-slate-500">車両を登録すると、利用予定と現在の利用状況を確認できます。</p><div className="mt-5 flex flex-wrap justify-center gap-2"><Link href="/settings/vehicles" className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white hover:bg-blue-700"><Plus className="size-4" />車両を登録</Link><Link href="/" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 hover:bg-slate-50"><LayoutGrid className="size-4" />駐車場を見る</Link></div></div></Card>;
 }
 
-function ActiveTripsPanel({ trips, openEnd }: { trips: Trip[]; openEnd: (trip: Trip) => void }) {
-  return <Card className="p-5"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-black">返却対象</h2><p className="text-xs text-slate-500">返却すると即時利用可能になります</p></div><span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">{trips.length}件</span></div><div className="space-y-3">{trips.length === 0 ? <Empty label="現在、返却対象の車両はありません" /> : trips.map((trip) => { const overdue = new Date(trip.plannedEnd).getTime() < Date.now(); return <div key={trip.id} className={cn("rounded-2xl border p-4", overdue ? "border-rose-300 bg-rose-50/50" : "border-slate-200")}><div className="flex items-start justify-between"><div><p className="font-black">{trip.vehicle.name}</p><p className="mt-0.5 text-xs text-slate-500">{trip.employee.name} ・ {trip.employee.department}</p></div>{overdue ? <span className="rounded-full bg-rose-100 px-2 py-1 text-[10px] font-bold text-rose-700">返却超過</span> : null}</div><div className={cn("my-3 flex items-center gap-2 text-xs", overdue ? "font-bold text-rose-700" : "text-slate-600")}><Clock3 className="size-4" />返却予定 {formatDateTime(trip.plannedEnd)}</div><Button className="w-full" variant="secondary" onClick={() => openEnd(trip)}><LogOut className="size-4" />返却登録</Button></div>; })}</div></Card>;
+// タイムライン右の利用中の車両。超過した人から連絡を受けた社内の人が、延長や予定変更をここで済ませる。返却は駐車場の配置図で区画を選んで行う。
+function ActiveTripsPanel({ trips, reservations, mutate, actorName, openEdit }: { trips: Trip[]; reservations: Trip[]; mutate: (body: object, success: string) => Promise<boolean>; actorName: string; openEdit: (trip: Trip) => void }) {
+  const now = Date.now();
+  const inUse = [...trips].sort((a, b) => a.plannedEnd.localeCompare(b.plannedEnd));
+  return <Card className="overflow-hidden"><div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5"><div><h2 className="text-sm font-black">利用中</h2><p className="text-[11px] text-slate-500">延長の連絡を受けたらここで更新できます</p></div><span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">{inUse.length}台</span></div>
+    {inUse.length === 0 ? <div className="p-4"><Empty label="現在利用中の車両はありません" /></div> : <ul className="divide-y divide-slate-100">{inUse.map((trip) => {
+      const end = new Date(trip.plannedEnd).getTime();
+      const overdue = end < now;
+      const next = nextReservationFor(trip, reservations);
+      // 次の予約までの残り。超過中は今からの残り時間で見る。
+      const gap = next ? Math.floor((new Date(next.plannedStart).getTime() - Math.max(end, now)) / 60_000) : null;
+      const tight = gap !== null && gap < 60;
+      return <li key={trip.id} className={cn("space-y-1.5 px-4 py-3", overdue && "bg-rose-50/60")}>
+        <div className="flex items-center gap-2"><CarFront className="size-4 shrink-0" style={{ color: trip.vehicle.color }} /><p className="min-w-0 flex-1 truncate text-sm font-black">{trip.vehicle.name}<span className="ml-1.5 text-[10px] font-bold text-slate-400">{trip.vehicle.code}</span></p>{overdue ? <span className="shrink-0 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-black text-rose-700">超過 {formatMinutes(Math.max(1, Math.floor((now - end) / 60_000)))}</span> : null}</div>
+        <p className="truncate text-xs text-slate-500">{trip.employee.name} ・ {trip.employee.department}</p>
+        <p className={cn("flex items-center gap-1.5 text-xs", overdue ? "font-bold text-rose-700" : "text-slate-600")}><Clock3 className="size-3.5 shrink-0" />返却予定 {formatDateTime(trip.plannedEnd)}</p>
+        {next ? <p className={cn("flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-bold", tight ? "bg-amber-100 text-amber-900" : "bg-slate-50 text-slate-500")}><CalendarClock className="size-3.5 shrink-0" /><span className="truncate">次の予約 {formatDateTime(next.plannedStart)} {next.employee.name}{tight ? gap <= 0 ? "（開始時刻を過ぎています）" : `（あと${formatMinutes(gap)}）` : ""}</span></p> : null}
+        <div className="flex flex-wrap items-center gap-1 pt-0.5"><TripExtendButtons trip={trip} reservations={reservations} minutes={[30, 60]} mutate={mutate} actorName={actorName} className="min-h-8 px-2 text-xs" /><Button variant="ghost" className="min-h-8 px-2 text-xs" onClick={() => openEdit(trip)}><Pencil className="size-3.5" />予定変更</Button><Link href={`/?returnTrip=${trip.id}`} className="ml-auto inline-flex min-h-8 items-center gap-1 rounded-lg px-2 text-[11px] font-bold text-slate-500 hover:bg-slate-100 hover:text-slate-800"><LogOut className="size-3.5" />駐車場で返却</Link></div>
+      </li>;
+    })}</ul>}
+  </Card>;
+}
+
+// 返却予定の延長ボタン。次の予約や7日の上限を越える延長は押せない。
+function TripExtendButtons({ trip, reservations, minutes, mutate, actorName, className }: { trip: Trip; reservations: Trip[]; minutes: number[]; mutate: (body: object, success: string) => Promise<boolean>; actorName: string; className?: string }) {
+  const [busy, setBusy] = useState(false);
+  const now = Date.now();
+  const overdue = new Date(trip.plannedEnd).getTime() < now;
+  const next = nextReservationFor(trip, reservations);
+  const limit = Math.min(new Date(trip.plannedStart).getTime() + 7 * 24 * 60 * 60_000, next ? new Date(next.plannedStart).getTime() : Infinity);
+  const extend = async (value: number) => {
+    const end = extendedEnd(trip, value, Date.now());
+    setBusy(true);
+    try {
+      await mutate(overdue ? { action: "setTripEnd", tripId: trip.id, version: trip.version, plannedEnd: new Date(end).toISOString(), actorName } : { action: "adjustTrip", tripId: trip.id, version: trip.version, minutes: value, actorName }, `${trip.vehicle.name}の返却予定を${formatDateTime(new Date(end))}に延長しました`);
+    } finally { setBusy(false); }
+  };
+  return <>{minutes.map((value) => <Button key={value} variant="ghost" className={className} title={overdue ? `返却予定を今から${formatMinutes(value)}後にする` : `返却予定を${formatMinutes(value)}延長`} disabled={busy || extendedEnd(trip, value, now) > limit} onClick={() => void extend(value)}>{overdue ? "今から" : "＋"}{formatMinutes(value)}</Button>)}</>;
 }
 function Legend({ color, label }: { color: string; label: string }) { return <span className="flex items-center gap-1.5"><i className={cn("size-2 rounded-full", color)} />{label}</span>; }
 function Empty({ label }: { label: string }) { return <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-400">{label}</div>; }
@@ -700,7 +741,7 @@ function ParkingMap({ data, trips, changedVehicleIds, mutate, openStart, openRet
   // 返却する利用中の車両。一覧からドラッグ中、または詳細の「返却」で選んだ車両。
   const [returningTripId, setReturningTripId] = useState<string | null>(null);
   const returningTrip = returningTripId ? trips.find((trip) => trip.id === returningTripId) ?? null : null;
-  const [extending, setExtending] = useState(false);
+
   useEffect(() => {
     if (selectedVehicleId && selectedVehicle?.version !== selectedVersion.current) setSelectedVehicleId(null);
   }, [selectedVehicleId, selectedVehicle?.version]);
@@ -723,13 +764,14 @@ function ParkingMap({ data, trips, changedVehicleIds, mutate, openStart, openRet
   };
   const isTarget = (spot: ParkingSpot) => canDropOn(spot) || canReturnTo(spot);
   const pickingVehicle = movingVehicle ?? returningTrip?.vehicle ?? null;
-  const canExtend = (trip: Trip, minutes: number) => new Date(trip.plannedEnd).getTime() + minutes * 60_000 <= new Date(trip.plannedStart).getTime() + 7 * 24 * 60 * 60_000;
-  const extend = async (trip: Trip, minutes: number) => {
-    setExtending(true);
-    try {
-      await mutate({ action: "adjustTrip", tripId: trip.id, version: trip.version, minutes, actorName }, `${trip.vehicle.name}の利用を${minutes >= 60 ? `${minutes / 60}時間` : `${minutes}分`}延長しました`);
-    } finally { setExtending(false); }
-  };
+  // タイムラインの「駐車場で返却」から来たときは、その車の返却先選びから始める。
+  useEffect(() => {
+    const tripId = new URLSearchParams(window.location.search).get("returnTrip");
+    if (!tripId) return;
+    const trip = trips.find((item) => item.id === tripId);
+    if (trip) startReturn(trip);
+    window.history.replaceState({}, "", "/");
+  }, [trips]);
   return <><Card className="overflow-hidden">
     <div className="p-3 md:p-4">
       <div className="@container relative mx-auto aspect-[950/525] max-w-[1180px] overflow-hidden rounded-xl border border-slate-200 bg-white" style={{ width: "min(100%, calc((100vh - 270px) * 1.81))" }}>
@@ -740,7 +782,7 @@ function ParkingMap({ data, trips, changedVehicleIds, mutate, openStart, openRet
           {spot.vehicle ? <div className="relative size-full">{moveMode ? <button type="button" draggable aria-pressed={spot.vehicle.id === movingVehicleId} title={`${spot.vehicle.name}を移動`} onClick={() => setMovingVehicleId((current) => current === spot.vehicle?.id ? null : spot.vehicle?.id ?? null)} onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setMovingVehicleId(spot.vehicle?.id ?? null); }} className="grid size-full cursor-grab place-content-center overflow-hidden text-center active:cursor-grabbing">{vehicleTileContent(spot.vehicle, spot.orientation === "horizontal")}<GripVertical aria-hidden className="pointer-events-none absolute right-0.5 top-0.5 size-3.5 text-slate-400" /></button> : <button type="button" aria-pressed={spot.vehicle.id === selectedVehicleId} title={`${spot.vehicle.name}の詳細を表示`} onClick={() => selectVehicle(spot.vehicle?.id === selectedVehicleId ? null : spot.vehicle ?? null)} className="grid size-full place-content-center overflow-hidden text-center">{vehicleTileContent(spot.vehicle, spot.orientation === "horizontal")}</button>}{spot.vehicle.fuelLevel !== null ? <span className={cn("pointer-events-none absolute bottom-0.5 right-1 text-[7px] font-black leading-none @2xl:text-[8px]", isLowFuel(spot.vehicle.fuelLevel) ? "text-amber-800" : "text-emerald-800")}>残量 {formatFuelLevel(spot.vehicle.fuelLevel)}</span> : null}</div> : <button type="button" title={`${formatSpotLabel(spot)}へ返却`} onClick={() => { if (returningTrip) returnTo(spot); else if (moveMode) moveTo(spot); else openReturn(spot); }} className={cn("grid size-full place-content-center text-center transition", pickingVehicle ? !isTarget(spot) && "cursor-default" : "hover:bg-slate-100/70")}><span className="block text-[9px] font-bold leading-tight text-slate-500 @2xl:text-[11px] @5xl:text-[13px]"><MapPin className="mx-auto mb-0.5 size-3" />{spot.role === "HOLDING" ? "仮置き" : spot.role === "TEMPORARY" ? "一時" : spot.role === "DEDICATED" ? spot.dedicatedVehicleName ?? "専用" : "空き"}<span className="hidden @2xl:block">{spot.role === "HOLDING" ? "実在なし" : spot.role === "TEMPORARY" ? "駐車可" : spot.role === "DEDICATED" ? "専用" : "返却"}</span></span></button>}
         </div>)}
         {selectedVehicle && selectedSpot ? <div role="region" aria-label={`${selectedVehicle.name}の詳細`} className="absolute inset-x-2 bottom-2 z-30 mx-auto flex max-w-xl flex-wrap items-center gap-2 rounded-2xl border border-blue-200 bg-white/95 p-2.5 pr-4 shadow-2xl backdrop-blur"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-blue-50"><CarFront className="size-5" style={{ color: selectedVehicle.color }} /></span><div className="mr-auto min-w-28 flex-1"><div className="flex flex-wrap items-center gap-1.5"><b className="text-sm">{selectedVehicle.name}</b>{selectedVehicle.status === "MAINTENANCE" ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-800">整備中</span> : null}<VehicleEquipmentBadges vehicle={selectedVehicle} /></div><p className="text-[10px] font-bold text-slate-500">{selectedVehicle.plateNumber} ・ {selectedVehicle.code} ・ 駐車位置 {selectedSpot.code}{selectedVehicle.fuelLevel !== null ? ` ・ 残量 ${formatFuelLevel(selectedVehicle.fuelLevel)}` : ""}</p></div><Button className="min-h-9 px-3 text-xs" disabled={selectedVehicle.status !== "AVAILABLE"} onClick={() => openStart(selectedVehicle)}><CarFront className="size-3.5" />{selectedVehicle.status === "MAINTENANCE" ? "利用不可" : "利用開始"}</Button><Button variant="ghost" className="min-h-9 px-3 text-xs" onClick={() => startMove(selectedVehicle)}><MapPin className="size-3.5" />位置変更</Button><Button variant="ghost" className="min-h-9 px-3 text-xs" onClick={() => openFuel(selectedVehicle)}><Fuel className="size-3.5" />残量変更</Button><button type="button" aria-label="車両詳細を閉じる" onClick={() => setSelectedVehicleId(null)} className="absolute -right-2.5 -top-2.5 grid size-8 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-md hover:bg-slate-100 hover:text-slate-800"><X className="size-4" /></button></div> : null}
-        {selectedTrip ? <div role="region" aria-label={`${selectedTrip.vehicle.name}の利用状況`} className="absolute inset-x-2 bottom-2 z-30 mx-auto flex max-w-xl flex-wrap items-center gap-2 rounded-2xl border border-blue-200 bg-white/95 p-2.5 pr-4 shadow-2xl backdrop-blur"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-blue-50"><CarFront className="size-5" style={{ color: selectedTrip.vehicle.color }} /></span><div className="mr-auto min-w-32 flex-1"><div className="flex flex-wrap items-center gap-1.5"><b className="text-sm">{selectedTrip.vehicle.name}</b><span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-black text-blue-700">利用中</span></div><p className="text-[10px] font-bold text-slate-500">{selectedTrip.employee.name} ・ <span className={cn(new Date(selectedTrip.plannedEnd).getTime() < Date.now() && "text-rose-700")}>{formatDateTime(selectedTrip.plannedEnd)}{new Date(selectedTrip.plannedEnd).getTime() < Date.now() ? " 超過" : " 返却予定"}</span></p></div><Button className="min-h-9 px-3 text-xs" onClick={() => startReturn(selectedTrip)}><LogOut className="size-3.5" />返却</Button>{[15, 30, 60].map((minutes) => <Button key={minutes} variant="ghost" className="min-h-9 px-2 text-xs" disabled={extending || !canExtend(selectedTrip, minutes)} onClick={() => void extend(selectedTrip, minutes)}>＋{minutes >= 60 ? `${minutes / 60}時間` : `${minutes}分`}</Button>)}<Button variant="ghost" className="min-h-9 px-3 text-xs" onClick={() => openEdit(selectedTrip)}><Pencil className="size-3.5" />予定変更</Button><button type="button" aria-label="利用状況を閉じる" onClick={() => setSelectedTripId(null)} className="absolute -right-2.5 -top-2.5 grid size-8 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-md hover:bg-slate-100 hover:text-slate-800"><X className="size-4" /></button></div> : null}
+        {selectedTrip ? <div role="region" aria-label={`${selectedTrip.vehicle.name}の利用状況`} className="absolute inset-x-2 bottom-2 z-30 mx-auto flex max-w-xl flex-wrap items-center gap-2 rounded-2xl border border-blue-200 bg-white/95 p-2.5 pr-4 shadow-2xl backdrop-blur"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-blue-50"><CarFront className="size-5" style={{ color: selectedTrip.vehicle.color }} /></span><div className="mr-auto min-w-32 flex-1"><div className="flex flex-wrap items-center gap-1.5"><b className="text-sm">{selectedTrip.vehicle.name}</b><span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-black text-blue-700">利用中</span></div><p className="text-[10px] font-bold text-slate-500">{selectedTrip.employee.name} ・ <span className={cn(new Date(selectedTrip.plannedEnd).getTime() < Date.now() && "text-rose-700")}>{formatDateTime(selectedTrip.plannedEnd)}{new Date(selectedTrip.plannedEnd).getTime() < Date.now() ? " 超過" : " 返却予定"}</span></p></div><Button className="min-h-9 px-3 text-xs" onClick={() => startReturn(selectedTrip)}><LogOut className="size-3.5" />返却</Button><TripExtendButtons trip={selectedTrip} reservations={data.nextReservations} minutes={[15, 30, 60]} mutate={mutate} actorName={actorName} className="min-h-9 px-2 text-xs" /><Button variant="ghost" className="min-h-9 px-3 text-xs" onClick={() => openEdit(selectedTrip)}><Pencil className="size-3.5" />予定変更</Button><button type="button" aria-label="利用状況を閉じる" onClick={() => setSelectedTripId(null)} className="absolute -right-2.5 -top-2.5 grid size-8 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-md hover:bg-slate-100 hover:text-slate-800"><X className="size-4" /></button></div> : null}
       </div>
       {returningTrip ? <div role="status" className="mx-auto mt-2 flex max-w-md items-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 p-2"><LogOut className="size-4 shrink-0 text-blue-600" /><p className="mr-auto text-xs font-bold"><b>{returningTrip.vehicle.name}</b>を返却する区画をタップ（ドラッグも可）</p><Button variant="ghost" className="min-h-8 shrink-0 whitespace-nowrap px-3 text-xs" onClick={() => setReturningTripId(null)}>やめる</Button></div> : null}
       {movingVehicle ? <div role="status" className="mx-auto mt-2 flex max-w-md items-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 p-2"><Move className="size-4 shrink-0 text-blue-600" /><p className="mr-auto text-xs font-bold"><b>{movingVehicle.name}</b>の移動先をタップ（ドラッグも可）</p><Button variant="ghost" className="min-h-8 shrink-0 whitespace-nowrap px-3 text-xs" onClick={() => setMovingVehicleId(null)}>やめる</Button></div> : null}
