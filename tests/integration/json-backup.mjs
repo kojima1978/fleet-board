@@ -2,17 +2,7 @@ import assert from "node:assert/strict";
 
 const appUrl = process.env.APP_URL || "http://app:3000";
 const origin = new URL(appUrl).origin;
-assert.equal((await fetch(`${appUrl}/api/admin/data`)).status, 401, "未認証の書き出しを拒否する");
-const login = await fetch(`${appUrl}/api/admin/session`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json", Origin: origin },
-  body: JSON.stringify({ pin: process.env.FLEETFLOW_ADMIN_PIN ?? "2468" }),
-});
-assert.equal(login.status, 200, await login.text());
-const cookie = login.headers.get("set-cookie")?.split(";", 1)[0];
-assert.ok(cookie, "管理者Cookieが必要です");
-
-const exported = await fetch(`${appUrl}/api/admin/data`, { headers: { Cookie: cookie } });
+const exported = await fetch(`${appUrl}/api/admin/data`);
 if (!exported.ok) throw new Error(`JSON書き出し失敗: ${exported.status} ${await exported.text()}`);
 assert.match(exported.headers.get("content-disposition") ?? "", /fleetflow-data-\d{8}\.json/);
 const backup = await exported.json();
@@ -21,7 +11,7 @@ assert.equal(backup.formatVersion, 1);
 const originalCounts = Object.fromEntries(Object.entries(backup.data).map(([key, rows]) => [key, rows.length]));
 
 const post = async (body) => {
-  const response = await fetch(`${appUrl}/api/admin/data`, { method: "POST", headers: { "Content-Type": "application/json", Cookie: cookie, Origin: origin }, body: JSON.stringify(body) });
+  const response = await fetch(`${appUrl}/api/admin/data`, { method: "POST", headers: { "Content-Type": "application/json", Origin: origin }, body: JSON.stringify(body) });
   return { response, result: await response.json() };
 };
 
@@ -29,7 +19,7 @@ const validated = await post({ mode: "validate", backup });
 assert.equal(validated.response.status, 200, JSON.stringify(validated.result));
 assert.deepEqual(validated.result.counts, originalCounts);
 
-const crossOrigin = await fetch(`${appUrl}/api/admin/data`, { method: "POST", headers: { "Content-Type": "application/json", Cookie: cookie, Origin: "http://evil.example" }, body: JSON.stringify({ mode: "validate", backup }) });
+const crossOrigin = await fetch(`${appUrl}/api/admin/data`, { method: "POST", headers: { "Content-Type": "application/json", Origin: "http://evil.example" }, body: JSON.stringify({ mode: "validate", backup }) });
 assert.equal(crossOrigin.status, 403, "別Originからの復元を拒否する");
 
 const invalid = structuredClone(backup);
@@ -44,7 +34,7 @@ const restored = await post({ mode: "restore", confirmation: "RESTORE", backup }
 assert.equal(restored.response.status, 200, JSON.stringify(restored.result));
 assert.deepEqual(restored.result.counts, originalCounts);
 
-const afterResponse = await fetch(`${appUrl}/api/admin/data`, { headers: { Cookie: cookie } });
+const afterResponse = await fetch(`${appUrl}/api/admin/data`);
 if (!afterResponse.ok) throw new Error(`復元後のJSON書き出し失敗: ${afterResponse.status} ${await afterResponse.text()}`);
 const after = await afterResponse.json();
 for (const [key, count] of Object.entries(originalCounts)) {

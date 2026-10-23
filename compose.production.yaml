@@ -15,11 +15,8 @@ services:
       target: production
     environment:
       DATABASE_URL: postgresql://fleet:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/fleet?schema=public
-      FLEETFLOW_ADMIN_PIN: ${FLEETFLOW_ADMIN_PIN:?FLEETFLOW_ADMIN_PIN is required}
-      FLEETFLOW_SESSION_SECRET: ${FLEETFLOW_SESSION_SECRET:?FLEETFLOW_SESSION_SECRET is required}
       FLEETFLOW_APP_VERSION: ${FLEETFLOW_APP_VERSION:-0.1.0}
       FLEETFLOW_DEPLOYED_AT: ${FLEETFLOW_DEPLOYED_AT:-unknown}
-      FLEETFLOW_COOKIE_SECURE: ${FLEETFLOW_COOKIE_SECURE:-false}
       FLEETFLOW_TRUST_PROXY: ${FLEETFLOW_TRUST_PROXY:-false}
     ports:
       # LAN IPへ公開しても、サーバー自身のlocalhostからは開けるようにする。
@@ -62,7 +59,6 @@ services:
     command: sh scripts/production/prepare-db.sh
     environment:
       DATABASE_URL: postgresql://fleet:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/fleet?schema=public
-      FLEETFLOW_ADMIN_PIN: ${FLEETFLOW_ADMIN_PIN:?FLEETFLOW_ADMIN_PIN is required}
     depends_on:
       db:
         condition: service_healthy

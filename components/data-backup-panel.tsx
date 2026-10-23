@@ -83,7 +83,7 @@ export function DataBackupPanel() {
       <h3 className="mt-4 text-lg font-black">JSON一括書き出し</h3>
       <p className="mt-1 text-sm leading-6 text-slate-500">社員・車両・駐車区画・NFC・利用予定・利用履歴・操作履歴を、1つのJSONファイルに保存します。</p>
       <Button className="mt-5 w-full" disabled={busy} onClick={() => void exportData()}>{status === "exporting" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}{status === "exporting" ? "書き出し中…" : "全データをJSONで保存"}</Button>
-      <p className="mt-3 text-xs leading-5 text-slate-400">管理者用データです。NFC UIDや氏名を含むため、安全な場所で保管してください。</p>
+      <p className="mt-3 text-xs leading-5 text-slate-400">NFC UIDや氏名を含むため、安全な場所で保管してください。</p>
     </Card>
 
     <Card className="p-5">

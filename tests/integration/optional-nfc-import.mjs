@@ -3,10 +3,8 @@ import pg from "pg";
 
 const { Client } = pg;
 const databaseUrl = process.env.DATABASE_URL;
-const adminPin = process.env.FLEETFLOW_ADMIN_PIN;
 const appUrl = process.env.APP_URL || "http://127.0.0.1:3000";
 if (!databaseUrl) throw new Error("DATABASE_URL is required");
-if (!adminPin) throw new Error("FLEETFLOW_ADMIN_PIN is required");
 
 const suffix = String(Date.now()).slice(-9);
 const employeeCodes = [`IEA${suffix}`, `IEB${suffix}`];
@@ -17,22 +15,21 @@ const employeeUids = [`E0A0${suffix}00`, `E0B0${suffix}00`];
 const vehicleUids = [`C0A0${suffix}00`, `C0B0${suffix}00`];
 const operationIds = [];
 const client = new Client({ connectionString: databaseUrl });
-let cookie = "";
 
 async function postAdmin(body) {
   const operationId = crypto.randomUUID();
   operationIds.push(operationId);
   const response = await fetch(`${appUrl}/api/dashboard`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Cookie: cookie },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ operationId, ...body }),
   });
   const responseBody = await response.json();
   assert.equal(response.status, 200, JSON.stringify(responseBody));
 }
 
-async function dashboard(authenticated = true) {
-  const response = await fetch(`${appUrl}/api/dashboard`, { headers: authenticated ? { Cookie: cookie } : undefined });
+async function dashboard() {
+  const response = await fetch(`${appUrl}/api/dashboard`);
   assert.equal(response.status, 200);
   return response.json();
 }
@@ -61,15 +58,6 @@ async function cleanup() {
 
 await client.connect();
 try {
-  const login = await fetch(`${appUrl}/api/admin/session`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pin: adminPin }),
-  });
-  assert.equal(login.status, 200, await login.text());
-  cookie = login.headers.get("set-cookie")?.split(";", 1)[0] ?? "";
-  assert.ok(cookie, "管理者セッションCookieを取得できません");
-
   await postAdmin({
     action: "importEmployees",
     items: [
@@ -85,9 +73,6 @@ try {
     ],
   });
 
-  const publicData = await dashboard(false);
-  assert.equal(publicData.employees.find((item) => item.code === employeeCodes[1])?.nfcUid, "", "未認証の一覧に社員NFC UIDを含めない");
-  assert.equal(publicData.vehicles.find((item) => item.code === vehicleCodes[1])?.nfcUid, "", "未認証の一覧に車両NFC UIDを含めない");
 
   let data = await dashboard();
   const employeeWithoutNfc = data.employees.find((item) => item.code === employeeCodes[0]);

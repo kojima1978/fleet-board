@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { adminTokenFromRequest, verifyAdminToken } from "@/lib/admin-auth";
 import { backupCounts, createFleetBackup, FleetBackupValidationError, JSON_BACKUP_MAX_BYTES, parseFleetBackup, restoreFleetBackup } from "@/lib/json-backup";
 import { consumeRateLimit, isSameOriginRequest, readJsonBody, requestClientKey } from "@/lib/request-security";
 
@@ -8,12 +7,7 @@ export const dynamic = "force-dynamic";
 
 const restoreRequestSchema = z.object({ mode: z.enum(["validate", "restore"]), confirmation: z.string().max(20).optional(), backup: z.unknown() }).strict();
 
-function requireAdmin(request: Request) {
-  return verifyAdminToken(adminTokenFromRequest(request));
-}
-
-export async function GET(request: Request) {
-  if (!requireAdmin(request)) return NextResponse.json({ message: "管理者認証が必要です" }, { status: 401 });
+export async function GET() {
   try {
     const backup = await createFleetBackup();
     const date = backup.exportedAt.slice(0, 10).replaceAll("-", "");
@@ -26,7 +20,6 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   if (!isSameOriginRequest(request)) return NextResponse.json({ message: "送信元を確認できません" }, { status: 403 });
-  if (!requireAdmin(request)) return NextResponse.json({ message: "管理者認証が必要です" }, { status: 401 });
   const rate = consumeRateLimit("json-restore", requestClientKey(request), 10, 60 * 60_000);
   if (!rate.allowed) return NextResponse.json({ message: "復元確認の回数が多すぎます。しばらく待って再試行してください" }, { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } });
   try {

@@ -4,7 +4,6 @@ import { prisma } from "@/lib/prisma";
 import { normalizeNfcUid } from "@/lib/nfc";
 import { RESERVATION_GRACE_MINUTES } from "@/lib/reservations";
 import { FUEL_LEVEL_MAX, formatFuelLevel } from "@/lib/fuel-level";
-import { adminTokenFromRequest, verifyAdminToken } from "@/lib/admin-auth";
 import { getBackupStatus } from "@/lib/backup-status";
 import { isSameOriginRequest, readJsonBody } from "@/lib/request-security";
 import { getApplicationSystemStatus } from "@/lib/system-status";
@@ -15,12 +14,12 @@ export const dynamic = "force-dynamic";
 const activeOperationIds = new Set<string>();
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-function withVehicleCode<T extends { id: string; name: string; plateNumber: string; color: string; hasEtc: boolean; hasNavigation: boolean; fuelLevel: number | null; status: "AVAILABLE" | "RESERVED" | "IN_USE" | "MAINTENANCE"; parkingSpotId: string | null; active: boolean; version: number; vehicleNumber: { code: string }; nfcAssignments: { nfcTag: { uid: string } }[] }>(vehicle: T, includeNfc = false) {
-  return { id: vehicle.id, code: vehicle.vehicleNumber.code, name: vehicle.name, plateNumber: vehicle.plateNumber, nfcUid: includeNfc ? vehicle.nfcAssignments[0]?.nfcTag.uid ?? "" : "", color: vehicle.color, hasEtc: vehicle.hasEtc, hasNavigation: vehicle.hasNavigation, fuelLevel: vehicle.fuelLevel, status: vehicle.status, parkingSpotId: vehicle.parkingSpotId, active: vehicle.active, version: vehicle.version };
+function withVehicleCode<T extends { id: string; name: string; plateNumber: string; color: string; hasEtc: boolean; hasNavigation: boolean; fuelLevel: number | null; status: "AVAILABLE" | "RESERVED" | "IN_USE" | "MAINTENANCE"; parkingSpotId: string | null; active: boolean; version: number; vehicleNumber: { code: string }; nfcAssignments: { nfcTag: { uid: string } }[] }>(vehicle: T) {
+  return { id: vehicle.id, code: vehicle.vehicleNumber.code, name: vehicle.name, plateNumber: vehicle.plateNumber, nfcUid: vehicle.nfcAssignments[0]?.nfcTag.uid ?? "", color: vehicle.color, hasEtc: vehicle.hasEtc, hasNavigation: vehicle.hasNavigation, fuelLevel: vehicle.fuelLevel, status: vehicle.status, parkingSpotId: vehicle.parkingSpotId, active: vehicle.active, version: vehicle.version };
 }
 
-function withEmployeeCode<T extends { id: string; name: string; active: boolean; version: number; employeeNumber: { code: string }; department: { name: string }; nfcAssignments: { nfcTag: { uid: string } }[] }>(employee: T, includeNfc = false) {
-  return { id: employee.id, code: employee.employeeNumber.code, name: employee.name, department: employee.department.name, nfcUid: includeNfc ? employee.nfcAssignments[0]?.nfcTag.uid ?? "" : "", active: employee.active, version: employee.version };
+function withEmployeeCode<T extends { id: string; name: string; active: boolean; version: number; employeeNumber: { code: string }; department: { name: string }; nfcAssignments: { nfcTag: { uid: string } }[] }>(employee: T) {
+  return { id: employee.id, code: employee.employeeNumber.code, name: employee.name, department: employee.department.name, nfcUid: employee.nfcAssignments[0]?.nfcTag.uid ?? "", active: employee.active, version: employee.version };
 }
 
 function todayInTokyo() {
@@ -95,7 +94,6 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("updateSpotRole"), id: idSchema, version: z.number().int().nonnegative(), role: z.enum(PARKING_SPOT_ROLES), dedicatedVehicleId: idSchema.nullable() }),
   z.object({ action: z.literal("setFuelLevel"), vehicleId: idSchema, version: z.number().int().nonnegative(), fuelLevel: z.number().int().min(0).max(FUEL_LEVEL_MAX), ...actorSchema }),
 ]);
-const adminActions = new Set(["createEmployee", "createVehicle", "updateEmployee", "updateVehicle", "setEmployeeActive", "setVehicleActive", "setVehicleMaintenance", "importEmployees", "importVehicles", "updateSpotRole"]);
 
 // 専用区画に別の車を置こうとしたら止める。vehicleIdがnullなら、これから登録する車両として扱う。
 async function assertSpotAllowsVehicle(tx: Prisma.TransactionClient, spot: { code: string; role: (typeof PARKING_SPOT_ROLES)[number]; dedicatedVehicleId: string | null }, vehicleId: string | null) {
@@ -136,14 +134,13 @@ export async function GET(request: Request) {
     getBackupStatus(),
     getApplicationSystemStatus(),
   ]);
-  const includeNfc = verifyAdminToken(adminTokenFromRequest(request));
   return NextResponse.json({
-    employees: employees.map((employee) => withEmployeeCode(employee, includeNfc)),
+    employees: employees.map((employee) => withEmployeeCode(employee)),
     departments,
-    vehicles: vehicles.map((vehicle) => withVehicleCode(vehicle, includeNfc)),
-    spots: spots.map((spot) => ({ ...spot, dedicatedVehicleName: vehicles.find((vehicle) => vehicle.id === spot.dedicatedVehicleId)?.name ?? null, vehicle: spot.vehicle ? withVehicleCode(spot.vehicle, includeNfc) : null })),
-    trips: trips.map((trip) => ({ ...trip, employee: withEmployeeCode(trip.employee, includeNfc), vehicle: withVehicleCode(trip.vehicle, includeNfc) })),
-    nextReservations: nextReservations.map((trip) => ({ ...trip, employee: withEmployeeCode(trip.employee, includeNfc), vehicle: withVehicleCode(trip.vehicle, includeNfc) })),
+    vehicles: vehicles.map((vehicle) => withVehicleCode(vehicle)),
+    spots: spots.map((spot) => ({ ...spot, dedicatedVehicleName: vehicles.find((vehicle) => vehicle.id === spot.dedicatedVehicleId)?.name ?? null, vehicle: spot.vehicle ? withVehicleCode(spot.vehicle) : null })),
+    trips: trips.map((trip) => ({ ...trip, employee: withEmployeeCode(trip.employee), vehicle: withVehicleCode(trip.vehicle) })),
+    nextReservations: nextReservations.map((trip) => ({ ...trip, employee: withEmployeeCode(trip.employee), vehicle: withVehicleCode(trip.vehicle) })),
     system: {
       backupLatestAt: backup.latestAt,
       backupVerifiedAt: backup.verifiedAt,
@@ -163,7 +160,6 @@ export async function POST(request: Request) {
   const parsed = actionSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ message: "入力内容を確認してください", details: process.env.NODE_ENV === "development" ? parsed.error.issues : undefined }, { status: 400 });
   const input = parsed.data;
-  if (adminActions.has(input.action) && !verifyAdminToken(adminTokenFromRequest(request))) return NextResponse.json({ message: "管理者認証の有効期限が切れました。PINを再入力してください" }, { status: 401 });
   if (activeOperationIds.has(operationId)) {
     for (let attempt = 0; attempt < 100; attempt += 1) {
       await wait(100);

@@ -19,19 +19,10 @@ function New-HexSecret([int]$byteCount) {
   return ([System.BitConverter]::ToString($bytes)).Replace("-", "").ToLowerInvariant()
 }
 
-function New-AdminPin {
-  $bytes = New-Object byte[] 4
-  $generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-  try { $generator.GetBytes($bytes) }
-  finally { $generator.Dispose() }
-  return 10000000 + ([System.BitConverter]::ToUInt32($bytes, 0) % 90000000)
-}
-
 if (Test-Path -LiteralPath $environmentPath) {
   $content = [System.IO.File]::ReadAllText($environmentPath, [System.Text.Encoding]::UTF8).TrimEnd()
   $defaults = @(
     "FLEETFLOW_BIND_ADDRESS=127.0.0.1"
-    "FLEETFLOW_COOKIE_SECURE=false"
     "FLEETFLOW_APP_VERSION=0.1.0"
     "FLEETFLOW_DEPLOYED_AT=$deployedAt"
     "FLEETFLOW_BACKUP_DESTINATION="
@@ -45,15 +36,10 @@ if (Test-Path -LiteralPath $environmentPath) {
   exit 0
 }
 
-$adminPin = New-AdminPin
 $databasePassword = New-HexSecret 24
-$sessionSecret = New-HexSecret 48
 $content = @(
   "POSTGRES_PASSWORD=$databasePassword"
-  "FLEETFLOW_ADMIN_PIN=$adminPin"
-  "FLEETFLOW_SESSION_SECRET=$sessionSecret"
   "FLEETFLOW_BIND_ADDRESS=127.0.0.1"
-  "FLEETFLOW_COOKIE_SECURE=false"
   "FLEETFLOW_PORT=3035"
   "FLEETFLOW_APP_VERSION=0.1.0"
   "FLEETFLOW_DEPLOYED_AT=$deployedAt"
@@ -61,7 +47,7 @@ $content = @(
 ) -join [Environment]::NewLine
 [System.IO.File]::WriteAllText($environmentPath, $content + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding($false)))
 
-$message = $messages.productionInitialized -f $adminPin, $environmentPath
+$message = $messages.productionInitialized -f $environmentPath
 if ($NoUi) {
   Write-Output $message
 }

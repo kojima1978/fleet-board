@@ -34,11 +34,7 @@ try {
   if ($LASTEXITCODE -ne 0) { throw $messages.preflightComposeInvalid }
   Add-Result $messages.preflightCompose "ok" $messages.preflightComposeOk
 
-  $pin = Get-Setting "FLEETFLOW_ADMIN_PIN"
-  $secret = Get-Setting "FLEETFLOW_SESSION_SECRET"
   $password = Get-Setting "POSTGRES_PASSWORD"
-  if ($pin -notmatch '^\d{4,12}$') { Add-Result $messages.preflightAdminPin "error" $messages.preflightAdminPinInvalid } else { Add-Result $messages.preflightAdminPin "ok" $messages.preflightConfigured }
-  if ($secret.Length -lt 32) { Add-Result $messages.preflightSessionSecret "error" $messages.preflightSessionSecretInvalid } else { Add-Result $messages.preflightSessionSecret "ok" $messages.preflightConfigured }
   if ($password.Length -lt 24) { Add-Result $messages.preflightDatabasePassword "error" $messages.preflightDatabasePasswordInvalid } else { Add-Result $messages.preflightDatabasePassword "ok" $messages.preflightConfigured }
 
   $port = Get-Setting "FLEETFLOW_PORT"

@@ -11,8 +11,6 @@ services:
       FLEETFLOW_DEV_BIND_ADDRESS: ${FLEETFLOW_DEV_BIND_ADDRESS:-127.0.0.1}
       # コンテナー内のホスト名はコンテナーIDになるため、WindowsのPC名を渡す。
       FLEETFLOW_DEV_HOST_NAME: ${COMPUTERNAME:-}
-      FLEETFLOW_ADMIN_PIN: ${FLEETFLOW_ADMIN_PIN:-2468}
-      FLEETFLOW_SESSION_SECRET: ${FLEETFLOW_SESSION_SECRET:-fleetflow-local-development-secret}
     ports:
       # LAN IPへ公開しても、サーバー自身のlocalhostからは開けるようにする。
       # 既定設定（127.0.0.1）では同じ公開先が重なるが、Composeが1つにまとめる。

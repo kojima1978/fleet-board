@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getBackupStatus } from "@/lib/backup-status";
 import type { Prisma } from "@/prisma/generated/client";
-import { adminTokenFromRequest, verifyAdminToken } from "@/lib/admin-auth";
 import { getApplicationSystemStatus } from "@/lib/system-status";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +17,6 @@ function csvCell(value: string) {
 }
 
 export async function GET(request: Request) {
-  if (!verifyAdminToken(adminTokenFromRequest(request))) return NextResponse.json({ message: "管理者認証が必要です" }, { status: 401 });
   const url = new URL(request.url);
   const query = (url.searchParams.get("q")?.trim() ?? "").slice(0, 100);
   const action = (url.searchParams.get("action")?.trim() ?? "").slice(0, 100);

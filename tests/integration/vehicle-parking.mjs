@@ -7,12 +7,11 @@ const suffix = Date.now().toString(36);
 const codes = Array.from({ length: 8 }, (_, i) => `PK${suffix}${i}`);
 const spots = [0, 1, 2, 3].map((i) => `parking-test-${suffix}-${i}`);
 const operationIds = [];
-let cookie;
 async function post(body) {
   const operationId = crypto.randomUUID();
   operationIds.push(operationId);
   const response = await fetch(`${appUrl}/api/dashboard`, {
-    method: "POST", headers: { "Content-Type": "application/json", Origin: new URL(appUrl).origin, Cookie: cookie },
+    method: "POST", headers: { "Content-Type": "application/json", Origin: new URL(appUrl).origin },
     body: JSON.stringify({ operationId, ...body }),
   });
   return { status: response.status, body: await response.json() };
@@ -27,10 +26,6 @@ async function vehicle(i) {
 
 await client.connect();
 try {
-  const login = await fetch(`${appUrl}/api/admin/session`, { method: "POST", headers: { "Content-Type": "application/json", Origin: new URL(appUrl).origin }, body: JSON.stringify({ pin: process.env.FLEETFLOW_ADMIN_PIN }) });
-  assert.equal(login.status, 200);
-  cookie = login.headers.get("set-cookie")?.split(";", 1)[0];
-  assert.ok(cookie);
   for (const [i, id] of spots.entries()) {
     await client.query('INSERT INTO "ParkingSpot" (id,code,x,y,width,height,orientation,enabled,version) VALUES ($1,$2,0,0,5,5,\'horizontal\',$3,1)', [id, `P${suffix}${i}`, i !== 2]);
   }

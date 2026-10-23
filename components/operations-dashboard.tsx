@@ -5,7 +5,6 @@ import { AlertTriangle, Check, Database, DatabaseBackup, Download, Nfc, RefreshC
 import { useNfcBridgeHealth } from "@/lib/use-nfc-bridge";
 import { AppHeader, HeaderSystemStatus, Navigation, type HeaderSyncState } from "./app-header";
 import { Button, Card, cn } from "./ui";
-import { AdminGate } from "./admin-gate";
 
 type AuditLog = { id: string; actorName: string; action: string; targetType: string; description: string; createdAt: string };
 type BackupStatus = { latestFile: string | null; latestAt: string | null; latestBytes: number | null; verifiedAt: string | null };
@@ -46,6 +45,8 @@ export function OperationsDashboard() {
       setLoading(false);
     }
   }, [action, from, to]);
+  // 初回表示で操作履歴を読み込む。
+  useEffect(() => { void load(); }, []);
   useEffect(() => {
     const employeeId = window.sessionStorage.getItem("fleetflow.employeeId");
     setEmployeeName(employeeId ? window.sessionStorage.getItem("fleetflow.employeeName") ?? "利用者選択済み" : null);
@@ -92,7 +93,7 @@ export function OperationsDashboard() {
       {employeeName ? <div className="flex items-center overflow-hidden rounded-xl border border-emerald-200 bg-emerald-50"><button type="button" onClick={openNfc} title="利用者を変更" className="flex min-h-10 items-center gap-2 px-3 text-sm font-bold text-emerald-800"><UserRound className="size-4" /><span className="hidden max-w-28 truncate lg:inline">{employeeName}</span><span className="hidden text-[10px] text-emerald-600 xl:inline">変更</span></button><button type="button" onClick={clearEmployee} aria-label="利用者選択を解除" className="grid min-h-10 w-9 place-items-center border-l border-emerald-200 text-emerald-700 hover:bg-emerald-100"><X className="size-3.5" /></button></div> : <Button className="border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100" onClick={openNfc}><Nfc className="size-5" /><span className="hidden sm:inline">社員証をかざす</span></Button>}
       <button aria-label="最新情報に更新" aria-busy={loading} disabled={loading} onClick={() => void load(query, page)} className="grid size-11 place-items-center rounded-xl border border-slate-200 bg-white disabled:opacity-50"><RefreshCw className={cn("size-4", loading && "animate-spin")} /></button>
     </>} />
-    <main className="mx-auto max-w-[1400px] space-y-5 p-4 pb-24 md:p-8"><AdminGate onAuthenticated={() => load()} onLogout={() => { setData(null); setError(""); }}><div className="space-y-5"><div><p className="text-xs font-bold text-blue-600">運用管理</p><h2 className="mt-1 text-2xl font-black">操作履歴</h2><p className="mt-1 text-sm text-slate-500">誰が・いつ・何を変更したかを確認できます。</p></div>
+    <main className="mx-auto max-w-[1400px] space-y-5 p-4 pb-24 md:p-8"><div className="space-y-5"><div><p className="text-xs font-bold text-blue-600">運用管理</p><h2 className="mt-1 text-2xl font-black">操作履歴</h2><p className="mt-1 text-sm text-slate-500">誰が・いつ・何を変更したかを確認できます。</p></div>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <StatusCard icon={<Server className="size-5" />} title="アプリ" detail={data ? `v${data.system.appVersion}・${data.system.environment === "production" ? "本番" : "開発"}` : "確認中"} healthy={Boolean(data) && !error} />
         <StatusCard icon={<Database className="size-5" />} title="データベース" detail={data ? data.system.schemaVersion : "確認中"} healthy={Boolean(data) && !error} />
@@ -104,7 +105,7 @@ export function OperationsDashboard() {
         <div className="divide-y divide-slate-100">{data?.logs.map((log) => <article key={log.id} className="grid gap-2 p-4 [content-visibility:auto] sm:grid-cols-[160px_150px_1fr] sm:items-center"><time className="text-xs font-bold text-slate-500">{dateTime.format(new Date(log.createdAt))}</time><div><p className="text-sm font-black">{log.action}</p><p className="text-[11px] text-slate-400">{log.actorName}</p></div><p className="text-sm text-slate-700">{log.description}</p></article>)}</div>
         {!loading && data?.logs.length === 0 ? <p className="p-10 text-center text-sm text-slate-400">該当する操作履歴はありません</p> : null}
         {data && data.pagination.pageCount > 1 ? <div className="flex items-center justify-center gap-3 border-t border-slate-100 bg-slate-50 p-3"><Button variant="ghost" disabled={loading || page === 1} onClick={() => void load(query, page - 1)}>前へ</Button><span className="text-xs font-bold text-slate-600">{page} / {data.pagination.pageCount}ページ（全{data.pagination.total}件）</span><Button variant="ghost" disabled={loading || page === data.pagination.pageCount} onClick={() => void load(query, page + 1)}>次へ</Button></div> : null}
-      </Card></div></AdminGate>
+      </Card></div>
     </main>
     <Navigation view="operations" className="fixed inset-x-3 bottom-3 z-40 flex rounded-2xl border border-slate-200 bg-white/95 p-1.5 shadow-2xl backdrop-blur md:hidden" />
   </div>;

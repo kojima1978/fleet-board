@@ -15,7 +15,6 @@ import { useKioskIdle } from "@/lib/use-kiosk-idle";
 import { SettingsPanelV2 } from "./settings-panel-v2";
 import { SpotRoleSettings } from "./spot-role-settings";
 import { DataBackupPanel } from "./data-backup-panel";
-import { AdminGate } from "./admin-gate";
 import { Button, Card, cn } from "./ui";
 import { AppHeader, HeaderSystemStatus, Navigation, type HeaderSyncState } from "./app-header";
 
@@ -402,14 +401,12 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
           </section>}
         </> : null}
 
-        {view === "settingsEmployees" || view === "settingsVehicles" || view === "settingsSpots" || view === "settingsData" ? <AdminGate onAuthenticated={async () => { await load(true); }} onLogout={async () => { await load(true); }}>
-          <div className="space-y-5">
+        {view === "settingsEmployees" || view === "settingsVehicles" || view === "settingsSpots" || view === "settingsData" ? <div className="space-y-5">
             <PageHeading eyebrow="管理設定" title={view === "settingsEmployees" ? "社員登録" : view === "settingsVehicles" ? "車両登録" : view === "settingsSpots" ? "駐車区画" : "データ保存・復元"} description={view === "settingsEmployees" ? "利用者となる社員と社員証のNFCタグを登録します。" : view === "settingsVehicles" ? "利用する社用車と車両のNFCタグを登録します。" : view === "settingsSpots" ? "区画ごとの役割（一時・お客様用・専用・仮置き）を設定します。" : "FleetFlowの全データをJSONで保存し、必要なときに一括復元します。"} />
             <SettingsNavigation view={view} />
             {view === "settingsData" ? <DataBackupPanel /> : view === "settingsSpots" ? <SpotRoleSettings data={data} mutate={mutate} /> : <><div className="flex flex-wrap items-end justify-between gap-2"><div><p className="text-xs font-bold text-blue-600">日常管理</p><h3 className="mt-0.5 text-lg font-black">{view === "settingsEmployees" ? "社員情報" : "車両情報"}</h3></div><p className="text-xs text-slate-500">検索・登録・変更をこの一覧から行えます</p></div><SettingsPanelV2 kind={view === "settingsEmployees" ? "employee" : "vehicle"} data={data} mutate={mutate} /></>}
             <AdminToolsPanel />
-          </div>
-        </AdminGate> : null}
+          </div> : null}
       </main>
 
       {dialog === "nfc" && <NfcDialog employees={activeEmployees} vehicles={activeVehicles} onEmployee={(person) => { selectEmployee(person); setToast({ message: `${person.name}さんを認証しました`, tone: "success" }); setDialog(null); }} onVehicle={(vehicle) => { setDialog(null); if (vehicle.status === "MAINTENANCE") { setToast({ message: `${vehicle.name}は整備中のため利用開始できません`, tone: "error" }); return; } const trip = activeTrips.find((item) => item.vehicleId === vehicle.id); if (trip) openEnd(trip); else openStart(vehicle); }} onClose={() => setDialog(null)} />}
