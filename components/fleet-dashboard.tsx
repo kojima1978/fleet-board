@@ -9,7 +9,7 @@ import { createOperationId } from "@/lib/operation-id";
 import { resolveNfcUid } from "@/lib/resolve-nfc";
 import { canUseSpot, formatSpotLabel, isDashedSpot, spotRoleTag } from "@/lib/parking-spots";
 import { RESERVATION_GRACE_MINUTES } from "@/lib/reservations";
-import { FUEL_LEVEL_LABELS, formatFuelLevel, isLowFuel } from "@/lib/fuel-level";
+import { FUEL_LEVEL_LABELS, FUEL_LEVEL_MAX, formatFuelLevel, isLowFuel } from "@/lib/fuel-level";
 import { nfcBridgeStatusText, useNfcBridge, useNfcBridgeHealth } from "@/lib/use-nfc-bridge";
 import { useKioskIdle } from "@/lib/use-kiosk-idle";
 import { SettingsPanelV2 } from "./settings-panel-v2";
@@ -310,7 +310,9 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   const completeReturn = async (trip: Trip, spotId: string, fuelLevel: number | null) => {
     const currentVehicle = data.vehicles.find((vehicle) => vehicle.id === trip.vehicleId);
     if (!currentVehicle) return false;
-    const ok = await mutate({ action: "end", tripId: trip.id, tripVersion: trip.version, vehicleId: trip.vehicleId, vehicleVersion: currentVehicle.version, spotId, fuelLevel, actorName: employee?.name ?? "共用端末" }, "返却を登録しました。車両は利用可能です");
+    // 満タンで返してくれた人にお礼を伝える。出発時より増えていれば給油してくれたとみなす。
+    const thanks = fuelLevel !== FUEL_LEVEL_MAX ? "車両は利用可能です" : currentVehicle.fuelLevel !== null && currentVehicle.fuelLevel < FUEL_LEVEL_MAX ? "給油ありがとうございます！" : "満タンでの返却ありがとうございます！";
+    const ok = await mutate({ action: "end", tripId: trip.id, tripVersion: trip.version, vehicleId: trip.vehicleId, vehicleVersion: currentVehicle.version, spotId, fuelLevel, actorName: employee?.name ?? "共用端末" }, `返却を登録しました。${thanks}`);
     if (ok) setUndoReturn({ tripId: trip.id, vehicleId: trip.vehicleId, vehicleName: trip.vehicle.name, expiresAt: Date.now() + 5 * 60_000 });
     return ok;
   };
