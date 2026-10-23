@@ -392,7 +392,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
             <div className="flex flex-wrap gap-2"><button type="button" onClick={() => setStayOnTimeline(true)} disabled={stayOnTimeline} className="rounded-xl px-3 py-2 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100 disabled:text-emerald-500">タイムラインに留まる</button><Link href="/" className="rounded-xl border border-emerald-300 bg-white px-4 py-2 text-sm font-bold text-emerald-800 transition hover:bg-emerald-100">今すぐ駐車場へ戻る</Link></div>
           </Card> : null}
           {activeVehicles.length === 0 ? <TimelineEmptyState /> : <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-            {timelineMode === "chart" ? <Card className="min-w-0 overflow-hidden"><TimelinePanelHeader mode={timelineMode} onChange={setTimelineMode} /><Timeline data={data} mutate={mutate} openStart={openStart} openEdit={openEdit} actorName={employee?.name ?? "共用端末"} highlightTripId={confirmedTrip?.id} timelineDate={timelineDate} timelineDays={timelineDays} setTimelineDate={setTimelineDate} setTimelineDays={setTimelineDays} /></Card> : <TimelineList trips={data.trips} openEdit={openEdit} mode={timelineMode} onChange={setTimelineMode} />}
+            {timelineMode === "chart" ? <Card className="min-w-0 overflow-hidden"><TimelinePanelHeader mode={timelineMode} onChange={setTimelineMode} /><Timeline data={data} mutate={mutate} openStart={openStart} openEdit={openEdit} actorName={employee?.name ?? "共用端末"} highlightTripId={confirmedTrip?.id} timelineDate={timelineDate} timelineDays={timelineDays} setTimelineDate={setTimelineDate} setTimelineDays={setTimelineDays} /></Card> : <TimelineList trips={data.trips} openEdit={openEdit} mode={timelineMode} onChange={setTimelineMode} timelineDate={timelineDate} timelineDays={timelineDays} setTimelineDate={setTimelineDate} setTimelineDays={setTimelineDays} />}
             <ActiveTripsPanel trips={activeTrips} reservations={data.nextReservations} mutate={mutate} actorName={employee?.name ?? "共用端末"} openEdit={openEdit} />
           </section>}
         </> : null}
@@ -520,7 +520,16 @@ function ViewSwitch<T extends string>({ value, onChange, first, second, compact 
 }
 
 function TimelinePanelHeader({ mode, onChange }: { mode: "chart" | "list"; onChange: (mode: "chart" | "list") => void }) {
-  return <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-100 px-4 py-2.5"><ViewSwitch value={mode} onChange={onChange} first={{ value: "chart", label: "タイムライン", icon: <Clock3 className="size-4" /> }} second={{ value: "list", label: "予定一覧", icon: <List className="size-4" /> }} compact /><p className="mr-auto text-xs text-slate-500">{mode === "chart" ? "ドラッグまたは予定をタップして時間を変更" : "予定を選ぶと終了時間の変更や取消ができます"}</p><div className="flex shrink-0 gap-3 text-xs"><Legend color="bg-blue-500" label="利用中" /><Legend color="bg-violet-500" label="予約" /><Legend color="bg-slate-400" label="完了" /></div></div>;
+  return <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-100 px-4 py-2.5"><ViewSwitch value={mode} onChange={onChange} first={{ value: "chart", label: "タイムライン", icon: <Clock3 className="size-4" /> }} second={{ value: "list", label: "予約一覧", icon: <List className="size-4" /> }} compact /><p className="mr-auto text-xs text-slate-500">{mode === "chart" ? "ドラッグまたは予定をタップして時間を変更" : "予約を選ぶと時間の変更や取消ができます"}</p>{mode === "chart" ? <div className="flex shrink-0 gap-3 text-xs"><Legend color="bg-blue-500" label="利用中" /><Legend color="bg-violet-500" label="予約" /><Legend color="bg-slate-400" label="完了" /></div> : null}</div>;
+}
+
+// タイムラインと予約一覧で共通の期間切り替え。
+function TimelineDateNav({ timelineDate, timelineDays, setTimelineDate, setTimelineDays, children }: { timelineDate: Date; timelineDays: 1 | 3; setTimelineDate: React.Dispatch<React.SetStateAction<Date>>; setTimelineDays: React.Dispatch<React.SetStateAction<1 | 3>>; children?: React.ReactNode }) {
+  const moveDay = (amount: number) => setTimelineDate((current) => new Date(current.getTime() + amount * 24 * 60 * 60_000));
+  return <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/70 p-3">
+    <div className="flex items-center gap-1"><button aria-label="前日" onClick={() => moveDay(-1)} className="grid size-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"><ChevronLeft className="size-4" /></button><button onClick={() => setTimelineDate(tokyoDayStart())} className="min-h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 hover:bg-slate-50">今日</button><button aria-label="翌日" onClick={() => moveDay(1)} className="grid size-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"><ChevronRight className="size-4" /></button><span className="ml-2 text-sm font-black">{jpShortDate.format(timelineDate)}{timelineDays === 3 ? `〜${jpShortDate.format(new Date(timelineDate.getTime() + 2 * 24 * 60 * 60_000))}` : ""}</span></div>
+    <div className="flex items-center gap-2">{children}<div className="flex rounded-xl bg-slate-200 p-1"><button onClick={() => setTimelineDays(1)} className={cn("min-h-8 rounded-lg px-3 text-xs font-bold", timelineDays === 1 ? "bg-white text-slate-900 shadow-sm" : "text-slate-500")}>1日</button><button onClick={() => setTimelineDays(3)} className={cn("min-h-8 rounded-lg px-3 text-xs font-bold", timelineDays === 3 ? "bg-white text-slate-900 shadow-sm" : "text-slate-500")}>3日</button></div></div>
+  </div>;
 }
 
 // 配置図の右に常時表示する利用中の車両。タップで詳細を開き、配置図の空き区画へドラッグすると返却できる。
@@ -541,17 +550,28 @@ function ActiveVehicleSidebar({ trips, selectedTripId, returningTripId, onSelect
   </Card>;
 }
 
-function TimelineList({ trips, openEdit, mode, onChange }: { trips: Trip[]; openEdit: (trip: Trip) => void; mode: "chart" | "list"; onChange: (mode: "chart" | "list") => void }) {
-  const ordered = [...trips].sort((left, right) => new Date(timelineStartOf(left)).getTime() - new Date(timelineStartOf(right)).getTime());
-  const now = Date.now();
-  return <Card className="overflow-hidden"><TimelinePanelHeader mode={mode} onChange={onChange} />{ordered.length === 0 ? <div className="p-5"><Empty label="この期間の利用予定はありません" /></div> : <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">{ordered.map((trip) => {
-    const overdue = trip.status === "IN_USE" && new Date(trip.plannedEnd).getTime() < now;
-    const label = trip.status === "IN_USE" ? overdue ? "返却超過" : "利用中" : trip.status === "RESERVED" ? "予約" : "完了";
-    const displayStart = timelineStartOf(trip);
-    const displayEnd = timelineEndOf(trip, now);
-    const liveOverdue = trip.status === "IN_USE" && new Date(trip.plannedEnd).getTime() < now;
-    return <button key={trip.id} type="button" disabled={trip.status === "COMPLETED"} onClick={() => openEdit(trip)} className="min-h-28 rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-blue-300 hover:bg-blue-50/40 hover:shadow-sm disabled:cursor-default disabled:hover:border-slate-200 disabled:hover:bg-white disabled:hover:shadow-none"><span className="flex items-start gap-2"><span className={cn("mt-1 size-2.5 shrink-0 rounded-full", overdue ? "bg-rose-500" : trip.status === "IN_USE" ? "bg-blue-500" : trip.status === "RESERVED" ? "bg-violet-500" : "bg-slate-300")} /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-black">{trip.vehicle.name}</span><span className="mt-0.5 block truncate text-xs text-slate-500">{trip.employee.name}</span></span><span className={cn("shrink-0 rounded-full px-2.5 py-1 text-xs font-bold", overdue ? "bg-rose-100 text-rose-700" : trip.status === "IN_USE" ? "bg-blue-50 text-blue-700" : trip.status === "RESERVED" ? "bg-violet-50 text-violet-700" : "bg-slate-100 text-slate-500")}>{label}</span>{trip.status !== "COMPLETED" ? <ChevronRight className="mt-1 size-4 shrink-0 text-slate-300" /> : null}</span><span className="mt-3 block border-t border-slate-100 pt-2 text-xs font-bold text-slate-600">{trip.status === "COMPLETED" ? "実績 " : liveOverdue ? "超過中 " : "予定 "}{formatDateTime(displayStart)}〜{liveOverdue ? `現在 ${formatDateTime(displayEnd)}` : formatDateTime(displayEnd)}</span></button>;
-  })}</div>}</Card>;
+// これからの予約を日付ごとに1件1行で並べる。利用中は右の「利用中」、完了は履歴で見る。
+function TimelineList({ trips, openEdit, mode, onChange, timelineDate, timelineDays, setTimelineDate, setTimelineDays }: { trips: Trip[]; openEdit: (trip: Trip) => void; mode: "chart" | "list"; onChange: (mode: "chart" | "list") => void; timelineDate: Date; timelineDays: 1 | 3; setTimelineDate: React.Dispatch<React.SetStateAction<Date>>; setTimelineDays: React.Dispatch<React.SetStateAction<1 | 3>> }) {
+  const now = new Date();
+  const today = tokyoDayStart(now).getTime();
+  const reservations = trips.filter((trip) => trip.status === "RESERVED" && new Date(trip.plannedEnd).getTime() > now.getTime()).sort((left, right) => left.plannedStart.localeCompare(right.plannedStart));
+  const groups = new Map<number, Trip[]>();
+  for (const trip of reservations) { const day = tokyoDayStart(new Date(trip.plannedStart)).getTime(); groups.set(day, [...(groups.get(day) ?? []), trip]); }
+  const dayLabel = (day: number) => day === today ? "今日" : day === today + 86_400_000 ? "明日" : null;
+  return <Card className="overflow-hidden"><TimelinePanelHeader mode={mode} onChange={onChange} /><TimelineDateNav timelineDate={timelineDate} timelineDays={timelineDays} setTimelineDate={setTimelineDate} setTimelineDays={setTimelineDays} />
+    {reservations.length === 0 ? <div className="p-5"><Empty label="この期間の予約はありません" /></div> : [...groups].map(([day, items]) => <section key={day}>
+      <h3 className="sticky top-0 flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-1.5 text-xs font-black text-slate-700">{dayLabel(day) ? <span className="text-blue-700">{dayLabel(day)}</span> : null}{jpShortDate.format(new Date(day))}<span className="ml-auto font-bold text-slate-400">{items.length}件</span></h3>
+      <ul className="divide-y divide-slate-100">{items.map((trip) => {
+        const sameDay = tokyoDayStart(new Date(trip.plannedEnd)).getTime() === day;
+        return <li key={trip.id}><button type="button" onClick={() => openEdit(trip)} className="flex w-full items-center gap-3 px-4 py-2 text-left transition hover:bg-violet-50/50">
+          <span className="w-28 shrink-0 text-xs font-bold tabular-nums text-slate-700">{formatTime(trip.plannedStart)}–{sameDay ? formatTime(trip.plannedEnd) : formatDateTime(trip.plannedEnd)}</span>
+          <CarFront className="size-4 shrink-0" style={{ color: trip.vehicle.color }} />
+          <span className="min-w-0 flex-1 truncate text-sm"><b className="font-black">{trip.vehicle.name}</b><span className="ml-2 text-xs text-slate-500">{trip.employee.name}</span></span>
+          <ChevronRight className="size-4 shrink-0 text-slate-300" />
+        </button></li>;
+      })}</ul>
+    </section>)}
+  </Card>;
 }
 
 function SettingsNavigation({ view }: { view: "settingsEmployees" | "settingsVehicles" | "settingsSpots" | "settingsData" }) {
@@ -650,7 +670,6 @@ function Timeline({ data, mutate, openStart, openEdit, actorName, highlightTripI
   const todayStart = tokyoDayStart(now);
   const includesNow = now >= timelineStart && now < timelineEnd;
   const nowMinute = (now.getTime() - timelineStart.getTime()) / 60_000;
-  const moveDay = (amount: number) => setTimelineDate((current) => new Date(current.getTime() + amount * 24 * 60 * 60_000));
   const scrollToNow = (smooth = true) => {
     const area = scrollArea.current;
     if (!area || !includesNow) return;
@@ -687,10 +706,8 @@ function Timeline({ data, mutate, openStart, openEdit, actorName, highlightTripI
   useEffect(() => { const timer = window.setInterval(() => setNow(new Date()), 60_000); return () => window.clearInterval(timer); }, []);
   useEffect(() => { if (includesNow) scrollToNow(false); }, [timelineDate, timelineDays]);
 
-  return <><div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/70 p-3">
-    <div className="flex items-center gap-1"><button aria-label="前日" onClick={() => moveDay(-1)} className="grid size-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"><ChevronLeft className="size-4" /></button><button onClick={() => setTimelineDate(tokyoDayStart())} className="min-h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 hover:bg-slate-50">今日</button><button aria-label="翌日" onClick={() => moveDay(1)} className="grid size-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"><ChevronRight className="size-4" /></button><span className="ml-2 text-sm font-black">{jpShortDate.format(timelineStart)}{timelineDays === 3 ? `〜${jpShortDate.format(new Date(timelineEnd.getTime() - 1))}` : ""}</span></div>
-    <div className="flex items-center gap-2">{includesNow ? <button onClick={() => scrollToNow()} className="min-h-9 rounded-lg px-3 text-xs font-bold text-blue-700 hover:bg-blue-50">現在時刻へ</button> : null}<div className="flex rounded-xl bg-slate-200 p-1"><button onClick={() => setTimelineDays(1)} className={cn("min-h-8 rounded-lg px-3 text-xs font-bold", timelineDays === 1 ? "bg-white text-slate-900 shadow-sm" : "text-slate-500")}>1日</button><button onClick={() => setTimelineDays(3)} className={cn("min-h-8 rounded-lg px-3 text-xs font-bold", timelineDays === 3 ? "bg-white text-slate-900 shadow-sm" : "text-slate-500")}>3日</button></div></div>
-  </div><div ref={scrollArea} className="overflow-x-auto">
+  return <><TimelineDateNav timelineDate={timelineDate} timelineDays={timelineDays} setTimelineDate={setTimelineDate} setTimelineDays={setTimelineDays}>{includesNow ? <button onClick={() => scrollToNow()} className="min-h-9 rounded-lg px-3 text-xs font-bold text-blue-700 hover:bg-blue-50">現在時刻へ</button> : null}</TimelineDateNav>
+  <div ref={scrollArea} className="overflow-x-auto">
     <div className="min-w-max">
       <div className="sticky top-0 z-10 ml-32 bg-white" style={{ width: timelineWidth }}><div className="flex h-7 border-b border-slate-200">{days.map((day) => { const isToday = day.getTime() === todayStart.getTime(); return <div key={day.toISOString()} className={cn("border-l px-2 py-1 text-xs font-black", isToday ? "border-blue-400 bg-blue-50 text-blue-700" : "border-slate-300 bg-slate-50 text-slate-600")} style={{ width: (timelineDays === 1 ? timelineMinutes : MINUTES_PER_DAY) * pxPerMinute }}>{isToday ? "今日 " : ""}{jpShortDate.format(day)}</div>; })}</div><div className="relative h-7 border-b border-slate-100">{timeTicks.map((minute) => { const isHour = minute % 60 === 0; const isEnd = minute === timelineMinutes; const displayMinute = minute + (timelineDays === 1 ? DAY_VIEW_START_MINUTE : 0); return <span key={minute} className={cn("absolute inset-y-0 border-l", isHour ? "border-slate-300" : "border-slate-200")} style={{ left: minute * pxPerMinute }}>{isHour && !isEnd ? <span className="absolute left-1 top-1 whitespace-nowrap text-[9px] font-bold text-slate-500">{Math.floor(displayMinute / 60) % 24}:00</span> : null}</span>; })}{includesNow ? <span className="absolute inset-y-0 z-20 w-0.5 bg-rose-500" style={{ left: nowMinute * pxPerMinute }}><i className="absolute -left-1 top-0 size-2.5 rounded-full bg-rose-500" /></span> : null}</div></div>
       {data.vehicles.map((vehicle) => {
