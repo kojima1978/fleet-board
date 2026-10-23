@@ -13,6 +13,19 @@ button { -webkit-tap-highlight-color: transparent; }
 @keyframes toast-life { 0% { opacity: 0; transform: translate(-50%, 12px); } 8%, 85% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; transform: translate(-50%, 8px); } }
 [role="status"].fixed { animation: toast-life 3.4s ease both; }
 
+/* 残量が変わったときだけ、液面の上端を波形のマスクで切り抜いて横へ流し、1.8秒で波の高さを0へ戻す。 */
+@keyframes fuel-wave {
+  0% { mask-position: 0 0, 0 4px; mask-size: 16px 4px, 100% 100%; }
+  35% { mask-position: 17px 0, 0 4px; mask-size: 16px 4px, 100% 100%; }
+  100% { mask-position: 48px 0, 0 0; mask-size: 16px 0, 100% 100%; }
+}
+.fuel-wave {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 4' preserveAspectRatio='none'%3E%3Cpath d='M0 2Q5-2 10 2T20 2V4H0Z'/%3E%3C/svg%3E"), linear-gradient(#000, #000);
+  mask-repeat: repeat-x, no-repeat;
+  animation: fuel-wave 1.8s linear forwards;
+}
+@media (prefers-reduced-motion: reduce) { .fuel-wave { animation: none; mask-image: none; } }
+
 .start-dialog > div { height: auto !important; min-height: 0 !important; }
 .start-dialog button { white-space: nowrap; }
 .start-dialog > div:first-child > div:last-child { margin-top: 1rem !important; }

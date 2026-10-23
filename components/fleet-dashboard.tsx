@@ -681,12 +681,13 @@ function ParkingMap({ data, changedVehicleIds, mutate, openStart, openReturn, op
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const selectedSpot = selectedVehicleId ? data.spots.find((spot) => spot.vehicle?.id === selectedVehicleId) : undefined;
   const selectedVehicle = selectedSpot?.vehicle ?? null;
+  const wavingVehicleIds = useFuelChangeWave(data.spots);
   return <Card className="overflow-hidden">
     <div className="p-3 md:p-4">
       <div className="relative mx-auto aspect-[950/525] max-w-[1180px] overflow-hidden rounded-xl border border-slate-200 bg-white" style={{ width: "min(100%, calc((100vh - 270px) * 1.81))" }}>
         <img src="/parking-layout.svg" alt="" className="pointer-events-none absolute inset-0 size-full select-none" draggable={false} />
         {data.spots.map((spot) => <div key={spot.id} onDragOver={(e) => { if (dragVehicle && !spot.vehicle && canUseSpot(dragVehicle, spot)) e.preventDefault(); }} onDrop={() => { if (dragVehicle && !spot.vehicle && canUseSpot(dragVehicle, spot)) mutate({ action: "moveVehicle", vehicleId: dragVehicle.id, version: dragVehicle.version, spotId: spot.id, actorName }, `${formatSpotLabel(spot.code)}へ移動しました`); setDragVehicle(null); setSelectedVehicleId(null); }} className={cn("absolute grid place-items-center rounded-[4px] border-2 transition", parkingSpotClass(spot), dragVehicle && !spot.vehicle && canUseSpot(dragVehicle, spot) && "border-dashed bg-emerald-100", dragVehicle && !spot.vehicle && !canUseSpot(dragVehicle, spot) && "cursor-not-allowed opacity-60", spot.vehicle?.id === selectedVehicleId && "z-20 ring-4 ring-blue-300", spot.vehicle && changedVehicleIds.includes(spot.vehicle.id) && "z-10 ring-4 ring-amber-300 animate-pulse")} style={{ left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.width}%`, height: `${spot.height}%` }}>
-          {spot.vehicle && spot.vehicle.fuelLevel !== null ? <span aria-hidden className={cn("pointer-events-none absolute inset-x-0 bottom-0 rounded-b-[2px] border-t", isLowFuel(spot.vehicle.fuelLevel) ? "border-amber-500/80 bg-amber-300/70" : "border-emerald-500/70 bg-emerald-300/50")} style={{ height: fuelFillHeight(spot.vehicle.fuelLevel) }} /> : null}
+          {spot.vehicle && spot.vehicle.fuelLevel !== null ? <FuelFill level={spot.vehicle.fuelLevel} waving={wavingVehicleIds.includes(spot.vehicle.id)} /> : null}
           <span className="absolute left-1 top-0.5 z-[1] text-[9px] font-black text-slate-500">{spot.code}{isSakuraSpot(spot) ? <small className="ml-0.5 hidden text-[7px] sm:inline">サクラ専用</small> : CUSTOMER_SPOT_CODES.has(spot.code) ? <small className="ml-0.5 hidden text-[7px] sm:inline">お客様用</small> : HOLDING_SPOT_CODES.has(spot.code) ? <small className="ml-0.5 text-[7px]">仮置き</small> : TEMPORARY_SPOT_CODES.has(spot.code) ? <small className="ml-0.5 hidden text-[7px] text-slate-400 sm:inline">一時</small> : null}</span>
           {spot.vehicle ? <div className="relative size-full"><button type="button" aria-pressed={spot.vehicle.id === selectedVehicleId} title={`${spot.vehicle.name}の詳細を表示`} onClick={() => setSelectedVehicleId((current) => current === spot.vehicle?.id ? null : spot.vehicle?.id ?? null)} className="grid size-full place-content-center overflow-hidden text-center"><CarFront className="mx-auto size-4 sm:size-5" style={{ color: spot.vehicle.color }} /><b className="mt-0.5 block max-w-full truncate px-1 text-[8px] leading-tight sm:text-[10px]">{spot.vehicle.name}</b><small className="mt-0.5 block whitespace-nowrap text-[7px] font-bold leading-none text-slate-500 sm:text-[8px]">{formatPlateShort(spot.vehicle.plateNumber)} ・ {spot.vehicle.code}</small>{spot.vehicle.status === "MAINTENANCE" ? <small className="mt-0.5 block text-[7px] font-black text-amber-800">整備中</small> : <VehicleEquipmentBadges vehicle={spot.vehicle} compact />}</button><button type="button" title="駐車位置を移動" aria-label={`${spot.vehicle.name}の駐車位置を移動`} onClick={() => openMove(spot.vehicle!)} draggable onDragStart={() => setDragVehicle(spot.vehicle)} onDragEnd={() => setDragVehicle(null)} className="absolute right-1 top-1 grid size-7 cursor-grab place-items-center rounded-lg border border-slate-200 bg-white/95 text-slate-600 shadow-md transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 active:cursor-grabbing"><GripVertical className="size-4" /></button>{spot.vehicle.fuelLevel !== null ? <span className={cn("pointer-events-none absolute bottom-0.5 left-1 text-[7px] font-black leading-none sm:text-[8px]", isLowFuel(spot.vehicle.fuelLevel) ? "text-amber-800" : "text-emerald-800")}>残量 {formatFuelLevel(spot.vehicle.fuelLevel)}</span> : null}</div> : <button type="button" title={`${formatSpotLabel(spot.code)}へ返却`} onClick={() => { if (!dragVehicle) openReturn(spot); }} className="grid size-full place-content-center text-center text-[9px] font-bold text-slate-500 transition hover:bg-slate-100/70 sm:text-[10px]"><MapPin className="mx-auto mb-0.5 size-3" />{HOLDING_SPOT_CODES.has(spot.code) ? "仮置き" : TEMPORARY_SPOT_CODES.has(spot.code) ? "一時" : isSakuraSpot(spot) ? "サクラ" : "空き"}<span className="hidden sm:block">{HOLDING_SPOT_CODES.has(spot.code) ? "実在なし" : TEMPORARY_SPOT_CODES.has(spot.code) ? "駐車可" : isSakuraSpot(spot) ? "専用" : "返却"}</span></button>}
         </div>)}
@@ -883,6 +884,28 @@ function EndDialog({ trip, spots, submitting, onClose, onSubmit }: { trip: Trip;
 }
 
 const fuelFillHeight = (level: number) => `${Math.max(6, level * 25)}%`;
+// 残量が変わった車両だけ、少しの間タイルの液面を波打たせる。初回表示では揺らさない。
+function useFuelChangeWave(spots: ParkingSpot[]) {
+  const previousLevels = useRef<Map<string, number | null> | null>(null);
+  const [wavingVehicleIds, setWavingVehicleIds] = useState<string[]>([]);
+  useEffect(() => {
+    const levels = new Map(spots.flatMap((spot) => spot.vehicle ? [[spot.vehicle.id, spot.vehicle.fuelLevel] as const] : []));
+    const previous = previousLevels.current;
+    previousLevels.current = levels;
+    if (!previous) return;
+    const changed = [...levels].filter(([id, level]) => level !== null && previous.get(id) !== level).map(([id]) => id);
+    if (changed.length) setWavingVehicleIds((ids) => [...new Set([...ids, ...changed])]);
+  }, [spots]);
+  useEffect(() => {
+    if (!wavingVehicleIds.length) return;
+    const timer = setTimeout(() => setWavingVehicleIds([]), 1900);
+    return () => clearTimeout(timer);
+  }, [wavingVehicleIds]);
+  return wavingVehicleIds;
+}
+function FuelFill({ level, waving }: { level: number; waving: boolean }) {
+  return <span aria-hidden className={cn("pointer-events-none absolute inset-x-0 bottom-0 rounded-b-[2px] border-t transition-[height] duration-700 ease-out motion-reduce:transition-none", isLowFuel(level) ? "border-amber-500/80 bg-amber-300/70" : "border-emerald-500/70 bg-emerald-300/50", waving && "fuel-wave border-transparent")} style={{ height: fuelFillHeight(level) }} />;
+}
 function FuelGauge({ level, className }: { level: number; className?: string }) {
   return <span aria-hidden className={cn("relative block overflow-hidden rounded-b-md rounded-t-sm border-2 border-slate-300 bg-white", className)}><span className={cn("absolute inset-x-0 bottom-0", isLowFuel(level) ? "bg-amber-300" : "bg-emerald-300")} style={{ height: fuelFillHeight(level) }} /></span>;
 }
