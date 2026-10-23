@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getApplicationSystemStatus } from "@/lib/system-status";
 import { FUEL_LEVEL_MAX } from "@/lib/fuel-level";
+import { defaultSpotRoles } from "@/prisma/parking-spot-seed";
 
 export const JSON_BACKUP_FORMAT_VERSION = 1;
 export const JSON_BACKUP_MAX_BYTES = 50 * 1024 * 1024;
@@ -14,7 +15,7 @@ const nullableDateTime = dateTime.nullable();
 const departmentSchema = z.object({ id, name: z.string().min(1).max(100), active: z.boolean(), createdAt: dateTime, updatedAt: dateTime }).strict();
 const employeeNumberSchema = z.object({ id, code: z.string().min(1).max(100), createdAt: dateTime, updatedAt: dateTime }).strict();
 const vehicleNumberSchema = z.object({ id, code: z.string().min(1).max(100), createdAt: dateTime, updatedAt: dateTime }).strict();
-const parkingSpotSchema = z.object({ id, code: z.string().min(1).max(100), x: z.number().finite(), y: z.number().finite(), width: z.number().finite().positive(), height: z.number().finite().positive(), orientation: z.string().min(1).max(50), enabled: z.boolean(), version: z.number().int().nonnegative() }).strict();
+const parkingSpotSchema = z.object({ id, code: z.string().min(1).max(100), x: z.number().finite(), y: z.number().finite(), width: z.number().finite().positive(), height: z.number().finite().positive(), orientation: z.string().min(1).max(50), enabled: z.boolean(), role: z.enum(["REGULAR", "TEMPORARY", "CUSTOMER", "DEDICATED", "HOLDING"]).optional(), dedicatedVehicleId: id.nullable().optional(), version: z.number().int().nonnegative() }).strict();
 const nfcTagSchema = z.object({ id, uid: z.string().min(1).max(100), createdAt: dateTime, updatedAt: dateTime }).strict();
 const employeeSchema = z.object({ id, employeeNumberId: id, departmentId: id, name: z.string().min(1).max(100), active: z.boolean(), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
 const fuelLevelSchema = z.number().int().min(0).max(FUEL_LEVEL_MAX).nullable().optional();
@@ -96,6 +97,7 @@ export function parseFleetBackup(value: unknown): FleetBackup {
     assertReference(vehicleNumberIds, vehicle.vehicleNumberId, "車両番号");
     assertReference(parkingSpotIds, vehicle.parkingSpotId, "駐車区画");
   }
+  for (const spot of data.parkingSpots) assertReference(vehicleIds, spot.dedicatedVehicleId ?? null, "専用区画の車両");
   for (const assignment of data.nfcAssignments) {
     if ((assignment.employeeId === null) === (assignment.vehicleId === null)) throw new FleetBackupValidationError("NFC割当は社員または車両のどちらか一方を参照する必要があります");
     assertReference(employeeIds, assignment.employeeId, "NFC割当の社員");
@@ -137,6 +139,15 @@ export async function createFleetBackup(): Promise<FleetBackup> {
 }
 
 const asDate = (value: string) => new Date(value);
+// 役割を持たない以前のバックアップは、当時コードで固定していた役割で復元する。
+const legacySpotRole = (code: string, data: FleetBackup["data"]) => {
+  if (code === "19") {
+    const numberId = data.vehicleNumbers.find((item) => item.code === "C07")?.id;
+    const sakura = data.vehicles.filter((vehicle) => vehicle.vehicleNumberId === numberId).sort((a, b) => Number(b.active) - Number(a.active) || b.createdAt.localeCompare(a.createdAt))[0];
+    if (sakura) return { role: "DEDICATED" as const, dedicatedVehicleId: sakura.id };
+  }
+  return { role: defaultSpotRoles[code] ?? "REGULAR" as const };
+};
 const asNullableDate = (value: string | null) => value ? new Date(value) : null;
 
 export async function restoreFleetBackup(backup: FleetBackup) {
@@ -158,7 +169,7 @@ export async function restoreFleetBackup(backup: FleetBackup) {
     if (data.departments.length) await tx.department.createMany({ data: data.departments.map((item) => ({ ...item, createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
     if (data.employeeNumbers.length) await tx.employeeNumber.createMany({ data: data.employeeNumbers.map((item) => ({ ...item, createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
     if (data.vehicleNumbers.length) await tx.vehicleNumber.createMany({ data: data.vehicleNumbers.map((item) => ({ ...item, createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
-    if (data.parkingSpots.length) await tx.parkingSpot.createMany({ data: data.parkingSpots });
+    if (data.parkingSpots.length) await tx.parkingSpot.createMany({ data: data.parkingSpots.map((item) => ({ ...item, ...(item.role === undefined ? legacySpotRole(item.code, data) : {}) })) });
     if (data.nfcTags.length) await tx.nfcTag.createMany({ data: data.nfcTags.map((item) => ({ ...item, createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
     if (data.employees.length) await tx.employee.createMany({ data: data.employees.map((item) => ({ ...item, createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
     if (data.vehicles.length) await tx.vehicle.createMany({ data: data.vehicles.map((item) => ({ ...item, createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });

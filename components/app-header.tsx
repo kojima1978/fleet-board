@@ -7,7 +7,7 @@ import { Archive, CarFront, ChevronDown, ChevronUp, Clock3, LayoutGrid, LoaderCi
 import type { NfcBridgeStatus } from "@/lib/use-nfc-bridge";
 import { Button, cn } from "./ui";
 
-export type AppView = "parking" | "timeline" | "settingsEmployees" | "settingsVehicles" | "settingsData" | "operations";
+export type AppView = "parking" | "timeline" | "settingsEmployees" | "settingsVehicles" | "settingsSpots" | "settingsData" | "operations";
 export type HeaderSyncState = "loading" | "healthy" | "stale";
 
 const jpTimeSeconds = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
@@ -31,7 +31,7 @@ export function AppHeader({ view, actions }: { view: AppView; actions?: ReactNod
 function HeaderClock() {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const timer = window.setInterval(() => setNow(new Date()), 10_000); return () => window.clearInterval(timer); }, []);
-  return <time suppressHydrationWarning dateTime={now.toISOString()} className="block whitespace-nowrap text-xs text-slate-500">{jpClockDate.format(now)} <span className="font-bold tabular-nums text-slate-700">{jpClockTime.format(now)}</span></time>;
+  return <time suppressHydrationWarning dateTime={now.toISOString()} className="block whitespace-nowrap text-xs text-slate-500">{jpClockDate.format(now)} <span className="tabular-nums">{jpClockTime.format(now)}</span></time>;
 }
 
 export function Navigation({ view, className }: { view: AppView; className?: string }) {

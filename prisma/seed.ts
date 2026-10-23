@@ -1,6 +1,6 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "./generated/client";
-import { parkingSpotGeometry } from "./parking-spot-seed";
+import { defaultSpotRoles, parkingSpotGeometry } from "./parking-spot-seed";
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) });
 
@@ -30,7 +30,12 @@ async function main() {
       for (const { geometry, spot } of positionedSpots) await tx.parkingSpot.update({ where: { id: spot!.id }, data: geometry });
     });
   } else {
-    for (const geometry of parkingSpotGeometry) await prisma.parkingSpot.upsert({ where: { code: geometry.code }, update: geometry, create: geometry });
+    for (const geometry of parkingSpotGeometry) await prisma.parkingSpot.upsert({ where: { code: geometry.code }, update: geometry, create: { ...geometry, role: defaultSpotRoles[geometry.code] ?? "REGULAR" } });
+  }
+  // 役割の列を追加したばかりの開発DBにだけ初期の役割を入れ、設定画面で変えた役割は上書きしない。
+  const rolesMissing = await prisma.parkingSpot.count({ where: { role: { not: "REGULAR" } } }) === 0;
+  if (rolesMissing) {
+    for (const [code, role] of Object.entries(defaultSpotRoles)) await prisma.parkingSpot.updateMany({ where: { code }, data: { role } });
   }
   const existingEmployees = await prisma.employee.findMany({ include: { employeeNumber: true }, orderBy: { createdAt: "desc" } });
   const existingEmployeeByCode = new Map<string, (typeof existingEmployees)[number]>();
@@ -66,6 +71,8 @@ async function main() {
     }
     if (freeSpot) occupiedSpotIds.add(freeSpot.id);
   }
+  const sakura = await prisma.vehicle.findFirst({ where: { vehicleNumber: { code: "C07" }, active: true } });
+  if (rolesMissing && sakura) await prisma.parkingSpot.updateMany({ where: { code: "19", role: "REGULAR" }, data: { role: "DEDICATED", dedicatedVehicleId: sakura.id } });
   const employees = await prisma.employee.findMany({ orderBy: { employeeNumber: { code: "asc" } } });
   const vehicles = await prisma.vehicle.findMany({ orderBy: { vehicleNumber: { code: "asc" } } });
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());

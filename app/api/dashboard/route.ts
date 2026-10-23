@@ -8,10 +8,10 @@ import { adminTokenFromRequest, verifyAdminToken } from "@/lib/admin-auth";
 import { getBackupStatus } from "@/lib/backup-status";
 import { isSameOriginRequest, readJsonBody } from "@/lib/request-security";
 import { getApplicationSystemStatus } from "@/lib/system-status";
+import { canUseSpot, formatSpotLabel, PARKING_SPOT_ROLES, SPOT_ROLE_LABELS } from "@/lib/parking-spots";
+import type { Prisma } from "@/prisma/generated/client";
 
 export const dynamic = "force-dynamic";
-const SAKURA_SPOT_CODE = "19";
-const SAKURA_VEHICLE_CODE = "C07";
 const activeOperationIds = new Set<string>();
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -92,9 +92,17 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("setTripEnd"), tripId: idSchema, version: z.number().int().nonnegative(), plannedEnd: z.string().datetime(), ...actorSchema }),
   z.object({ action: z.literal("cancelTrip"), tripId: idSchema, version: z.number().int().nonnegative(), ...actorSchema }),
   z.object({ action: z.literal("moveVehicle"), vehicleId: idSchema, version: z.number().int().nonnegative(), spotId: idSchema, ...actorSchema }),
+  z.object({ action: z.literal("updateSpotRole"), id: idSchema, version: z.number().int().nonnegative(), role: z.enum(PARKING_SPOT_ROLES), dedicatedVehicleId: idSchema.nullable() }),
   z.object({ action: z.literal("setFuelLevel"), vehicleId: idSchema, version: z.number().int().nonnegative(), fuelLevel: z.number().int().min(0).max(FUEL_LEVEL_MAX), ...actorSchema }),
 ]);
-const adminActions = new Set(["createEmployee", "createVehicle", "updateEmployee", "updateVehicle", "setEmployeeActive", "setVehicleActive", "setVehicleMaintenance", "importEmployees", "importVehicles"]);
+const adminActions = new Set(["createEmployee", "createVehicle", "updateEmployee", "updateVehicle", "setEmployeeActive", "setVehicleActive", "setVehicleMaintenance", "importEmployees", "importVehicles", "updateSpotRole"]);
+
+// 専用区画に別の車を置こうとしたら止める。vehicleIdがnullなら、これから登録する車両として扱う。
+async function assertSpotAllowsVehicle(tx: Prisma.TransactionClient, spot: { code: string; role: (typeof PARKING_SPOT_ROLES)[number]; dedicatedVehicleId: string | null }, vehicleId: string | null) {
+  if (canUseSpot({ id: vehicleId ?? "" }, spot)) return;
+  const dedicated = spot.dedicatedVehicleId ? await tx.vehicle.findUnique({ where: { id: spot.dedicatedVehicleId }, select: { name: true } }) : null;
+  throw new Error(`${formatSpotLabel({ ...spot, dedicatedVehicleName: dedicated?.name ?? null })}には他の車両を駐車できません`);
+}
 
 export async function GET(request: Request) {
   await expireStaleReservations();
@@ -128,7 +136,7 @@ export async function GET(request: Request) {
     employees: employees.map((employee) => withEmployeeCode(employee, includeNfc)),
     departments,
     vehicles: vehicles.map((vehicle) => withVehicleCode(vehicle, includeNfc)),
-    spots: spots.map((spot) => ({ ...spot, vehicle: spot.vehicle ? withVehicleCode(spot.vehicle, includeNfc) : null })),
+    spots: spots.map((spot) => ({ ...spot, dedicatedVehicleName: vehicles.find((vehicle) => vehicle.id === spot.dedicatedVehicleId)?.name ?? null, vehicle: spot.vehicle ? withVehicleCode(spot.vehicle, includeNfc) : null })),
     trips: trips.map((trip) => ({ ...trip, employee: withEmployeeCode(trip.employee, includeNfc), vehicle: withVehicleCode(trip.vehicle, includeNfc) })),
     system: {
       backupLatestAt: backup.latestAt,
@@ -191,7 +199,7 @@ export async function POST(request: Request) {
           const spot = await tx.parkingSpot.findUnique({ where: { id: input.spotId }, include: { vehicle: true } });
           if (!spot || !spot.enabled) throw new Error("選択した駐車区画は利用できません");
           if (spot.vehicle) throw new Error(`区画${spot.code}は使用中です`);
-          if (spot.code === SAKURA_SPOT_CODE && input.code !== SAKURA_VEHICLE_CODE) throw new Error("区画19はサクラ専用です");
+          await assertSpotAllowsVehicle(tx, spot, null);
         }
         const vehicleNumber = await tx.vehicleNumber.upsert({ where: { code: input.code }, update: {}, create: { code: input.code } });
         const assigned = await tx.vehicle.findFirst({ where: { vehicleNumberId: vehicleNumber.id, active: true }, select: { name: true } });
@@ -436,10 +444,10 @@ export async function POST(request: Request) {
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-spot:${input.spotId}`}))::text AS spot_lock, pg_advisory_xact_lock(hashtext(${`fleet-vehicle:${input.vehicleId}`}))::text AS vehicle_lock`;
         const [target, returningVehicle] = await Promise.all([
           tx.parkingSpot.findUniqueOrThrow({ where: { id: input.spotId }, include: { vehicle: true } }),
-          tx.vehicle.findUniqueOrThrow({ where: { id: input.vehicleId }, select: { fuelLevel: true, vehicleNumber: { select: { code: true } } } }),
+          tx.vehicle.findUniqueOrThrow({ where: { id: input.vehicleId }, select: { fuelLevel: true } }),
         ]);
         if (target.vehicle && target.vehicle.id !== input.vehicleId) throw new Error(`区画${target.code}は使用中です`);
-        if (target.code === SAKURA_SPOT_CODE && returningVehicle.vehicleNumber.code !== SAKURA_VEHICLE_CODE) throw new Error("区画19はサクラ専用です");
+        await assertSpotAllowsVehicle(tx, target, input.vehicleId);
         const trip = await tx.trip.updateMany({ where: { id: input.tripId, vehicleId: input.vehicleId, version: input.tripVersion, status: "IN_USE" }, data: { status: "COMPLETED", actualEnd: new Date(), returnSpotCode: target.code, returnFuelLevel: fuelLevel, previousFuelLevel: fuelLevel === null ? null : returningVehicle.fuelLevel, version: { increment: 1 } } });
         const vehicle = await tx.vehicle.updateMany({ where: { id: input.vehicleId, version: input.vehicleVersion }, data: { status: "AVAILABLE", parkingSpotId: input.spotId, ...(fuelLevel === null ? {} : { fuelLevel }), version: { increment: 1 } } });
         if (trip.count !== 1 || vehicle.count !== 1) throw new Error("CONFLICT");
@@ -550,15 +558,36 @@ export async function POST(request: Request) {
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-spot:${input.spotId}`}))::text AS spot_lock, pg_advisory_xact_lock(hashtext(${`fleet-vehicle:${input.vehicleId}`}))::text AS vehicle_lock`;
         const [target, movingVehicle] = await Promise.all([
           tx.parkingSpot.findUniqueOrThrow({ where: { id: input.spotId }, include: { vehicle: true } }),
-          tx.vehicle.findUniqueOrThrow({ where: { id: input.vehicleId }, select: { status: true, vehicleNumber: { select: { code: true } } } }),
+          tx.vehicle.findUniqueOrThrow({ where: { id: input.vehicleId }, select: { status: true } }),
         ]);
         if (movingVehicle.status !== "AVAILABLE") throw new Error("利用中の車両には駐車位置を設定できません");
         if (!target.enabled) throw new Error("選択した駐車区画は利用できません");
         if (target.vehicle && target.vehicle.id !== input.vehicleId) throw new Error(`区画${target.code}は使用中です`);
-        if (target.code === SAKURA_SPOT_CODE && movingVehicle.vehicleNumber.code !== SAKURA_VEHICLE_CODE) throw new Error("区画19はサクラ専用です");
+        await assertSpotAllowsVehicle(tx, target, input.vehicleId);
         const updated = await tx.vehicle.updateMany({ where: { id: input.vehicleId, version: input.version }, data: { parkingSpotId: input.spotId, version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
         await tx.auditLog.create({ data: { operationId, ...auditActor, action: "駐車位置修正", targetType: "Vehicle", targetId: input.vehicleId, description: `区画${target.code}へ変更` } });
+      });
+    }
+    if (input.action === "updateSpotRole") {
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-spot:${input.id}`}))::text AS spot_lock`;
+        const spot = await tx.parkingSpot.findUniqueOrThrow({ where: { id: input.id }, include: { vehicle: { select: { id: true, name: true } } } });
+        const dedicatedVehicleId = input.role === "DEDICATED" ? input.dedicatedVehicleId : null;
+        let dedicatedVehicleName: string | null = null;
+        if (input.role === "DEDICATED") {
+          if (!dedicatedVehicleId) throw new Error("専用にする車両を選んでください");
+          const dedicated = await tx.vehicle.findUnique({ where: { id: dedicatedVehicleId }, select: { name: true, active: true } });
+          if (!dedicated?.active) throw new Error("選択した車両は利用できません");
+          if (spot.vehicle && spot.vehicle.id !== dedicatedVehicleId) throw new Error(`区画${spot.code}には${spot.vehicle.name}が駐車中です。先に移動してください`);
+          dedicatedVehicleName = dedicated.name;
+        }
+        if (spot.role === input.role && spot.dedicatedVehicleId === dedicatedVehicleId) throw new Error("役割は変更されていません");
+        const updated = await tx.parkingSpot.updateMany({ where: { id: input.id, version: input.version }, data: { role: input.role, dedicatedVehicleId, version: { increment: 1 } } });
+        if (updated.count !== 1) throw new Error("CONFLICT");
+        const previousName = spot.dedicatedVehicleId ? (await tx.vehicle.findUnique({ where: { id: spot.dedicatedVehicleId }, select: { name: true } }))?.name ?? null : null;
+        const describe = (role: typeof input.role, name: string | null) => role === "DEDICATED" ? `${name ?? "車両未設定"}専用` : SPOT_ROLE_LABELS[role];
+        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "区画役割変更", targetType: "ParkingSpot", targetId: input.id, description: `区画${spot.code}を「${describe(spot.role, previousName)}」から「${describe(input.role, dedicatedVehicleName)}」へ変更` } });
       });
     }
     if (input.action === "setFuelLevel") {

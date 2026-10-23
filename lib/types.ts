@@ -1,3 +1,5 @@
+import type { ParkingSpotRole } from "@/lib/parking-spots";
+
 export type Employee = { id: string; code: string; name: string; department: string; nfcUid: string; active: boolean; version: number };
 export type Department = { id: string; name: string; active: boolean };
 export type Vehicle = {
@@ -9,6 +11,7 @@ export type Vehicle = {
 export type ParkingSpot = {
   id: string; code: string; x: number; y: number; width: number; height: number;
   orientation: string; enabled: boolean; version: number; vehicle: Vehicle | null;
+  role: ParkingSpotRole; dedicatedVehicleId: string | null; dedicatedVehicleName: string | null;
 };
 export type Trip = {
   id: string; employeeId: string; vehicleId: string; plannedStart: string; plannedEnd: string;

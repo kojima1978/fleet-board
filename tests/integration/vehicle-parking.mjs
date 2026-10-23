@@ -5,7 +5,7 @@ const appUrl = process.env.APP_URL || "http://app:3000";
 const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
 const suffix = Date.now().toString(36);
 const codes = Array.from({ length: 8 }, (_, i) => `PK${suffix}${i}`);
-const spots = [0, 1, 2].map((i) => `parking-test-${suffix}-${i}`);
+const spots = [0, 1, 2, 3].map((i) => `parking-test-${suffix}-${i}`);
 const operationIds = [];
 let cookie;
 async function post(body) {
@@ -18,6 +18,8 @@ async function post(body) {
   return { status: response.status, body: await response.json() };
 }
 const create = (i, spotId) => post({ action: "createVehicle", code: codes[i], name: `駐車登録テスト${i}`, plateNumber: codes[i], color: "#2563eb", nfcUid: "", ...(spotId ? { spotId } : {}) });
+const spotRow = async (id) => (await client.query('SELECT * FROM "ParkingSpot" WHERE id=$1', [id])).rows[0];
+const setRole = async (id, role, dedicatedVehicleId = null, version) => post({ action: "updateSpotRole", id, version: version ?? (await spotRow(id)).version, role, dedicatedVehicleId });
 async function vehicle(i) {
   const { rows } = await client.query('SELECT v.* FROM "Vehicle" v JOIN "VehicleNumber" n ON n.id=v."vehicleNumberId" WHERE n.code=$1', [codes[i]]);
   return rows[0];
@@ -58,7 +60,25 @@ try {
   const publicResponse = await fetch(`${appUrl}/api/dashboard`);
   const data = await publicResponse.json();
   assert.equal(data.spots.find((spot) => spot.id === spots[2]).vehicle.id, unlocated.id, "配置図のデータにも反映する");
-  console.log("Vehicle parking passed: registration without NFC, edit, occupied/disabled/missing spots, concurrent registration, later placement, stale version and map data");
+  const owner = await vehicle(0);
+  assert.equal((await setRole(spots[0], "DEDICATED", unlocated.id)).status, 400, "他の車が駐車中の区画は専用にできない");
+  assert.equal((await setRole(spots[3], "DEDICATED")).status, 400, "専用には車両の指定が必要");
+  const staleVersion = (await spotRow(spots[3])).version;
+  const dedicated = await setRole(spots[3], "DEDICATED", owner.id);
+  assert.equal(dedicated.status, 200, JSON.stringify(dedicated.body));
+  assert.equal((await setRole(spots[3], "TEMPORARY", null, staleVersion)).status, 409, "古い区画バージョンを拒否する");
+  const placed = await vehicle(6);
+  assert.equal((await post({ action: "moveVehicle", vehicleId: placed.id, version: placed.version, spotId: spots[3] })).status, 400, "専用区画に他の車は移動できない");
+  assert.equal((await create(7, spots[3])).status, 400, "専用区画に新規車両を登録できない");
+  const ownerMove = await post({ action: "moveVehicle", vehicleId: owner.id, version: owner.version, spotId: spots[3] });
+  assert.equal(ownerMove.status, 200, JSON.stringify(ownerMove.body));
+  const roleData = await (await fetch(`${appUrl}/api/dashboard`)).json();
+  const dedicatedSpot = roleData.spots.find((spot) => spot.id === spots[3]);
+  assert.deepEqual([dedicatedSpot.role, dedicatedSpot.dedicatedVehicleId, dedicatedSpot.dedicatedVehicleName], ["DEDICATED", owner.id, "NFCなし編集"], "配置図に専用車両名を返す");
+  assert.equal((await setRole(spots[3], "REGULAR")).status, 200);
+  assert.equal((await spotRow(spots[3])).dedicatedVehicleId, null, "通常へ戻すと専用車両を外す");
+  assert.equal((await setRole(spots[3], "REGULAR")).status, 400, "変更なしは拒否する");
+  console.log("Vehicle parking passed: registration without NFC, edit, occupied/disabled/missing spots, concurrent registration, later placement, stale version, map data and spot roles");
 } finally {
   await client.query('DELETE FROM "AuditLog" WHERE "operationId"=ANY($1::text[])', [operationIds]);
   await client.query('DELETE FROM "Vehicle" WHERE "vehicleNumberId" IN (SELECT id FROM "VehicleNumber" WHERE code=ANY($1::text[]))', [codes]);

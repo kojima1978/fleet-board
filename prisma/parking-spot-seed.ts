@@ -1,3 +1,10 @@
+// 新しく作る区画の初期の役割。作成後は設定画面から変更する。
+export const defaultSpotRoles: Record<string, "TEMPORARY" | "CUSTOMER" | "HOLDING"> = {
+  "08": "TEMPORARY", "13": "TEMPORARY", "17": "TEMPORARY", "18": "TEMPORARY",
+  "01": "CUSTOMER", "02": "CUSTOMER", "20": "CUSTOMER", "24": "CUSTOMER",
+  "22": "HOLDING", "23": "HOLDING",
+};
+
 export const parkingSpotGeometry = [
   ...[269.6, 360.6, 451.6, 542.6, 633.6, 724.6, 815.6].map((x, i) => ({ code: String(i + 1).padStart(2, "0"), x: x / 9.5, y: 385.334 / 5.25, width: 66.8 / 9.5, height: 110.8 / 5.25, orientation: "vertical" })),
   ...[269.6, 395.6, 521.6, 647.6, 771.6].map((x, i) => ({ code: String(i + 8).padStart(2, "0"), x: x / 9.5, y: 304.334 / 5.25, width: 110.8 / 9.5, height: 66.8 / 5.25, orientation: "horizontal" })),

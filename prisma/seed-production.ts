@@ -1,6 +1,6 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "./generated/client";
-import { parkingSpotGeometry } from "./parking-spot-seed";
+import { defaultSpotRoles, parkingSpotGeometry } from "./parking-spot-seed";
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) });
 
@@ -26,7 +26,7 @@ async function main() {
       await prisma.parkingSpot.upsert({
         where: { code: geometry.code },
         update: geometry,
-        create: geometry,
+        create: { ...geometry, role: defaultSpotRoles[geometry.code] ?? "REGULAR" },
       });
     }
   }
