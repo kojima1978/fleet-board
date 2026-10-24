@@ -69,13 +69,15 @@ const optionalNfcUidSchema = z.preprocess(
   nfcUidSchema.optional(),
 );
 const idSchema = z.string().trim().min(1).max(100);
+// 空白の違いで同じ部署が二重に登録されないよう、連続する空白を1つにまとめる。
+const departmentNameSchema = z.string().trim().min(1).max(50).transform((value) => value.replace(/\s+/g, " "));
 const actorSchema = { actorName: z.string().trim().max(50).optional(), actorEmployeeId: idSchema.optional() };
-const employeeImportItemSchema = z.object({ code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), department: z.string().trim().min(1).max(50), nfcUid: optionalNfcUidSchema });
+const employeeImportItemSchema = z.object({ code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), department: departmentNameSchema, nfcUid: optionalNfcUidSchema });
 const vehicleImportItemSchema = z.object({ code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#2563eb"), hasEtc: z.boolean().default(false), hasNavigation: z.boolean().default(false) });
 const actionSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("createEmployee"), code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), department: z.string().trim().min(1).max(50), nfcUid: nfcUidSchema }),
+  z.object({ action: z.literal("createEmployee"), code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), department: departmentNameSchema, nfcUid: nfcUidSchema }),
   z.object({ action: z.literal("createVehicle"), code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, spotId: idSchema.optional(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().default(false), hasNavigation: z.boolean().default(false) }),
-  z.object({ action: z.literal("updateEmployee"), id: idSchema, version: z.number().int().nonnegative(), code: z.string().trim().min(1).max(20).optional(), name: z.string().trim().min(1).max(50), department: z.string().trim().min(1).max(50), nfcUid: nfcUidSchema }),
+  z.object({ action: z.literal("updateEmployee"), id: idSchema, version: z.number().int().nonnegative(), code: z.string().trim().min(1).max(20).optional(), name: z.string().trim().min(1).max(50), department: departmentNameSchema, nfcUid: nfcUidSchema }),
   z.object({ action: z.literal("updateVehicle"), id: idSchema, version: z.number().int().nonnegative(), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().optional(), hasNavigation: z.boolean().optional() }),
   z.object({ action: z.literal("setEmployeeActive"), id: idSchema, version: z.number().int().nonnegative(), active: z.boolean() }),
   z.object({ action: z.literal("setVehicleActive"), id: idSchema, version: z.number().int().nonnegative(), active: z.boolean() }),
@@ -93,7 +95,30 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("moveVehicle"), vehicleId: idSchema, version: z.number().int().nonnegative(), spotId: idSchema, ...actorSchema }),
   z.object({ action: z.literal("updateSpotRole"), id: idSchema, version: z.number().int().nonnegative(), role: z.enum(PARKING_SPOT_ROLES), dedicatedVehicleId: idSchema.nullable() }),
   z.object({ action: z.literal("setFuelLevel"), vehicleId: idSchema, version: z.number().int().nonnegative(), fuelLevel: z.number().int().min(0).max(FUEL_LEVEL_MAX), ...actorSchema }),
+  z.object({ action: z.literal("createDepartment"), name: departmentNameSchema }),
+  z.object({ action: z.literal("renameDepartment"), id: idSchema, version: z.number().int().nonnegative(), name: departmentNameSchema }),
+  z.object({ action: z.literal("setDepartmentActive"), id: idSchema, version: z.number().int().nonnegative(), active: z.boolean() }),
+  z.object({ action: z.literal("moveDepartment"), id: idSchema, direction: z.enum(["up", "down"]) }),
 ]);
+
+// 部署の追加・停止・並べ替えと、社員の部署付け替えを順番に処理する。
+async function lockDepartments(tx: Prisma.TransactionClient) {
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('fleet-departments'))::text AS department_lock`;
+}
+
+async function nextDepartmentOrder(tx: Prisma.TransactionClient) {
+  const last = await tx.department.aggregate({ _max: { sortOrder: true } });
+  return (last._max.sortOrder ?? 0) + 1;
+}
+
+// 社員の登録・修正では、部署管理で登録済みの部署だけを選べる。停止中の部署は今の所属のままなら残せる。
+async function findSelectableDepartment(tx: Prisma.TransactionClient, name: string, currentDepartmentId?: string) {
+  await lockDepartments(tx);
+  const department = await tx.department.findUnique({ where: { name } });
+  if (!department) throw new Error(`部署「${name}」は登録されていません。設定の「部署」で追加してください`);
+  if (!department.active && department.id !== currentDepartmentId) throw new Error(`部署「${name}」は利用停止中です`);
+  return department;
+}
 
 // 専用区画に別の車を置こうとしたら止める。vehicleIdがnullなら、これから登録する車両として扱う。
 async function assertSpotAllowsVehicle(tx: Prisma.TransactionClient, spot: { code: string; role: (typeof PARKING_SPOT_ROLES)[number]; dedicatedVehicleId: string | null }, vehicleId: string | null) {
@@ -114,7 +139,7 @@ export async function GET(request: Request) {
   const dayEnd = new Date(dayStart.getTime() + days * 24 * 60 * 60_000);
   const [employees, departments, vehicles, spots, trips, nextReservations, backup, system] = await Promise.all([
     prisma.employee.findMany({ include: { employeeNumber: true, department: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } }, orderBy: { employeeNumber: { code: "asc" } } }),
-    prisma.department.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
+    prisma.department.findMany({ include: { _count: { select: { employees: { where: { active: true } } } } }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
     prisma.vehicle.findMany({ include: { vehicleNumber: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } }, orderBy: { vehicleNumber: { code: "asc" } } }),
     prisma.parkingSpot.findMany({ include: { vehicle: { include: { vehicleNumber: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } } } }, orderBy: { code: "asc" } }),
     prisma.trip.findMany({
@@ -136,7 +161,7 @@ export async function GET(request: Request) {
   ]);
   return NextResponse.json({
     employees: employees.map((employee) => withEmployeeCode(employee)),
-    departments,
+    departments: departments.map((department) => ({ id: department.id, name: department.name, active: department.active, version: department.version, employeeCount: department._count.employees })),
     vehicles: vehicles.map((vehicle) => withVehicleCode(vehicle)),
     spots: spots.map((spot) => ({ ...spot, dedicatedVehicleName: vehicles.find((vehicle) => vehicle.id === spot.dedicatedVehicleId)?.name ?? null, vehicle: spot.vehicle ? withVehicleCode(spot.vehicle) : null })),
     trips: trips.map((trip) => ({ ...trip, employee: withEmployeeCode(trip.employee), vehicle: withVehicleCode(trip.vehicle) })),
@@ -184,9 +209,9 @@ export async function POST(request: Request) {
       await assertNfcAvailable(input.nfcUid);
       await prisma.$transaction(async (tx) => {
         const employeeNumber = await tx.employeeNumber.upsert({ where: { code: input.code }, update: {}, create: { code: input.code } });
-        const department = await tx.department.upsert({ where: { name: input.department }, update: { active: true }, create: { name: input.department } });
+        const department = await findSelectableDepartment(tx, input.department);
         const assigned = await tx.employee.findFirst({ where: { employeeNumberId: employeeNumber.id, active: true }, select: { name: true } });
-        if (assigned) throw new Error(`社員番号${input.code}は「${assigned.name}」で使用中です。旧社員を無効化してから登録してください`);
+        if (assigned) throw new Error(`社員番号${input.code}は「${assigned.name}」で使用中です。旧社員の利用を停止してから登録してください`);
         const employee = await tx.employee.create({ data: { employeeNumberId: employeeNumber.id, departmentId: department.id, name: input.name } });
         const nfcTag = await tx.nfcTag.upsert({ where: { uid: input.nfcUid }, update: {}, create: { uid: input.nfcUid } });
         await tx.nfcAssignment.create({ data: { employeeId: employee.id, nfcTagId: nfcTag.id } });
@@ -205,7 +230,7 @@ export async function POST(request: Request) {
         }
         const vehicleNumber = await tx.vehicleNumber.upsert({ where: { code: input.code }, update: {}, create: { code: input.code } });
         const assigned = await tx.vehicle.findFirst({ where: { vehicleNumberId: vehicleNumber.id, active: true }, select: { name: true } });
-        if (assigned) throw new Error(`車両番号${input.code}は「${assigned.name}」で使用中です。旧車両を無効化してから登録してください`);
+        if (assigned) throw new Error(`車両番号${input.code}は「${assigned.name}」で使用中です。旧車両の利用を停止してから登録してください`);
         const vehicle = await tx.vehicle.create({ data: { vehicleNumberId: vehicleNumber.id, name: input.name, plateNumber: input.plateNumber, color: input.color, hasEtc: input.hasEtc, hasNavigation: input.hasNavigation, parkingSpotId: input.spotId } });
         if (input.nfcUid) {
           const nfcTag = await tx.nfcTag.upsert({ where: { uid: input.nfcUid }, update: {}, create: { uid: input.nfcUid } });
@@ -218,7 +243,7 @@ export async function POST(request: Request) {
       await assertNfcAvailable(input.nfcUid, { employeeId: input.id });
       await prisma.$transaction(async (tx) => {
         const employee = await tx.employee.findUniqueOrThrow({ where: { id: input.id }, include: { employeeNumber: true, nfcAssignments: { where: { validTo: null }, include: { nfcTag: true }, take: 1 } } });
-        const department = await tx.department.upsert({ where: { name: input.department }, update: { active: true }, create: { name: input.department } });
+        const department = await findSelectableDepartment(tx, input.department, employee.departmentId);
         // 社員番号は他の（無効な）社員と共有され得るため、番号の行は書き換えず付け替える。
         const codeChanged = input.code !== undefined && input.code !== employee.employeeNumber.code;
         let employeeNumberId = employee.employeeNumberId;
@@ -267,17 +292,19 @@ export async function POST(request: Request) {
         const employee = await tx.employee.findUniqueOrThrow({ where: { id: input.id }, include: { nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } } });
         if (!input.active) {
           const activeTrip = await tx.trip.findFirst({ where: { employeeId: input.id, status: { in: ["RESERVED", "IN_USE"] } } });
-          if (activeTrip) throw new Error("利用中または予約中の社員は無効化できません");
+          if (activeTrip) throw new Error("利用中または予約中の社員は利用停止できません");
         }
         if (input.active) {
           const assigned = await tx.employee.findFirst({ where: { employeeNumberId: employee.employeeNumberId, active: true, id: { not: employee.id } }, select: { name: true } });
-          if (assigned) throw new Error(`この社員番号は「${assigned.name}」で使用中のため再有効化できません`);
+          if (assigned) throw new Error(`この社員番号は「${assigned.name}」で使用中のため利用再開できません`);
+          // NFCは任意のため、カード履歴がなければカードなしで再開する。
           const latestTag = employee.nfcAssignments[0]?.nfcTag;
-          if (!latestTag) throw new Error("再有効化に使用できるNFCカード履歴がありません");
-          const cardOwner = await tx.nfcAssignment.findFirst({ where: { nfcTagId: latestTag.id, validTo: null }, select: { employee: { select: { name: true } }, vehicle: { select: { name: true } } } });
-          const owner = cardOwner?.employee?.name ?? cardOwner?.vehicle?.name;
-          if (owner) throw new Error(`以前のNFCカードは「${owner}」で使用中です。別のカードで新規登録してください`);
-          await tx.nfcAssignment.create({ data: { employeeId: employee.id, nfcTagId: latestTag.id } });
+          if (latestTag) {
+            const cardOwner = await tx.nfcAssignment.findFirst({ where: { nfcTagId: latestTag.id, validTo: null }, select: { employee: { select: { name: true } }, vehicle: { select: { name: true } } } });
+            const owner = cardOwner?.employee?.name ?? cardOwner?.vehicle?.name;
+            if (owner) throw new Error(`以前のNFCカードは「${owner}」で使用中です。別のカードで新規登録してください`);
+            await tx.nfcAssignment.create({ data: { employeeId: employee.id, nfcTagId: latestTag.id } });
+          }
         }
         const updated = await tx.employee.updateMany({ where: { id: input.id, version: input.version }, data: { active: input.active, version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
@@ -288,16 +315,17 @@ export async function POST(request: Request) {
     if (input.action === "setVehicleActive") {
       await prisma.$transaction(async (tx) => {
         const vehicle = await tx.vehicle.findUniqueOrThrow({ where: { id: input.id }, include: { nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } } });
-        if (!input.active && vehicle.status !== "AVAILABLE") throw new Error("利用中または予約中の車両は無効化できません");
+        if (!input.active && vehicle.status !== "AVAILABLE") throw new Error("利用中・予約中・整備中の車両は利用停止できません");
         if (input.active) {
           const assigned = await tx.vehicle.findFirst({ where: { vehicleNumberId: vehicle.vehicleNumberId, active: true, id: { not: vehicle.id } }, select: { name: true } });
-          if (assigned) throw new Error(`この車両番号は「${assigned.name}」で使用中のため再有効化できません`);
+          if (assigned) throw new Error(`この車両番号は「${assigned.name}」で使用中のため利用再開できません`);
           const latestTag = vehicle.nfcAssignments[0]?.nfcTag;
-          if (!latestTag) throw new Error("再有効化に使用できるNFCタグ履歴がありません");
-          const tagOwner = await tx.nfcAssignment.findFirst({ where: { nfcTagId: latestTag.id, validTo: null }, select: { employee: { select: { name: true } }, vehicle: { select: { name: true } } } });
-          const owner = tagOwner?.employee?.name ?? tagOwner?.vehicle?.name;
-          if (owner) throw new Error(`以前のNFCタグは「${owner}」で使用中です。別のタグで新規登録してください`);
-          await tx.nfcAssignment.create({ data: { vehicleId: vehicle.id, nfcTagId: latestTag.id } });
+          if (latestTag) {
+            const tagOwner = await tx.nfcAssignment.findFirst({ where: { nfcTagId: latestTag.id, validTo: null }, select: { employee: { select: { name: true } }, vehicle: { select: { name: true } } } });
+            const owner = tagOwner?.employee?.name ?? tagOwner?.vehicle?.name;
+            if (owner) throw new Error(`以前のNFCタグは「${owner}」で使用中です。別のタグで新規登録してください`);
+            await tx.nfcAssignment.create({ data: { vehicleId: vehicle.id, nfcTagId: latestTag.id } });
+          }
         }
         const updated = await tx.vehicle.updateMany({ where: { id: input.id, version: input.version }, data: { active: input.active, parkingSpotId: input.active ? vehicle.parkingSpotId : null, version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
@@ -331,6 +359,7 @@ export async function POST(request: Request) {
       }
       await prisma.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('fleet-import-employees'))::text AS import_lock`;
+        await lockDepartments(tx);
         if (await tx.auditLog.findUnique({ where: { operationId }, select: { id: true } })) return;
         for (const item of input.items) {
           const employeeNumber = await tx.employeeNumber.upsert({ where: { code: item.code }, update: {}, create: { code: item.code } });
@@ -341,7 +370,10 @@ export async function POST(request: Request) {
             const nfcOwner = existingNfc?.employee?.name ?? existingNfc?.vehicle?.name;
             if (nfcOwner) throw new Error(`NFC UID ${item.nfcUid}は「${nfcOwner}」で使用中です`);
           }
-          const department = await tx.department.upsert({ where: { name: item.department }, update: { active: true }, create: { name: item.department } });
+          // JSON取込では、未登録の部署は末尾に追加し、停止中の部署は再開する。
+          let department = await tx.department.findUnique({ where: { name: item.department } });
+          if (!department) department = await tx.department.create({ data: { name: item.department, sortOrder: await nextDepartmentOrder(tx) } });
+          else if (!department.active) department = await tx.department.update({ where: { id: department.id }, data: { active: true, sortOrder: await nextDepartmentOrder(tx), version: { increment: 1 } } });
           const employee = await tx.employee.create({ data: { employeeNumberId: employeeNumber.id, departmentId: department.id, name: item.name } });
           if (item.nfcUid) {
             const nfcTag = await tx.nfcTag.upsert({ where: { uid: item.nfcUid }, update: {}, create: { uid: item.nfcUid } });
@@ -614,6 +646,54 @@ export async function POST(request: Request) {
         await tx.auditLog.create({ data: { operationId, ...auditActor, action: "残量修正", targetType: "Vehicle", targetId: input.vehicleId, description: `${vehicle.name}の残量を${vehicle.fuelLevel === null ? "未登録" : formatFuelLevel(vehicle.fuelLevel)}から${formatFuelLevel(input.fuelLevel)}へ修正` } });
       });
     }
+    if (input.action === "createDepartment") {
+      await prisma.$transaction(async (tx) => {
+        await lockDepartments(tx);
+        const existing = await tx.department.findUnique({ where: { name: input.name }, select: { active: true } });
+        if (existing) throw new Error(existing.active ? `部署「${input.name}」はすでに登録されています` : `部署「${input.name}」は利用停止中です。一覧から利用を再開してください`);
+        const department = await tx.department.create({ data: { name: input.name, sortOrder: await nextDepartmentOrder(tx) } });
+        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "部署登録", targetType: "Department", targetId: department.id, description: `部署「${input.name}」を登録` } });
+      });
+    }
+    if (input.action === "renameDepartment") {
+      await prisma.$transaction(async (tx) => {
+        await lockDepartments(tx);
+        const department = await tx.department.findUniqueOrThrow({ where: { id: input.id }, select: { name: true } });
+        if (department.name === input.name) throw new Error("部署名は変更されていません");
+        if (await tx.department.findUnique({ where: { name: input.name }, select: { id: true } })) throw new Error(`部署「${input.name}」はすでに登録されています`);
+        const updated = await tx.department.updateMany({ where: { id: input.id, version: input.version }, data: { name: input.name, version: { increment: 1 } } });
+        if (updated.count !== 1) throw new Error("CONFLICT");
+        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "部署名変更", targetType: "Department", targetId: input.id, description: `部署名を「${department.name}」から「${input.name}」へ変更` } });
+      });
+    }
+    if (input.action === "setDepartmentActive") {
+      await prisma.$transaction(async (tx) => {
+        await lockDepartments(tx);
+        const department = await tx.department.findUniqueOrThrow({ where: { id: input.id }, select: { name: true, active: true } });
+        if (department.active === input.active) throw new Error(input.active ? "この部署はすでに利用中です" : "この部署はすでに利用停止中です");
+        if (!input.active) {
+          const members = await tx.employee.count({ where: { departmentId: input.id, active: true } });
+          if (members > 0) throw new Error(`部署「${department.name}」には有効な社員が${members}人所属しているため利用停止できません。先に社員の部署を変更してください`);
+        }
+        // 再開した部署は並び順の末尾に戻す。
+        const updated = await tx.department.updateMany({ where: { id: input.id, version: input.version }, data: { active: input.active, ...(input.active ? { sortOrder: await nextDepartmentOrder(tx) } : {}), version: { increment: 1 } } });
+        if (updated.count !== 1) throw new Error("CONFLICT");
+        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: input.active ? "部署利用再開" : "部署利用停止", targetType: "Department", targetId: input.id, description: `部署「${department.name}」の利用を${input.active ? "再開" : "停止"}` } });
+      });
+    }
+    if (input.action === "moveDepartment") {
+      await prisma.$transaction(async (tx) => {
+        await lockDepartments(tx);
+        const departments = await tx.department.findMany({ where: { active: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }], select: { id: true, name: true } });
+        const index = departments.findIndex((department) => department.id === input.id);
+        if (index < 0) throw new Error("利用停止中の部署は並べ替えできません");
+        const target = index + (input.direction === "up" ? -1 : 1);
+        if (target < 0 || target >= departments.length) throw new Error(input.direction === "up" ? "この部署はすでに先頭です" : "この部署はすでに末尾です");
+        [departments[index], departments[target]] = [departments[target], departments[index]];
+        for (const [position, department] of departments.entries()) await tx.department.update({ where: { id: department.id }, data: { sortOrder: position + 1 } });
+        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "部署並べ替え", targetType: "Department", targetId: input.id, description: `部署「${departments[target].name}」を${input.direction === "up" ? "上" : "下"}へ移動` } });
+      });
+    }
     return NextResponse.json({ ok: true });
   } catch (error) {
     const duplicate = typeof error === "object" && error !== null && "code" in error && error.code === "P2002";
@@ -622,7 +702,8 @@ export async function POST(request: Request) {
       if (completed) return NextResponse.json({ ok: true, replayed: true });
     }
     const employeeAction = input.action === "createEmployee" || input.action === "updateEmployee" || input.action === "importEmployees";
-    const duplicateMessage = employeeAction ? "社員番号またはNFC UIDがすでに登録されています" : "車両番号・ナンバー・NFC UIDのいずれかがすでに登録されています";
+    const departmentAction = input.action === "createDepartment" || input.action === "renameDepartment";
+    const duplicateMessage = departmentAction ? "同じ名前の部署がすでに登録されています" : employeeAction ? "社員番号またはNFC UIDがすでに登録されています" : "車両番号・ナンバー・NFC UIDのいずれかがすでに登録されています";
     const rawMessage = error instanceof Error ? error.message : "";
     const isConflict = rawMessage === "CONFLICT";
     const isBusinessMessage = rawMessage.length <= 200 && /[ぁ-んァ-ン一-龯]/.test(rawMessage);

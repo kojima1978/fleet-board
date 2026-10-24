@@ -61,6 +61,9 @@ model Department {
   id        String     @id @default(cuid())
   name      String     @unique
   active    Boolean    @default(true)
+  // 部署の選択肢と絞り込みの並び順。小さいほど上に出る。
+  sortOrder Int        @default(0)
+  version   Int        @default(1)
   employees Employee[]
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt

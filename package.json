@@ -9,6 +9,7 @@
     "lint": "tsc --noEmit",
     "test:integration": "node tests/integration/api-idempotency.mjs",
     "test:integration:optional-nfc": "node tests/integration/optional-nfc-import.mjs",
+    "test:integration:departments": "node tests/integration/department-management.mjs",
     "test:integration:operations": "node tests/integration/operations-export.mjs",
     "test:integration:parking": "node tests/integration/vehicle-parking.mjs",
     "test:integration:json-backup": "node tests/integration/json-backup.mjs",

@@ -14,6 +14,7 @@ import { nfcBridgeStatusText, useNfcBridge, useNfcBridgeHealth } from "@/lib/use
 import { useKioskIdle } from "@/lib/use-kiosk-idle";
 import { SettingsPanelV2 } from "./settings-panel-v2";
 import { SpotRoleSettings } from "./spot-role-settings";
+import { DepartmentSettings } from "./department-settings";
 import { DataBackupPanel } from "./data-backup-panel";
 import { Button, Card, cn } from "./ui";
 import { AppHeader, HeaderSystemStatus, Navigation, type HeaderSyncState } from "./app-header";
@@ -22,7 +23,7 @@ const MINUTES_PER_DAY = 24 * 60;
 const DAY_VIEW_START_MINUTE = 6 * 60;
 const DAY_VIEW_END_MINUTE = 22 * 60;
 type Dialog = "start" | "end" | "parkingReturn" | "fuel" | "edit" | "nfc" | null;
-type DashboardView = "parking" | "timeline" | "settingsEmployees" | "settingsVehicles" | "settingsSpots" | "settingsData";
+type DashboardView = "parking" | "timeline" | "settingsEmployees" | "settingsDepartments" | "settingsVehicles" | "settingsSpots" | "settingsData";
 type SyncState = HeaderSyncState;
 type StartContext = { vehicleId: string; employeeId: string };
 type UndoReturn = { tripId: string; vehicleId: string; vehicleName: string; expiresAt: number };
@@ -401,10 +402,10 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
           </section>}
         </> : null}
 
-        {view === "settingsEmployees" || view === "settingsVehicles" || view === "settingsSpots" || view === "settingsData" ? <div className="space-y-5">
-            <PageHeading eyebrow="管理設定" title={view === "settingsEmployees" ? "社員登録" : view === "settingsVehicles" ? "車両登録" : view === "settingsSpots" ? "駐車区画" : "データ保存・復元"} description={view === "settingsEmployees" ? "利用者となる社員と社員証のNFCタグを登録します。" : view === "settingsVehicles" ? "利用する社用車と車両のNFCタグを登録します。" : view === "settingsSpots" ? "区画ごとの役割（一時・お客様用・専用・仮置き）を設定します。" : "FleetFlowの全データをJSONで保存し、必要なときに一括復元します。"} />
+        {view === "settingsEmployees" || view === "settingsDepartments" || view === "settingsVehicles" || view === "settingsSpots" || view === "settingsData" ? <div className="space-y-5">
+            <PageHeading eyebrow="管理設定" title={view === "settingsEmployees" ? "社員登録" : view === "settingsDepartments" ? "部署" : view === "settingsVehicles" ? "車両登録" : view === "settingsSpots" ? "駐車区画" : "データ保存・復元"} description={view === "settingsEmployees" ? "利用者となる社員と社員証のNFCタグを登録します。" : view === "settingsDepartments" ? "社員が所属する部署の追加・名前の変更・並び順を管理します。" : view === "settingsVehicles" ? "利用する社用車と車両のNFCタグを登録します。" : view === "settingsSpots" ? "区画ごとの役割（一時・お客様用・専用・仮置き）を設定します。" : "FleetFlowの全データをJSONで保存し、必要なときに一括復元します。"} />
             <SettingsNavigation view={view} />
-            {view === "settingsData" ? <DataBackupPanel /> : view === "settingsSpots" ? <SpotRoleSettings data={data} mutate={mutate} /> : <><div className="flex flex-wrap items-end justify-between gap-2"><div><p className="text-xs font-bold text-blue-600">日常管理</p><h3 className="mt-0.5 text-lg font-black">{view === "settingsEmployees" ? "社員情報" : "車両情報"}</h3></div><p className="text-xs text-slate-500">検索・登録・変更をこの一覧から行えます</p></div><SettingsPanelV2 kind={view === "settingsEmployees" ? "employee" : "vehicle"} data={data} mutate={mutate} /></>}
+            {view === "settingsData" ? <DataBackupPanel /> : view === "settingsSpots" ? <SpotRoleSettings data={data} mutate={mutate} /> : view === "settingsDepartments" ? <DepartmentSettings data={data} mutate={mutate} /> : <><div className="flex flex-wrap items-end justify-between gap-2"><div><p className="text-xs font-bold text-blue-600">日常管理</p><h3 className="mt-0.5 text-lg font-black">{view === "settingsEmployees" ? "社員情報" : "車両情報"}</h3></div><p className="text-xs text-slate-500">検索・登録・変更をこの一覧から行えます</p></div><SettingsPanelV2 kind={view === "settingsEmployees" ? "employee" : "vehicle"} data={data} mutate={mutate} /></>}
             <AdminToolsPanel />
           </div> : null}
       </main>
@@ -576,8 +577,8 @@ function TimelineList({ trips, openEdit, mode, onChange, timelineDate, timelineD
   </Card>;
 }
 
-function SettingsNavigation({ view }: { view: "settingsEmployees" | "settingsVehicles" | "settingsSpots" | "settingsData" }) {
-  return <nav aria-label="設定メニュー" className="inline-flex max-w-full overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm"><Link href="/settings/employees" className={cn("whitespace-nowrap rounded-lg px-5 py-2 text-sm font-bold transition", view === "settingsEmployees" ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50")}>社員登録</Link><Link href="/settings/vehicles" className={cn("whitespace-nowrap rounded-lg px-5 py-2 text-sm font-bold transition", view === "settingsVehicles" ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50")}>車両登録</Link><Link href="/settings/spots" className={cn("whitespace-nowrap rounded-lg px-5 py-2 text-sm font-bold transition", view === "settingsSpots" ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50")}>駐車区画</Link><Link href="/settings/data" className={cn("whitespace-nowrap rounded-lg px-5 py-2 text-sm font-bold transition", view === "settingsData" ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50")}>データ保存・復元</Link></nav>;
+function SettingsNavigation({ view }: { view: "settingsEmployees" | "settingsDepartments" | "settingsVehicles" | "settingsSpots" | "settingsData" }) {
+  return <nav aria-label="設定メニュー" className="inline-flex max-w-full overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm"><Link href="/settings/employees" className={cn("whitespace-nowrap rounded-lg px-5 py-2 text-sm font-bold transition", view === "settingsEmployees" ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50")}>社員登録</Link><Link href="/settings/departments" className={cn("whitespace-nowrap rounded-lg px-5 py-2 text-sm font-bold transition", view === "settingsDepartments" ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50")}>部署</Link><Link href="/settings/vehicles" className={cn("whitespace-nowrap rounded-lg px-5 py-2 text-sm font-bold transition", view === "settingsVehicles" ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50")}>車両登録</Link><Link href="/settings/spots" className={cn("whitespace-nowrap rounded-lg px-5 py-2 text-sm font-bold transition", view === "settingsSpots" ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50")}>駐車区画</Link><Link href="/settings/data" className={cn("whitespace-nowrap rounded-lg px-5 py-2 text-sm font-bold transition", view === "settingsData" ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50")}>データ保存・復元</Link></nav>;
 }
 
 function AdminToolsPanel() {

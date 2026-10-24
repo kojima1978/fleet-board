@@ -7,7 +7,7 @@ import { Archive, CarFront, ChevronDown, ChevronUp, Clock3, LayoutGrid, LoaderCi
 import type { NfcBridgeStatus } from "@/lib/use-nfc-bridge";
 import { Button, cn } from "./ui";
 
-export type AppView = "parking" | "timeline" | "settingsEmployees" | "settingsVehicles" | "settingsSpots" | "settingsData" | "operations";
+export type AppView = "parking" | "timeline" | "settingsEmployees" | "settingsDepartments" | "settingsVehicles" | "settingsSpots" | "settingsData" | "operations";
 export type HeaderSyncState = "loading" | "healthy" | "stale";
 
 const jpTimeSeconds = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });

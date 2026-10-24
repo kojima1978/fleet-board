@@ -1,7 +1,8 @@
 import type { ParkingSpotRole } from "@/lib/parking-spots";
 
 export type Employee = { id: string; code: string; name: string; department: string; nfcUid: string; active: boolean; version: number };
-export type Department = { id: string; name: string; active: boolean };
+// employeeCountは有効な社員の人数。並び順はAPIが返す配列の順番。
+export type Department = { id: string; name: string; active: boolean; version: number; employeeCount: number };
 export type Vehicle = {
   id: string; code: string; name: string; plateNumber: string; nfcUid: string;
   hasEtc: boolean; hasNavigation: boolean; fuelLevel: number | null;

@@ -7,7 +7,7 @@ const appUrl = process.env.APP_URL || "http://127.0.0.1:3000";
 if (!databaseUrl) throw new Error("DATABASE_URL is required");
 
 const suffix = String(Date.now()).slice(-9);
-const employeeCodes = [`IEA${suffix}`, `IEB${suffix}`, `IEC${suffix}`];
+const employeeCodes = [`IEA${suffix}`, `IEB${suffix}`, `IEC${suffix}`, `IED${suffix}`];
 const vehicleCodes = [`IVA${suffix}`, `IVB${suffix}`];
 const departmentName = `取込テスト${suffix}`;
 const plateNumbers = [`TEST-A-${suffix}`, `TEST-B-${suffix}`];
@@ -64,6 +64,7 @@ try {
     items: [
       { code: employeeCodes[0], name: "NFC後登録社員", department: departmentName },
       { code: employeeCodes[1], name: "NFC同時登録社員", department: departmentName, nfcUid: employeeUids[1] },
+      { code: employeeCodes[3], name: "NFCなし社員", department: departmentName },
     ],
   });
   await postAdmin({
@@ -108,7 +109,24 @@ try {
   assert.match(rejected.message, /使用中/);
   data = await dashboard();
   assert.equal(data.employees.find((item) => item.id === other.id)?.code, employeeCodes[1]);
-  console.log("Optional NFC and vehicle equipment import passed: equipment survives later NFC registration, employee number can be changed");
+
+  // 利用停止でカードの割り当てを外し、再開で以前のカードを戻す。カードのない社員も再開できる。
+  for (const code of [employeeCodes[1], employeeCodes[3]]) {
+    let person = data.employees.find((item) => item.code === code);
+    const previousUid = person.nfcUid;
+    await postAdmin({ action: "setEmployeeActive", id: person.id, version: person.version, active: false });
+    data = await dashboard();
+    person = data.employees.find((item) => item.id === person.id);
+    assert.equal(person.active, false);
+    const openAssignments = await client.query('SELECT 1 FROM "NfcAssignment" WHERE "employeeId"=$1 AND "validTo" IS NULL', [person.id]);
+    assert.equal(openAssignments.rowCount, 0);
+    await postAdmin({ action: "setEmployeeActive", id: person.id, version: person.version, active: true });
+    data = await dashboard();
+    person = data.employees.find((item) => item.id === person.id);
+    assert.equal(person.active, true);
+    assert.equal(person.nfcUid, previousUid);
+  }
+  console.log("Optional NFC and vehicle equipment import passed: equipment survives later NFC registration, employee number can be changed, employees can be stopped and resumed with or without NFC");
 } finally {
   await cleanup().catch((error) => console.error("cleanup failed", error));
   await client.end();
