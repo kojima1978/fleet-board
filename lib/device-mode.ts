@@ -80,3 +80,13 @@ const nfcSound = createDeviceSetting<boolean>(
 export const useNfcSoundEnabled = nfcSound.useValue;
 export const setNfcSoundEnabled = nfcSound.set;
 export const isNfcSoundEnabled = nfcSound.read;
+
+// 長く操作がないとき、配置図の道路に車を走らせるか。
+const idleTraffic = createDeviceSetting<boolean>(
+  "fleetflow.idleTraffic",
+  (value) => value !== "off",
+  (value) => value ? null : "off",
+  true,
+);
+export const useIdleTrafficEnabled = idleTraffic.useValue;
+export const setIdleTrafficEnabled = idleTraffic.set;

@@ -711,7 +711,8 @@ export async function POST(request: Request) {
         const trip = await tx.trip.findUniqueOrThrow({ where: { id: input.tripId }, include: { vehicle: true, employee: true } });
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-employee:${trip.employeeId}`}))::text AS employee_lock, pg_advisory_xact_lock(hashtext(${`fleet-vehicle:${trip.vehicleId}`}))::text AS vehicle_lock`;
         if (trip.vehicleId !== input.vehicleId || trip.status !== "COMPLETED" || !trip.actualEnd) throw new Error("この返却記録は取り消せません");
-        if (now.getTime() - trip.actualEnd.getTime() > 5 * 60_000) throw new Error("返却から5分を過ぎたため、画面からは取り消せません");
+        // 画面の案内は30秒で消える。端末の時計のずれや通信の遅れを見込み、サーバーは2分まで受け付ける。
+        if (now.getTime() - trip.actualEnd.getTime() > 2 * 60_000) throw new Error("返却から2分を過ぎたため、画面からは取り消せません");
         const [vehicle, employeeConflict, subsequentTrip, laterVehicleAction] = await Promise.all([
           tx.vehicle.findUniqueOrThrow({ where: { id: trip.vehicleId } }),
           tx.trip.findFirst({ where: { employeeId: trip.employeeId, status: "IN_USE" } }),

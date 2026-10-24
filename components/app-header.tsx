@@ -5,7 +5,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { Archive, CarFront, Check, ChevronDown, ChevronUp, Clock3, Laptop, LayoutGrid, LoaderCircle, Nfc, RefreshCw, Settings, UserRound, Users, Volume2, VolumeX, X } from "lucide-react";
 import type { NfcBridgeStatus } from "@/lib/use-nfc-bridge";
-import { isKioskDevice, setDeviceMode, setNfcSoundEnabled, setUserTimeoutMinutes, useDeviceMode, useNfcSoundEnabled, USER_TIMEOUT_CHOICES, useUserTimeoutMinutes, type DeviceMode } from "@/lib/device-mode";
+import { isKioskDevice, setDeviceMode, setIdleTrafficEnabled, setNfcSoundEnabled, setUserTimeoutMinutes, useDeviceMode, useIdleTrafficEnabled, useNfcSoundEnabled, USER_TIMEOUT_CHOICES, useUserTimeoutMinutes, type DeviceMode } from "@/lib/device-mode";
 import { playNfcSound } from "@/lib/nfc-sound";
 import { NfcBridgeHelp } from "./nfc-bridge-help";
 import { Button, cn } from "./ui";
@@ -94,6 +94,7 @@ export function HeaderDeviceMode({ nfcStatus }: { nfcStatus: NfcBridgeStatus }) 
   const kiosk = isKioskDevice(mode, nfcStatus);
   const timeoutMinutes = useUserTimeoutMinutes();
   const soundEnabled = useNfcSoundEnabled();
+  const idleTrafficEnabled = useIdleTrafficEnabled();
 
   useEffect(() => {
     if (!open) return;
@@ -140,6 +141,7 @@ export function HeaderDeviceMode({ nfcStatus }: { nfcStatus: NfcBridgeStatus }) 
         <div className="mt-1 space-y-2 border-t border-slate-100 px-2 pb-1 pt-2.5">
           {kiosk ? <div className="flex items-center justify-between gap-2"><span className="text-xs font-bold text-slate-600">自動解除まで</span><div role="radiogroup" aria-label="操作がないとき利用者を自動で解除するまでの時間" className="flex rounded-lg bg-slate-100 p-0.5">{USER_TIMEOUT_CHOICES.map((minutes) => <button key={minutes} type="button" role="radio" aria-checked={minutes === timeoutMinutes} onClick={() => setUserTimeoutMinutes(minutes)} className={cn("min-h-8 rounded-md px-2.5 text-xs font-bold transition", minutes === timeoutMinutes ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700")}>{minutes}分</button>)}</div></div> : null}
           <div className="flex items-center justify-between gap-2"><span className="text-xs font-bold text-slate-600">効果音</span><button type="button" role="switch" aria-checked={soundEnabled} aria-label="NFCを読み取ったときの効果音" onClick={() => { setNfcSoundEnabled(!soundEnabled); if (!soundEnabled) playNfcSound("success"); }} className={cn("flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-bold transition", soundEnabled ? "bg-blue-50 text-blue-700 hover:bg-blue-100" : "bg-slate-100 text-slate-500 hover:text-slate-700")}>{soundEnabled ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />}{soundEnabled ? "オン" : "オフ"}</button></div>
+          <div className="flex items-center justify-between gap-2"><span className="text-xs font-bold text-slate-600">待機中の演出</span><button type="button" role="switch" aria-checked={idleTrafficEnabled} aria-label="1時間操作がないとき配置図の道路に車を走らせる" title="1時間操作がないと、配置図の道路に車が走ります" onClick={() => setIdleTrafficEnabled(!idleTrafficEnabled)} className={cn("flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-bold transition", idleTrafficEnabled ? "bg-blue-50 text-blue-700 hover:bg-blue-100" : "bg-slate-100 text-slate-500 hover:text-slate-700")}><CarFront className="size-3.5" />{idleTrafficEnabled ? "オン" : "オフ"}</button></div>
         </div>
       </>}
     </div> : null}

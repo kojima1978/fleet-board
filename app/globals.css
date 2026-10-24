@@ -34,6 +34,20 @@ button { -webkit-tap-highlight-color: transparent; }
 .spot-beckon { animation: spot-beckon 1.4s ease-in-out infinite; animation-delay: var(--beckon-delay, 0s); }
 @media (prefers-reduced-motion: reduce) { .spot-beckon { animation: none; } }
 
+/* 長く操作がないとき配置図の道路を走る車。上りは前を上に、下りは180度回して走らせる。 */
+.idle-car { position: absolute; width: 2.8cqw; height: 5cqw; animation-timing-function: linear; animation-fill-mode: both; }
+.idle-car-up { animation-name: idle-drive-up; }
+.idle-car-down { animation-name: idle-drive-down; transform: rotate(180deg); }
+.idle-car-long { height: 6.5cqw; }
+/* 車の高さ（5cqw）は配置図の高さの約9%、消防車（6.5cqw）は約12%。cqwとの補間は効かないので、上下の端は%で指定する。 */
+@keyframes idle-drive-up { from { top: 100%; } to { top: -13%; } }
+@keyframes idle-drive-down { from { top: -13%; } to { top: 100%; } }
+/* 緊急車両の赤色灯。左右を半周期ずらし、交互に光らせる。 */
+.siren-light { animation: siren-flash 0.5s steps(1, end) infinite; }
+.siren-light-alt { animation-delay: -0.25s; }
+@keyframes siren-flash { 0% { opacity: 1; } 50% { opacity: 0.2; } }
+@media (prefers-reduced-motion: reduce) { .idle-car { display: none; } }
+
 .start-dialog > div { height: auto !important; min-height: 0 !important; }
 .start-dialog button { white-space: nowrap; }
 .start-dialog > div:first-child > div:last-child { margin-top: 1rem !important; }

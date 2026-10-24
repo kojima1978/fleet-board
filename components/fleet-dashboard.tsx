@@ -15,7 +15,7 @@ import { nfcBridgeStatusText, useNfcBridge, useNfcBridgeHealth } from "@/lib/use
 import { useKioskIdle, useKioskUserTimeout } from "@/lib/use-kiosk-idle";
 import { playNfcSound } from "@/lib/nfc-sound";
 import { clearSavedEmployee, forgetPersistentEmployee, readSavedEmployee, saveEmployee } from "@/lib/employee-session";
-import { isKioskDevice, useDeviceMode, useUserTimeoutMinutes } from "@/lib/device-mode";
+import { isKioskDevice, useDeviceMode, useIdleTrafficEnabled, useUserTimeoutMinutes } from "@/lib/device-mode";
 import { formatMaintenanceTime, MAINTENANCE_KIND_SHORT_LABELS } from "@/lib/maintenance";
 import { activeMaintenanceOf, MaintenanceDialog } from "./maintenance-dialog";
 import { NfcBridgeHelp } from "./nfc-bridge-help";
@@ -24,6 +24,7 @@ import { SpotRoleSettings } from "./spot-role-settings";
 import { DepartmentSettings } from "./department-settings";
 import { DataBackupPanel } from "./data-backup-panel";
 import { Button, Card, cn } from "./ui";
+import { IdleTraffic, reportActivity } from "./idle-traffic";
 import { AppHeader, HeaderDeviceMode, HeaderSystemStatus, HeaderUserControl, Navigation, type HeaderSyncState } from "./app-header";
 
 const MINUTES_PER_DAY = 24 * 60;
@@ -33,7 +34,9 @@ type Dialog = "start" | "end" | "parkingReturn" | "fuel" | "edit" | "nfc" | "use
 type DashboardView = "parking" | "timeline" | "settingsEmployees" | "settingsDepartments" | "settingsVehicles" | "settingsSpots" | "settingsData";
 type SyncState = HeaderSyncState;
 type StartContext = { vehicleId: string; employeeId: string };
-type UndoReturn = { tripId: string; vehicleId: string; vehicleName: string; expiresAt: number };
+type UndoReturn = { tripId: string; vehicleId: string; vehicleName: string; returnedBy: string; expiresAt: number };
+// 返却の取り消し案内を出しておく秒数。共用端末で次の人の画面に残らないよう短めにする（サーバーは2分まで受け付ける）。
+const UNDO_RETURN_SECONDS = 30;
 const jpTime = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false });
 const jpTimeSeconds = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 const jpDate = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", month: "long", day: "numeric", weekday: "long" });
@@ -97,6 +100,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   const [editTrip, setEditTrip] = useState<Trip | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: "success" | "error"; thanks?: string; brief?: boolean } | null>(null);
   const [undoReturn, setUndoReturn] = useState<UndoReturn | null>(null);
+  const [undoSecondsLeft, setUndoSecondsLeft] = useState(UNDO_RETURN_SECONDS);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [syncState, setSyncState] = useState<SyncState>("loading");
@@ -251,12 +255,16 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
     };
   }, [startContext, stayOnTimeline, view]);
 
+  // 取り消せる残り秒数を数え、0になったら案内を消す。
   useEffect(() => {
     if (!undoReturn) return;
-    const remaining = undoReturn.expiresAt - Date.now();
-    if (remaining <= 0) { setUndoReturn(null); return; }
-    const timer = window.setTimeout(() => setUndoReturn(null), remaining);
-    return () => window.clearTimeout(timer);
+    const tick = () => {
+      const left = Math.ceil((undoReturn.expiresAt - Date.now()) / 1000);
+      if (left <= 0) setUndoReturn(null); else setUndoSecondsLeft(left);
+    };
+    tick();
+    const timer = window.setInterval(tick, 250);
+    return () => window.clearInterval(timer);
   }, [undoReturn]);
 
   useEffect(() => {
@@ -354,7 +362,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
     const ok = await mutate({ action: "end", tripId: trip.id, tripVersion: trip.version, vehicleId: trip.vehicleId, vehicleVersion: currentVehicle.version, spotId, fuelLevel, actorName: employee?.name ?? "共用端末" }, "返却を登録しました。車両は利用可能です");
     // 給油して満タンで返してくれた人にだけお礼を目立たせて出す。出発時より増えていれば給油してくれたとみなす。
     if (ok && fuelLevel === FUEL_LEVEL_MAX && currentVehicle.fuelLevel !== null && currentVehicle.fuelLevel < FUEL_LEVEL_MAX) setToast({ message: "返却を登録しました。車両は利用可能です", tone: "success", thanks: "給油ありがとうございます！" });
-    if (ok) setUndoReturn({ tripId: trip.id, vehicleId: trip.vehicleId, vehicleName: trip.vehicle.name, expiresAt: Date.now() + 5 * 60_000 });
+    if (ok) setUndoReturn({ tripId: trip.id, vehicleId: trip.vehicleId, vehicleName: trip.vehicle.name, returnedBy: employee?.id ?? trip.employeeId, expiresAt: Date.now() + UNDO_RETURN_SECONDS * 1000 });
     if (ok) finishKioskCheck();
     return ok;
   };
@@ -365,6 +373,8 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   };
   // 各自のPCでは「この端末の利用者」として残し、共用端末では社員証で確認した人を操作が終わるまでだけ持つ。
   const selectEmployee = (person: Employee) => {
+    // 共用端末で別の人が社員証をかざしたり選んだりしたら、前の人の返却取消は出さない。
+    if (kiosk && undoReturn && undoReturn.returnedBy !== person.id) setUndoReturn(null);
     setEmployee(person);
     saveEmployee(person, !kiosk);
   };
@@ -392,6 +402,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
     selectEmployee(person);
   };
   kioskNfcHandler.current = async (uid: string) => {
+    reportActivity();
     try {
       const result = await resolveNfcUid(uid);
       const person = result?.kind === "employee" ? activeEmployees.find((item) => item.id === result.id) : undefined;
@@ -441,7 +452,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
           {!isOnline ? <Card role="alert" className="flex flex-wrap items-center gap-3 border-amber-300 bg-amber-50 p-3 text-amber-950"><span className="grid size-9 shrink-0 place-items-center rounded-full bg-amber-500 text-white"><AlertTriangle className="size-4" /></span><div className="mr-auto"><p className="text-sm font-black">オフラインです</p><p className="text-xs text-amber-800">表示中の情報は更新されません。接続が戻ると自動的に再同期します。</p></div></Card> : null}
           {syncState === "stale" ? <Card role="alert" className="flex flex-wrap items-center gap-3 border-rose-300 bg-rose-50 p-3 text-rose-950"><span className="grid size-9 shrink-0 place-items-center rounded-full bg-rose-600 text-white"><AlertTriangle className="size-4" /></span><div className="mr-auto min-w-0"><p className="text-sm font-black">自動更新が停止しています</p><p className="text-xs text-rose-800">{lastSuccessfulSync ? `最終更新 ${jpTimeSeconds.format(lastSuccessfulSync)}。前回取得した情報を表示しています。` : "最新情報を取得できていません。"}</p></div><Button variant="danger" disabled={refreshing} onClick={() => void load()}>{refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}{refreshing ? "再接続中…" : "再接続"}</Button></Card> : null}
           <OperationalAlerts data={data} />
-          {undoReturn ? <Card className="flex flex-wrap items-center gap-3 border-amber-300 bg-amber-50 p-3 text-amber-950"><span className="grid size-9 shrink-0 place-items-center rounded-full bg-amber-500 text-white"><AlertTriangle className="size-4" /></span><div className="mr-auto min-w-0"><p className="text-sm font-black">{undoReturn.vehicleName}を返却しました</p><p className="text-xs text-amber-800">間違えた場合は5分以内に取り消せます</p></div><Button variant="secondary" className="border-amber-300 bg-white text-amber-900 hover:bg-amber-100" disabled={pendingAction} onClick={undoLastReturn}>返却を取り消す</Button><button type="button" aria-label="返却取消の案内を閉じる" onClick={() => setUndoReturn(null)} className="grid size-9 place-items-center rounded-lg text-amber-700 hover:bg-amber-100"><X className="size-4" /></button></Card> : null}
+          {undoReturn ? <Card className="flex flex-wrap items-center gap-3 border-amber-300 bg-amber-50 p-3 text-amber-950"><span className="grid size-9 shrink-0 place-items-center rounded-full bg-amber-500 text-white"><AlertTriangle className="size-4" /></span><div className="mr-auto min-w-0"><p className="text-sm font-black">{undoReturn.vehicleName}を返却しました</p><p className="text-xs text-amber-800">間違えた場合は、あと{undoSecondsLeft}秒のうちに取り消せます</p></div><Button variant="secondary" className="border-amber-300 bg-white text-amber-900 hover:bg-amber-100" disabled={pendingAction} onClick={undoLastReturn}>返却を取り消す<span className="tabular-nums text-amber-700">（{undoSecondsLeft}秒）</span></Button><button type="button" aria-label="返却取消の案内を閉じる" onClick={() => setUndoReturn(null)} className="grid size-9 place-items-center rounded-lg text-amber-700 hover:bg-amber-100"><X className="size-4" /></button></Card> : null}
         </> : null}
         {view === "parking" ? <section className="space-y-3 md:-mt-3">
           {setupIncomplete ? <InitialSetupGuide hasEmployees={activeEmployees.length > 0} hasVehicles={activeVehicles.length > 0} /> : null}
@@ -451,7 +462,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
               {!isOnline ? <span role="alert" title="接続が戻ると自動的に再同期します" className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-bold border-amber-300 bg-amber-50 text-amber-950"><AlertTriangle className="size-3.5 shrink-0" />オフライン（表示は更新されません）</span> : null}
               {isOnline && syncState === "stale" ? <span role="alert" className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-bold border-rose-300 bg-rose-50 text-rose-900"><AlertTriangle className="size-3.5 shrink-0" />自動更新停止{lastSuccessfulSync ? `（最終 ${jpTimeSeconds.format(lastSuccessfulSync)}）` : ""}<button type="button" disabled={refreshing} onClick={() => void load()} className="ml-0.5 inline-flex items-center gap-1 rounded-full bg-rose-600 px-2 py-0.5 text-white hover:bg-rose-700 disabled:opacity-60">{refreshing ? <LoaderCircle className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}{refreshing ? "再接続中…" : "再接続"}</button></span> : null}
               <OperationalAlerts data={data} compact />
-              {undoReturn ? <span title="間違えた場合は5分以内に取り消せます" className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-bold border-amber-300 bg-amber-50 text-amber-950">{undoReturn.vehicleName}を返却しました<button type="button" disabled={pendingAction} onClick={undoLastReturn} className="ml-0.5 rounded-full border border-amber-300 bg-white px-2 py-0.5 text-amber-900 hover:bg-amber-100 disabled:opacity-60">取り消す</button><button type="button" aria-label="返却取消の案内を閉じる" onClick={() => setUndoReturn(null)} className="grid size-5 place-items-center rounded-full text-amber-700 hover:bg-amber-100"><X className="size-3.5" /></button></span> : null}
+              {undoReturn ? <span title={`間違えた場合は、あと${undoSecondsLeft}秒のうちに取り消せます`} className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-bold border-amber-300 bg-amber-50 text-amber-950">{undoReturn.vehicleName}を返却しました<button type="button" disabled={pendingAction} onClick={undoLastReturn} className="ml-0.5 rounded-full border border-amber-300 bg-white px-2 py-0.5 text-amber-900 hover:bg-amber-100 disabled:opacity-60">取り消す<span className="tabular-nums text-amber-700">（{undoSecondsLeft}秒）</span></button><button type="button" aria-label="返却取消の案内を閉じる" onClick={() => setUndoReturn(null)} className="grid size-5 place-items-center rounded-full text-amber-700 hover:bg-amber-100"><X className="size-3.5" /></button></span> : null}
             </div>
             <div aria-hidden className="hidden flex-1 basis-0 md:block" />
           </div>
@@ -836,6 +847,7 @@ function VehicleEquipmentBadges({ vehicle, compact = false }: { vehicle: Pick<Ve
 function ParkingMap({ data, trips, changedVehicleIds, mutate, openStart, openReturn, openFuel, openEdit, openEnd, actorName, currentEmployeeId, returnRequest }: { data: DashboardData; trips: Trip[]; changedVehicleIds: string[]; mutate: (body: object, success: string) => Promise<boolean>; openStart: (vehicle?: Vehicle) => void; openReturn: (spot: ParkingSpot) => void; openFuel: (vehicle: Vehicle) => void; openEdit: (trip: Trip) => void; openEnd: (trip: Trip, spotId?: string, changeSpot?: () => void) => void; actorName: string; currentEmployeeId: string | null; returnRequest: { tripId: string; nonce: number } | null }) {
   // 車両移動モードでドラッグ中、またはタップで選んだ移動元の車両。
   const [movingVehicleId, setMovingVehicleId] = useState<string | null>(null);
+  const idleTrafficEnabled = useIdleTrafficEnabled();
   // 位置未設定の車両も置けるよう、区画ではなく車両一覧から探す。
   const movingVehicle = movingVehicleId ? data.vehicles.find((vehicle) => vehicle.id === movingVehicleId && vehicle.active && vehicle.status === "AVAILABLE") ?? null : null;
   const unplacedVehicles = data.vehicles.filter((vehicle) => vehicle.active && vehicle.status === "AVAILABLE" && !vehicle.parkingSpotId);
@@ -911,6 +923,7 @@ function ParkingMap({ data, trips, changedVehicleIds, mutate, openStart, openRet
     <div className="p-3 md:p-4">
       <div className="@container relative mx-auto aspect-[950/525] max-w-[1180px] overflow-hidden rounded-xl border border-slate-200 bg-white" style={{ width: "min(100%, calc((100vh - 270px) * 1.81))" }}>
         <img src="/parking-layout.svg" alt="" className="pointer-events-none absolute inset-0 size-full select-none" draggable={false} />
+        <IdleTraffic enabled={idleTrafficEnabled} colors={data.vehicles.filter((vehicle) => vehicle.active).map((vehicle) => vehicle.color)} />
         {data.spots.map((spot) => <div key={spot.id} onDragOver={(e) => { if (isTarget(spot)) e.preventDefault(); }} onDrop={(e) => { e.preventDefault(); if (returningTrip) returnTo(spot); else moveTo(spot); }} className={cn("absolute grid place-items-center rounded-[4px] border-2 transition", parkingSpotClass(spot, !!spot.vehicle && offSiteVehicleIds.has(spot.vehicle.id)), isTarget(spot) && "border-dashed border-emerald-400 bg-emerald-50", canReturnTo(spot) && "spot-beckon", pickingVehicle && !spot.vehicle && !canUseSpot(pickingVehicle, spot) && "cursor-not-allowed opacity-60", (spot.vehicle?.id === selectedVehicleId || spot.vehicle?.id === movingVehicleId) && "z-20 ring-4 ring-blue-700", spot.vehicle && changedVehicleIds.includes(spot.vehicle.id) && "z-10 ring-4 ring-amber-300 animate-pulse")} style={{ left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.width}%`, height: `${spot.height}%`, ...(canReturnTo(spot) ? { "--beckon-delay": `${(spot.x / 100) * 0.9}s` } as CSSProperties : {}) }}>
           {spot.vehicle && spot.vehicle.fuelLevel !== null && !offSiteVehicleIds.has(spot.vehicle.id) ? <FuelFill level={spot.vehicle.fuelLevel} waving={wavingVehicleIds.includes(spot.vehicle.id)} /> : null}
           <span className="absolute left-1 top-0.5 z-[1] text-[9px] font-black text-slate-500">{spot.code}{spotRoleTag(spot) ? <small className={cn("ml-0.5 text-[7px]", spot.role !== "HOLDING" && "hidden @2xl:inline", spot.role === "TEMPORARY" && "text-slate-400")}>{spotRoleTag(spot)}</small> : null}</span>
