@@ -10,16 +10,21 @@ export const SPOT_ROLE_DESCRIPTIONS: Record<ParkingSpotRole, string> = {
   HOLDING: "実在しない区画。駐車場所を確定できない場合だけ使う",
 };
 
-type SpotRoleInfo = { code: string; role: ParkingSpotRole; dedicatedVehicleId: string | null; dedicatedVehicleName: string | null };
+type SpotRoleInfo = { code: string; role: ParkingSpotRole; dedicatedVehicleId: string | null; dedicatedVehicleName: string | null; label: string | null };
 
-// 地図の区画番号の横に添える短い役割名。通常区画は何も付けない。
-export const spotRoleTag = (spot: SpotRoleInfo) =>
+export const SPOT_LABEL_MAX_LENGTH = 10;
+
+// 表示名を設定していない区画で使う、用途から決まる名前。通常区画は何も付けない。
+export const defaultSpotTag = (spot: Omit<SpotRoleInfo, "label">) =>
   spot.role === "DEDICATED" ? `${spot.dedicatedVehicleName ?? "車両未設定"}専用` : spot.role === "REGULAR" ? "" : SPOT_ROLE_LABELS[spot.role];
 
+// 地図の区画番号の横に添える短い名前。設定画面で変えた表示名を優先する。
+export const spotRoleTag = (spot: SpotRoleInfo) => spot.label ?? defaultSpotTag(spot);
+
 export const formatSpotLabel = (spot: SpotRoleInfo) =>
-  spot.role === "HOLDING"
+  spot.role === "HOLDING" && !spot.label
     ? `仮置き ${spot.code}（実在区画なし）`
-    : spot.role === "REGULAR"
+    : !spotRoleTag(spot)
       ? `区画 ${spot.code}`
       : `区画 ${spot.code}（${spotRoleTag(spot)}）`;
 

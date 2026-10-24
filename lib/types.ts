@@ -1,4 +1,5 @@
 import type { ParkingSpotRole } from "@/lib/parking-spots";
+import type { MaintenanceKind } from "@/lib/maintenance";
 
 export type Employee = { id: string; code: string; name: string; department: string; nfcUid: string; active: boolean; version: number };
 // employeeCountは有効な社員の人数。並び順はAPIが返す配列の順番。
@@ -12,7 +13,7 @@ export type Vehicle = {
 export type ParkingSpot = {
   id: string; code: string; x: number; y: number; width: number; height: number;
   orientation: string; enabled: boolean; version: number; vehicle: Vehicle | null;
-  role: ParkingSpotRole; dedicatedVehicleId: string | null; dedicatedVehicleName: string | null;
+  role: ParkingSpotRole; dedicatedVehicleId: string | null; dedicatedVehicleName: string | null; label: string | null;
 };
 export type Trip = {
   id: string; employeeId: string; vehicleId: string; plannedStart: string; plannedEnd: string;
@@ -20,4 +21,10 @@ export type Trip = {
   purpose: string | null; returnSpotCode: string | null; returnFuelLevel: number | null; version: number;
   employee: Employee; vehicle: Vehicle;
 };
-export type DashboardData = { employees: Employee[]; departments: Department[]; vehicles: Vehicle[]; spots: ParkingSpot[]; trips: Trip[]; nextReservations: Trip[]; system: { backupLatestAt: string | null; backupVerifiedAt: string | null; appVersion: string; environment: string; deployedAt: string | null; schemaVersion: string } };
+// 整備の記録。ACTIVEのOFF_SITEは車検・修理で外出中で、車両のparkingSpotIdは元の区画を確保したまま。plannedEndは戻り予定。
+export type VehicleMaintenance = {
+  id: string; vehicleId: string; kind: MaintenanceKind; status: "SCHEDULED" | "ACTIVE" | "COMPLETED" | "CANCELLED";
+  note: string | null; plannedStart: string; plannedEnd: string | null; actualStart: string | null; actualEnd: string | null;
+  returnSpotCode: string | null; version: number;
+};
+export type DashboardData = { employees: Employee[]; departments: Department[]; vehicles: Vehicle[]; spots: ParkingSpot[]; trips: Trip[]; nextReservations: Trip[]; maintenances: VehicleMaintenance[]; system: { backupLatestAt: string | null; backupVerifiedAt: string | null; appVersion: string; environment: string; deployedAt: string | null; schemaVersion: string } };

@@ -6,13 +6,17 @@ import { CarFront, Check, Download, FileJson, MapPin, Nfc, Pencil, Plus, Power, 
 import type { DashboardData, Employee, ParkingSpot, Vehicle } from "@/lib/types";
 import { canUseSpot, formatSpotLabel } from "@/lib/parking-spots";
 import { normalizeNfcUid, sameNfcUid } from "@/lib/nfc";
+import { isRecordCode, normalizeRecordCode, RECORD_CODE_EXAMPLES, recordCodeMessage, sanitizeRecordCodeInput } from "@/lib/record-codes";
 import { nfcBridgeStatusText, useNfcBridge } from "@/lib/use-nfc-bridge";
+import { activeMaintenanceOf, MaintenanceDialog } from "./maintenance-dialog";
+import { NfcBridgeHelp } from "./nfc-bridge-help";
 import { Button, Card, cn } from "./ui";
 
 type Mutate = (body: object, success: string) => Promise<boolean>;
 type StatusFilter = "all" | "active" | "inactive" | "inUse" | "maintenance";
+type NfcFilter = "all" | "registered" | "unregistered";
+const matchesNfc = (filter: NfcFilter, nfcUid: string) => filter === "all" || (filter === "registered") === !!nfcUid;
 type ConfirmTarget = { id: string; name: string; active: boolean; version: number };
-type MaintenanceTarget = { id: string; name: string; maintenance: boolean; version: number };
 type ImportRow = Record<string, unknown>;
 
 const emptyEmployee = { code: "", name: "", department: "", nfcUid: "" };
@@ -21,29 +25,35 @@ const field = "min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 
 const NFC_SCAN_TIMEOUT_MS = 15_000;
 const PAGE_SIZE = 30;
 const nfcUidLabel = (uid: string) => uid || "NFC未登録";
-// 社員一覧の見出しと各行で同じ列幅を使う。
-const employeeGrid = "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 md:grid-cols-[84px_minmax(0,13rem)_minmax(0,10rem)_minmax(0,1fr)_auto] md:gap-4";
-// 車両は列が多いため、広い画面でだけ表形式にする。狭い画面では駐車位置を2行目に回す。
-const vehicleGrid = "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-4 xl:grid-cols-[112px_minmax(0,11rem)_minmax(0,10rem)_minmax(0,9rem)_minmax(0,1fr)_72px_auto] xl:gap-4";
+// 社員一覧の見出しと各行で同じ列幅を使う。車両一覧と同じく、広い画面では列を左に詰めて編集ボタンをNFC UIDの隣に置く。
+const employeeGrid = "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 md:grid-cols-[84px_minmax(0,13rem)_minmax(0,10rem)_minmax(0,16rem)_auto] md:justify-start md:gap-4";
+// 車両は列が多いため、広い画面でだけ表形式にする。狭い画面では状態と駐車位置を車両名の下に出す。
+// 広い画面では列を左に詰め、操作ボタンを状態の隣に置いて視線の移動を減らす。
+const vehicleGrid = "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-4 xl:grid-cols-[112px_minmax(0,11rem)_minmax(0,10rem)_minmax(0,9rem)_minmax(0,16rem)_auto] xl:justify-start xl:gap-4";
 
 export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "vehicle"; data: DashboardData; mutate: Mutate }) {
   const [query, setQuery] = useState("");
   // 利用停止した社員・車両は年々増えるため、初期表示では有効なものだけを出す。
   const [status, setStatus] = useState<StatusFilter>("active");
   const [department, setDepartment] = useState("all");
+  // NFCは任意のため、カード・タグを配る前に未登録だけを一覧できるようにする。
+  const [nfc, setNfc] = useState<NfcFilter>("all");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
   const [employeeForm, setEmployeeForm] = useState(emptyEmployee);
   const [vehicleForm, setVehicleForm] = useState(emptyVehicle);
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);
-  const [maintenanceTarget, setMaintenanceTarget] = useState<MaintenanceTarget | null>(null);
+  const [maintenanceVehicleId, setMaintenanceVehicleId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [highlightId, setHighlightId] = useState("");
   const [discardConfirm, setDiscardConfirm] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [nfcCheckOpen, setNfcCheckOpen] = useState(false);
   const [importRows, setImportRows] = useState<ImportRow[]>([]);
+  // JSON取込の行番号ごとに選んだ駐車区画。未選択の行は位置未設定で登録する。
+  const [importSpots, setImportSpots] = useState<Record<number, string>>({});
   const [importError, setImportError] = useState("");
   const [importFileName, setImportFileName] = useState("");
   const [urlHydrated, setUrlHydrated] = useState(false);
@@ -58,6 +68,8 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
     const savedStatus = params.get("status") as StatusFilter | null;
     setStatus(savedStatus && ["all", "active", "inactive", "inUse", "maintenance"].includes(savedStatus) ? savedStatus : "active");
     setDepartment(params.get("department") ?? "all");
+    const savedNfc = params.get("nfc") as NfcFilter | null;
+    setNfc(savedNfc === "registered" || savedNfc === "unregistered" ? savedNfc : "all");
     setUrlHydrated(true);
   }, [kind]);
 
@@ -66,10 +78,11 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
     const params = new URLSearchParams(window.location.search);
     query ? params.set("q", query) : params.delete("q");
     status !== "active" ? params.set("status", status) : params.delete("status");
+    nfc !== "all" ? params.set("nfc", nfc) : params.delete("nfc");
     kind === "employee" && department !== "all" ? params.set("department", department) : params.delete("department");
     const suffix = params.toString();
     window.history.replaceState({}, "", `${window.location.pathname}${suffix ? `?${suffix}` : ""}`);
-  }, [department, kind, query, status, urlHydrated]);
+  }, [department, kind, nfc, query, status, urlHydrated]);
 
   useEffect(() => {
     if (!highlightId) return;
@@ -92,19 +105,21 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
   const employees = useMemo(() => data.employees.filter((person) => {
     const matchesQuery = !normalizedQuery || [person.code, person.name, person.department, person.nfcUid].some((value) => value.toLowerCase().includes(normalizedQuery));
     const matchesStatus = status === "all" || (status === "active" && person.active) || (status === "inactive" && !person.active);
-    return matchesQuery && matchesStatus && (department === "all" || person.department === department);
-  }), [data.employees, department, normalizedQuery, status]);
+    return matchesQuery && matchesStatus && matchesNfc(nfc, person.nfcUid) && (department === "all" || person.department === department);
+  }), [data.employees, department, nfc, normalizedQuery, status]);
   const vehicles = useMemo(() => data.vehicles.filter((vehicle) => {
     const matchesQuery = !normalizedQuery || [vehicle.code, vehicle.name, vehicle.plateNumber, vehicle.nfcUid].some((value) => value.toLowerCase().includes(normalizedQuery));
     const matchesStatus = status === "all" || (status === "active" && vehicle.active) || (status === "inactive" && !vehicle.active) || (status === "inUse" && vehicle.active && vehicle.status === "IN_USE") || (status === "maintenance" && vehicle.active && vehicle.status === "MAINTENANCE");
-    return matchesQuery && matchesStatus;
-  }), [data.vehicles, normalizedQuery, status]);
-  useEffect(() => { setPage(1); }, [department, kind, normalizedQuery, status]);
+    return matchesQuery && matchesStatus && matchesNfc(nfc, vehicle.nfcUid);
+  }), [data.vehicles, nfc, normalizedQuery, status]);
+  useEffect(() => { setPage(1); }, [department, kind, nfc, normalizedQuery, status]);
 
   const currentNfc = kind === "employee" ? employeeForm.nfcUid : vehicleForm.nfcUid;
   const editingId = editingEmployee?.id ?? editingVehicle?.id;
   const duplicateNfc = currentNfc ? [...data.employees.filter((person) => person.active), ...data.vehicles].find((item) => item.id !== editingId && sameNfcUid(item.nfcUid, currentNfc)) : undefined;
 
+  const employeeCodeInvalid = !isRecordCode(normalizeRecordCode(employeeForm.code));
+  const vehicleCodeInvalid = !isRecordCode(normalizeRecordCode(vehicleForm.code));
   const employeeDirty = JSON.stringify(employeeForm) !== JSON.stringify(editingEmployee ? { code: editingEmployee.code, name: editingEmployee.name, department: editingEmployee.department, nfcUid: editingEmployee.nfcUid } : emptyEmployee);
   const vehicleDirty = JSON.stringify(vehicleForm) !== JSON.stringify(editingVehicle ? { code: editingVehicle.code, name: editingVehicle.name, plateNumber: editingVehicle.plateNumber, nfcUid: editingVehicle.nfcUid, spotId: editingVehicle.parkingSpotId ?? "", color: editingVehicle.color, hasEtc: editingVehicle.hasEtc, hasNavigation: editingVehicle.hasNavigation } : emptyVehicle);
   const hasUnsavedChanges = drawerOpen && (kind === "employee" ? employeeDirty : vehicleDirty);
@@ -132,14 +147,14 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
   }, [drawerOpen]);
 
   useEffect(() => {
-    if (!drawerOpen && !confirmTarget && !maintenanceTarget) return;
+    if (!drawerOpen && !confirmTarget && !maintenanceVehicleId) return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      const activeLayer = document.querySelector<HTMLElement>("[role='alertdialog']") ?? drawerRef.current;
+      const activeLayer = document.querySelector<HTMLElement>("[role='alertdialog'], [data-focus-layer]") ?? drawerRef.current;
       if (event.key === "Escape") {
         event.preventDefault();
         if (submitting) return;
         if (discardConfirm) { setDiscardConfirm(false); return; }
-        if (maintenanceTarget) { setMaintenanceTarget(null); return; }
+        if (maintenanceVehicleId) { setMaintenanceVehicleId(null); return; }
         if (confirmTarget) { setConfirmTarget(null); return; }
         closeDrawer();
         return;
@@ -153,7 +168,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [closeDrawer, confirmTarget, discardConfirm, drawerOpen, maintenanceTarget, submitting]);
+  }, [closeDrawer, confirmTarget, discardConfirm, drawerOpen, maintenanceVehicleId, submitting]);
   const openCreate = () => { closeDrawer(true); setDrawerOpen(true); };
   const openEmployee = (person: Employee) => {
     setEditingEmployee(person); setEmployeeForm({ code: person.code, name: person.name, department: person.department, nfcUid: person.nfcUid }); setDrawerOpen(true);
@@ -162,9 +177,9 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
     setEditingVehicle(vehicle); setVehicleForm({ code: vehicle.code, name: vehicle.name, plateNumber: vehicle.plateNumber, nfcUid: vehicle.nfcUid, spotId: vehicle.parkingSpotId ?? "", color: vehicle.color, hasEtc: vehicle.hasEtc, hasNavigation: vehicle.hasNavigation }); setDrawerOpen(true);
   };
   const beginNfcScan = () => { setScanning(true); window.setTimeout(() => nfcInput.current?.focus(), 0); };
-  const closeImport = () => { if (submitting) return; setImportOpen(false); setImportRows([]); setImportError(""); setImportFileName(""); };
+  const closeImport = () => { if (submitting) return; setImportOpen(false); setImportRows([]); setImportSpots({}); setImportError(""); setImportFileName(""); };
   const readImportFile = async (file?: File) => {
-    setImportRows([]); setImportError(""); setImportFileName(file?.name ?? "");
+    setImportRows([]); setImportSpots({}); setImportError(""); setImportFileName(file?.name ?? "");
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) { setImportError("ファイルサイズは2MB以下にしてください"); return; }
     try {
@@ -175,13 +190,14 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
       const required = kind === "employee" ? ["code", "name", "department"] : ["code", "name", "plateNumber"];
       rows.forEach((row, index) => {
         if (!row || typeof row !== "object" || required.some((key) => typeof (row as Record<string, unknown>)[key] !== "string" || !(row as Record<string, string>)[key].trim())) throw new Error(`${index + 1}件目の必須項目を確認してください`);
+        if (!isRecordCode(normalizeRecordCode((row as Record<string, string>).code))) throw new Error(`${index + 1}件目の${recordCodeMessage(kind)}`);
         const nfcUid = (row as ImportRow).nfcUid;
         if (nfcUid != null && typeof nfcUid !== "string") throw new Error(`${index + 1}件目のNFC UIDは文字列または空欄にしてください`);
         if (kind === "vehicle" && "color" in row && (typeof (row as ImportRow).color !== "string" || !/^#[0-9a-fA-F]{6}$/.test((row as ImportRow).color as string))) throw new Error(`${index + 1}件目の表示色は #2563EB の形式で入力してください`);
         if (kind === "vehicle" && "hasEtc" in row && typeof (row as ImportRow).hasEtc !== "boolean") throw new Error(`${index + 1}件目のhasEtcはtrueまたはfalseで指定してください`);
         if (kind === "vehicle" && "hasNavigation" in row && typeof (row as ImportRow).hasNavigation !== "boolean") throw new Error(`${index + 1}件目のhasNavigationはtrueまたはfalseで指定してください`);
       });
-      setImportRows(rows as ImportRow[]);
+      setImportRows((rows as ImportRow[]).map((row) => ({ ...row, code: normalizeRecordCode(String(row.code)) })));
     } catch (error) {
       setImportError(error instanceof Error ? error.message : "JSONファイルを読み取れませんでした");
     }
@@ -189,31 +205,46 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
   const downloadTemplate = () => {
     const example = kind === "employee"
       ? [{ code: "E007", name: "山田 太郎", department: "営業部", nfcUid: "04AABBCCDDEEFF" }, { code: "E008", name: "鈴木 花子", department: "総務部" }]
-      : [{ code: "C18", name: "営業車18", plateNumber: "品川 500 あ 12-34", nfcUid: "04AABBCCDDEE11", color: "#2563EB", hasEtc: true, hasNavigation: true }, { code: "C19", name: "営業車19", plateNumber: "品川 500 い 56-78", color: "#0891B2", hasEtc: false, hasNavigation: true }];
+      : [{ code: "C018", name: "営業車18", plateNumber: "品川 500 あ 12-34", nfcUid: "04AABBCCDDEE11", color: "#2563EB", hasEtc: true, hasNavigation: true }, { code: "C019", name: "営業車19", plateNumber: "品川 500 い 56-78", color: "#0891B2", hasEtc: false, hasNavigation: true }];
     const blob = new Blob([JSON.stringify(example, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a"); anchor.href = url; anchor.download = kind === "employee" ? "employees-template.json" : "vehicles-template.json"; anchor.click(); URL.revokeObjectURL(url);
+  };
+  // 新しい車両を置ける区画は、有効で空いていて専用区画でないもの。
+  const freeImportSpots = data.spots.filter((spot) => spot.enabled && !spot.vehicle && canUseSpot({ id: "" }, spot));
+  // 利用再開した車両は、空いている仮置き区画へ自動で置く。
+  const freeHoldingCount = freeImportSpots.filter((spot) => spot.role === "HOLDING").length;
+  const importPlacedCount = Object.values(importSpots).filter(Boolean).length;
+  const importUnplacedCount = importRows.length - importPlacedCount;
+  const assignImportSpots = () => {
+    const used = new Set(Object.values(importSpots));
+    const free = freeImportSpots.filter((spot) => !used.has(spot.id));
+    const next = { ...importSpots };
+    importRows.forEach((_, index) => { if (!next[index] && free.length) next[index] = free.shift()!.id; });
+    setImportSpots(next);
   };
   const submitImport = async () => {
     if (submitting || importRows.length === 0) return;
     setSubmitting(true);
     try {
-      const items = importRows.map((row) => {
+      const items = importRows.map((row, index) => {
         const nfcUid = typeof row.nfcUid === "string" && row.nfcUid.trim() ? normalizeNfcUid(row.nfcUid) : undefined;
         return kind === "employee"
           ? { code: String(row.code).trim(), name: String(row.name).trim(), department: String(row.department).trim(), nfcUid }
-          : { code: String(row.code).trim(), name: String(row.name).trim(), plateNumber: String(row.plateNumber).trim(), nfcUid, color: typeof row.color === "string" ? row.color : "#2563eb", hasEtc: row.hasEtc === true, hasNavigation: row.hasNavigation === true };
+          : { code: String(row.code).trim(), name: String(row.name).trim(), plateNumber: String(row.plateNumber).trim(), nfcUid, color: typeof row.color === "string" ? row.color : "#2563eb", hasEtc: row.hasEtc === true, hasNavigation: row.hasNavigation === true, ...(importSpots[index] ? { spotId: importSpots[index] } : {}) };
       });
-      const ok = await mutate({ action: kind === "employee" ? "importEmployees" : "importVehicles", items }, `${items.length}${kind === "employee" ? "人" : "台"}をJSONから登録しました`);
-      if (ok) { setImportOpen(false); setImportRows([]); setImportError(""); setImportFileName(""); }
+      // 区画を選ばなかった車両は位置未設定になるため、配置図で置く必要があることを伝える。
+      const message = kind === "employee" ? `${items.length}人をJSONから登録しました` : `${items.length}台をJSONから登録しました${importUnplacedCount ? `。位置未設定 ${importUnplacedCount}台は配置図の「位置未設定」から置いてください` : ""}`;
+      const ok = await mutate({ action: kind === "employee" ? "importEmployees" : "importVehicles", items }, message);
+      if (ok) { setImportOpen(false); setImportRows([]); setImportSpots({}); setImportError(""); setImportFileName(""); }
     } finally {
       setSubmitting(false);
     }
   };
   const submitEmployee = async (event: React.FormEvent) => {
-    event.preventDefault(); if (duplicateNfc) return; setSubmitting(true);
+    event.preventDefault(); if (duplicateNfc || employeeCodeInvalid) return; setSubmitting(true);
     try {
-      const body = editingEmployee ? { action: "updateEmployee", id: editingEmployee.id, version: editingEmployee.version, code: employeeForm.code, name: employeeForm.name, department: employeeForm.department, nfcUid: employeeForm.nfcUid } : { action: "createEmployee", ...employeeForm };
+      const body = editingEmployee ? { action: "updateEmployee", id: editingEmployee.id, version: editingEmployee.version, code: normalizeRecordCode(employeeForm.code), name: employeeForm.name, department: employeeForm.department, nfcUid: employeeForm.nfcUid } : { action: "createEmployee", ...employeeForm, code: normalizeRecordCode(employeeForm.code) };
       const ok = await mutate(body, editingEmployee ? "社員情報を修正しました" : "社員を登録しました");
       if (ok) { if (editingEmployee) setHighlightId(editingEmployee.id); closeDrawer(true); }
     } finally {
@@ -221,9 +252,9 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
     }
   };
   const submitVehicle = async (event: React.FormEvent) => {
-    event.preventDefault(); if (duplicateNfc) return; setSubmitting(true);
+    event.preventDefault(); if (duplicateNfc || vehicleCodeInvalid) return; setSubmitting(true);
     try {
-      const body = editingVehicle ? { action: "updateVehicle", id: editingVehicle.id, version: editingVehicle.version, name: vehicleForm.name, plateNumber: vehicleForm.plateNumber, nfcUid: vehicleForm.nfcUid, color: vehicleForm.color, hasEtc: vehicleForm.hasEtc, hasNavigation: vehicleForm.hasNavigation } : { action: "createVehicle", ...vehicleForm, spotId: vehicleForm.spotId === "later" ? undefined : vehicleForm.spotId };
+      const body = editingVehicle ? { action: "updateVehicle", id: editingVehicle.id, version: editingVehicle.version, code: normalizeRecordCode(vehicleForm.code), name: vehicleForm.name, plateNumber: vehicleForm.plateNumber, nfcUid: vehicleForm.nfcUid, color: vehicleForm.color, hasEtc: vehicleForm.hasEtc, hasNavigation: vehicleForm.hasNavigation } : { action: "createVehicle", ...vehicleForm, code: normalizeRecordCode(vehicleForm.code) };
       const ok = await mutate(body, editingVehicle ? "車両情報を修正しました" : "車両を登録しました");
       if (ok) { if (editingVehicle) setHighlightId(editingVehicle.id); closeDrawer(true); }
     } finally {
@@ -235,23 +266,14 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
     setSubmitting(true);
     try {
       const action = kind === "employee" ? "setEmployeeActive" : "setVehicleActive";
-      const ok = await mutate({ action, id: confirmTarget.id, version: confirmTarget.version, active: !confirmTarget.active }, `${confirmTarget.name}の利用を${confirmTarget.active ? "停止" : "再開"}しました`);
+      const ok = await mutate({ action, id: confirmTarget.id, version: confirmTarget.version, active: !confirmTarget.active }, confirmTarget.active ? `${confirmTarget.name}の利用を停止しました` : `${confirmTarget.name}の利用を再開しました${freeHoldingCount ? "。仮置き区画に置きました" : "。仮置きが空いていないため位置未設定です"}`);
       if (ok) { setHighlightId(confirmTarget.id); setConfirmTarget(null); closeDrawer(true); }
     } finally {
       setSubmitting(false);
     }
   };
-  const applyMaintenanceChange = async () => {
-    if (!maintenanceTarget || submitting) return;
-    setSubmitting(true);
-    try {
-      const next = !maintenanceTarget.maintenance;
-      const ok = await mutate({ action: "setVehicleMaintenance", id: maintenanceTarget.id, version: maintenanceTarget.version, maintenance: next }, next ? `${maintenanceTarget.name}を整備中に変更しました` : `${maintenanceTarget.name}を利用可能に戻しました`);
-      if (ok) { setHighlightId(maintenanceTarget.id); setMaintenanceTarget(null); }
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  // 一覧が再取得されても最新の版数で操作できるよう、対象はIDで持つ。
+  const maintenanceVehicle = maintenanceVehicleId ? data.vehicles.find((vehicle) => vehicle.id === maintenanceVehicleId) ?? null : null;
 
   const total = kind === "employee" ? data.employees.length : data.vehicles.length;
   const active = kind === "employee" ? data.employees.filter((person) => person.active).length : data.vehicles.filter((vehicle) => vehicle.active).length;
@@ -271,33 +293,36 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
         <div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" /><input aria-label={`${kind === "employee" ? "社員" : "車両"}を検索`} className={cn(field, "pl-9")} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={kind === "employee" ? "社員番号・氏名・部署・NFC UIDで検索" : "車両番号・車両名・ナンバー・NFC UIDで検索"} /></div>
         <div className="flex flex-wrap gap-2">
           <select aria-label="状態で絞り込み" className={cn(field, "w-auto min-w-28")} value={status} onChange={(event) => setStatus(event.target.value as StatusFilter)}><option value="active">有効</option><option value="inactive">利用停止中</option><option value="all">すべて</option>{kind === "vehicle" ? <><option value="inUse">利用中</option><option value="maintenance">整備中</option></> : null}</select>
+          <select aria-label="NFCで絞り込み" className={cn(field, "w-auto min-w-28")} value={nfc} onChange={(event) => setNfc(event.target.value as NfcFilter)}><option value="all">NFCすべて</option><option value="unregistered">NFC未登録</option><option value="registered">NFC登録済み</option></select>
           {kind === "employee" ? <select aria-label="部署で絞り込み" className={cn(field, "w-auto min-w-32")} value={department} onChange={(event) => setDepartment(event.target.value)}><option value="all">すべての部署</option>{departments.map((name) => <option key={name} value={name}>{name}</option>)}</select> : null}
+          <Button variant="secondary" onClick={() => setNfcCheckOpen(true)}><Nfc className="size-4" />NFCを確認</Button>
           <Button variant="secondary" onClick={() => setImportOpen(true)}><FileJson className="size-4" />JSON取込</Button>
           <Button onClick={openCreate}><Plus className="size-4" />{kind === "employee" ? "社員を追加" : "車両を追加"}</Button>
         </div>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 px-4 py-3 text-xs text-slate-500"><span><b className="text-slate-900">{shown}</b>件を表示</span><span className="flex flex-wrap items-center gap-2"><span>有効 {active} / 全{total}{kind === "employee" ? "人" : "台"}</span>{status === "active" && total > active ? <button type="button" onClick={() => setStatus("inactive")} className="rounded-md px-1.5 py-0.5 font-bold text-blue-700 underline decoration-blue-200 underline-offset-4 hover:bg-blue-50">利用停止中の{total - active}{kind === "employee" ? "人" : "台"}を表示</button> : null}</span></div>
-      {shown === 0 ? <div className="p-10 text-center"><p className="text-sm text-slate-400">条件に一致する{kind === "employee" ? "社員" : "車両"}がありません</p><button type="button" onClick={() => { setQuery(""); setStatus("active"); setDepartment("all"); }} className="mt-3 rounded-lg px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50">検索条件をクリア</button></div> : <div className="divide-y divide-slate-100">
-        {kind === "employee" ? <div className={cn(employeeGrid, "hidden py-2 text-[11px] font-bold text-slate-400 md:grid")} aria-hidden="true"><span>社員番号</span><span>氏名</span><span>部署</span><span>NFC UID</span><span className="text-right">操作</span></div> : null}
+      {shown === 0 ? <div className="p-10 text-center"><p className="text-sm text-slate-400">条件に一致する{kind === "employee" ? "社員" : "車両"}がありません</p><button type="button" onClick={() => { setQuery(""); setStatus("active"); setDepartment("all"); setNfc("all"); }} className="mt-3 rounded-lg px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50">検索条件をクリア</button></div> : <div className="divide-y divide-slate-100">
+        {kind === "employee" ? <div className={cn(employeeGrid, "hidden py-2 text-[11px] font-bold text-slate-400 md:grid")} aria-hidden="true"><span>社員番号</span><span>氏名</span><span>部署</span><span>NFC UID</span><span>操作</span></div> : null}
         {kind === "employee" ? visibleEmployees.map((person) => <div key={person.id} className={cn(employeeGrid, "py-2.5 transition [content-visibility:auto] hover:bg-slate-50/70", !person.active && "bg-slate-50 text-slate-500", highlightId === person.id && "bg-amber-50 ring-2 ring-inset ring-amber-300")}>
           <span className="w-fit rounded-md bg-slate-100 px-2 py-0.5 font-mono text-xs font-bold text-slate-700">{person.code}</span>
           <div className="min-w-0"><div className="flex min-w-0 items-center gap-1.5"><p className="truncate text-sm font-black">{person.name}</p>{!person.active ? <span className="shrink-0 rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600">利用停止中</span> : null}</div><p className="truncate text-xs text-slate-400 md:hidden">{person.department} ・ <span className={person.nfcUid ? undefined : "font-bold text-amber-600"}>{nfcUidLabel(person.nfcUid)}</span></p></div>
           <p className="hidden truncate text-xs font-bold text-slate-600 md:block">{person.department}</p>
           <p className="hidden min-w-0 md:block">{!person.active ? <span className="block truncate text-[11px] text-slate-400">{person.nfcUid ? <><span className="font-mono line-through">{person.nfcUid}</span>（割当解除済み）</> : "NFCなし"}</span> : person.nfcUid ? <span className="block truncate font-mono text-[11px] text-slate-500">{person.nfcUid}</span> : <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">NFC未登録</span>}</p>
           <RowActions active={person.active} name={person.name} onEdit={() => openEmployee(person)} onResume={() => setConfirmTarget({ id: person.id, name: person.name, active: person.active, version: person.version })} />
-        </div>) : <div className={cn(vehicleGrid, "hidden py-2 text-[11px] font-bold text-slate-400 xl:grid")} aria-hidden="true"><span>車両番号</span><span>車両名</span><span>ナンバー</span><span>NFC UID</span><span>駐車位置</span><span>状態</span><span className="text-right">操作</span></div>}
+        </div>) : <div className={cn(vehicleGrid, "hidden py-2 text-[11px] font-bold text-slate-400 xl:grid")} aria-hidden="true"><span>車両番号</span><span>車両名</span><span>ナンバー</span><span>NFC UID</span><span>状態・駐車位置</span><span>操作</span></div>}
         {kind === "vehicle" ? visibleVehicles.map((vehicle) => <div key={vehicle.id} className={cn(vehicleGrid, "py-2.5 transition [content-visibility:auto] hover:bg-slate-50/70", !vehicle.active && "bg-slate-50 text-slate-500", vehicle.status === "MAINTENANCE" && "bg-amber-50/60", highlightId === vehicle.id && "bg-amber-50 ring-2 ring-inset ring-amber-300")}>
           <span className="flex items-center gap-2"><span className="hidden size-8 shrink-0 place-items-center rounded-lg bg-slate-100 sm:grid"><CarFront className="size-4" style={{ color: vehicle.color }} /></span><span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-xs font-bold text-slate-700">{vehicle.code}</span></span>
-          <div className="min-w-0"><div className="flex min-w-0 items-center gap-1.5"><p className="truncate text-sm font-black">{vehicle.name}</p><EquipmentBadges vehicle={vehicle} className="hidden xl:flex" /></div><div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1 xl:hidden"><VehicleStatusBadge vehicle={vehicle} /><EquipmentBadges vehicle={vehicle} /></div><p className="mt-0.5 truncate text-xs text-slate-400 xl:hidden">{vehicle.plateNumber} ・ <span className={vehicle.nfcUid ? undefined : "font-bold text-amber-600"}>{nfcUidLabel(vehicle.nfcUid)}</span></p></div>
+          <div className="min-w-0"><div className="flex min-w-0 items-center gap-1.5"><p className="truncate text-sm font-black">{vehicle.name}</p><EquipmentBadges vehicle={vehicle} className="hidden xl:flex" /></div><div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1 xl:hidden"><VehicleStatusBadge vehicle={vehicle} offSite={activeMaintenanceOf(data, vehicle.id)?.kind === "OFF_SITE"} /><VehicleLocation vehicle={vehicle} spots={data.spots} offSite={activeMaintenanceOf(data, vehicle.id)?.kind === "OFF_SITE"} /><EquipmentBadges vehicle={vehicle} /></div><p className="mt-0.5 truncate text-xs text-slate-400 xl:hidden">{vehicle.plateNumber} ・ <span className={vehicle.nfcUid ? undefined : "font-bold text-amber-600"}>{nfcUidLabel(vehicle.nfcUid)}</span></p></div>
           <p className="hidden truncate text-xs font-bold text-slate-600 xl:block">{vehicle.plateNumber}</p>
           <p className="hidden min-w-0 xl:block">{!vehicle.active ? <span className="block truncate text-[11px] text-slate-400">{vehicle.nfcUid ? <><span className="font-mono line-through">{vehicle.nfcUid}</span>（割当解除済み）</> : "NFCなし"}</span> : vehicle.nfcUid ? <span className="block truncate font-mono text-[11px] text-slate-500">{vehicle.nfcUid}</span> : <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">NFC未登録</span>}</p>
-          <div className="order-last col-span-3 min-w-0 xl:order-none xl:col-span-1"><VehicleParkingControl vehicle={vehicle} spots={data.spots} mutate={mutate} /></div>
-          <span className="hidden xl:block"><VehicleStatusBadge vehicle={vehicle} /></span>
-          <RowActions active={vehicle.active} name={vehicle.name} maintenance={vehicle.status === "MAINTENANCE"} maintenanceDisabled={!vehicle.active || (vehicle.status !== "AVAILABLE" && vehicle.status !== "MAINTENANCE")} onEdit={() => openVehicle(vehicle)} onResume={() => setConfirmTarget({ id: vehicle.id, name: vehicle.name, active: vehicle.active, version: vehicle.version })} onMaintenance={() => setMaintenanceTarget({ id: vehicle.id, name: vehicle.name, maintenance: vehicle.status === "MAINTENANCE", version: vehicle.version })} />
+          <span className="hidden min-w-0 flex-wrap items-center gap-1.5 xl:flex"><VehicleStatusBadge vehicle={vehicle} offSite={activeMaintenanceOf(data, vehicle.id)?.kind === "OFF_SITE"} /><VehicleLocation vehicle={vehicle} spots={data.spots} offSite={activeMaintenanceOf(data, vehicle.id)?.kind === "OFF_SITE"} /></span>
+          <RowActions active={vehicle.active} name={vehicle.name} maintenance={vehicle.status === "MAINTENANCE"} maintenanceScheduled={data.maintenances.some((item) => item.vehicleId === vehicle.id && item.status === "SCHEDULED")} maintenanceDisabled={!vehicle.active} onEdit={() => openVehicle(vehicle)} onResume={() => setConfirmTarget({ id: vehicle.id, name: vehicle.name, active: vehicle.active, version: vehicle.version })} onMaintenance={() => setMaintenanceVehicleId(vehicle.id)} />
         </div>) : null}
       </div>}
       {shown > PAGE_SIZE ? <div className="flex items-center justify-center gap-3 border-t border-slate-100 bg-slate-50 px-4 py-3"><button type="button" disabled={currentPage === 1} onClick={() => setPage((value) => Math.max(1, value - 1))} className="min-h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 disabled:opacity-35">前へ</button><span className="text-xs font-bold text-slate-600">{currentPage} / {pageCount}ページ</span><button type="button" disabled={currentPage === pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))} className="min-h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 disabled:opacity-35">次へ</button></div> : null}
     </Card>
+
+    {nfcCheckOpen ? <NfcCheckDialog data={data} kind={kind} onOpen={(owner) => { setNfcCheckOpen(false); if (owner.kind === "employee") openEmployee(owner.item); else openVehicle(owner.item); }} onClose={() => setNfcCheckOpen(false)} /> : null}
 
     {importOpen ? <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) closeImport(); }}>
       <div role="dialog" aria-modal="true" aria-busy={submitting} aria-label={`${kind === "employee" ? "社員" : "車両"}JSON取込`} className="w-full max-w-2xl rounded-3xl bg-white shadow-2xl">
@@ -311,11 +336,19 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
           {importError ? <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-bold text-rose-700">{importError}</p> : null}
           {importRows.length > 0 ? <div className="space-y-3">
             <div className="flex items-center justify-between rounded-xl bg-emerald-50 p-3 text-sm font-bold text-emerald-800"><span>{importRows.length}{kind === "employee" ? "人" : "台"}を登録できます</span><Check className="size-5" /></div>
-            <div className="max-h-64 overflow-auto rounded-xl border border-slate-200"><table className="w-full text-left text-xs"><thead className="sticky top-0 bg-slate-100 text-slate-600"><tr><th className="p-2">番号</th><th className="p-2">名称</th><th className="p-2">{kind === "employee" ? "部署" : "ナンバー"}</th><th className="p-2">NFC UID</th></tr></thead><tbody className="divide-y divide-slate-100">{importRows.slice(0, 20).map((row, index) => {
+            {kind === "vehicle" ? <div className="flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 p-3">
+              <p className="mr-auto text-xs font-bold text-slate-600">駐車区画 {importPlacedCount}台に割当・空き{freeImportSpots.length}区画</p>
+              <Button type="button" variant="ghost" disabled={submitting || importUnplacedCount === 0 || freeImportSpots.length <= importPlacedCount} onClick={assignImportSpots}><MapPin className="size-4" />空き区画を順に割り当て</Button>
+              {importPlacedCount ? <Button type="button" variant="ghost" disabled={submitting} onClick={() => setImportSpots({})}>割り当てを外す</Button> : null}
+            </div> : null}
+            {kind === "vehicle" && importUnplacedCount ? <p className="rounded-xl bg-amber-50 p-3 text-xs font-bold text-amber-800">区画を選んでいない{importUnplacedCount}台は位置未設定になります。登録後、配置図の「位置未設定」から駐車区画に置いてください。</p> : null}
+            <div className="max-h-64 overflow-auto rounded-xl border border-slate-200"><table className="w-full text-left text-xs"><thead className="sticky top-0 z-10 bg-slate-100 text-slate-600"><tr><th className="p-2">番号</th><th className="p-2">名称</th><th className="p-2">{kind === "employee" ? "部署" : "ナンバー"}</th><th className="p-2">NFC UID</th>{kind === "vehicle" ? <th className="p-2">駐車区画</th> : null}</tr></thead><tbody className="divide-y divide-slate-100">{(kind === "vehicle" ? importRows : importRows.slice(0, 20)).map((row, index) => {
               const nfcUid = typeof row.nfcUid === "string" && row.nfcUid.trim() ? normalizeNfcUid(row.nfcUid) : "";
-              return <tr key={`${String(row.code)}-${index}`}><td className="p-2 font-bold">{String(row.code)}</td><td className="p-2">{String(row.name)}</td><td className="p-2">{String(kind === "employee" ? row.department : row.plateNumber)}</td><td className={cn("p-2 text-[10px]", nfcUid ? "font-mono" : "font-bold text-amber-600")}>{nfcUid || "未登録（後から追加）"}</td></tr>;
+              // 他の行で選んだ区画は候補から外し、同じ区画を二重に選べないようにする。
+              const takenByOthers = new Set(Object.entries(importSpots).filter(([key, spotId]) => Number(key) !== index && spotId).map(([, spotId]) => spotId));
+              return <tr key={`${String(row.code)}-${index}`}><td className="p-2 font-bold">{String(row.code)}</td><td className="p-2">{String(row.name)}</td><td className="p-2">{String(kind === "employee" ? row.department : row.plateNumber)}</td><td className={cn("p-2 text-[10px]", nfcUid ? "font-mono" : "font-bold text-amber-600")}>{nfcUid || "未登録（後から追加）"}</td>{kind === "vehicle" ? <td className="p-1.5"><select aria-label={`${String(row.name)}の駐車区画`} value={importSpots[index] ?? ""} disabled={submitting} onChange={(event) => setImportSpots((current) => ({ ...current, [index]: event.target.value }))} className={cn("min-h-8 w-full min-w-24 rounded-lg border bg-white px-2 text-xs font-bold", importSpots[index] ? "border-blue-300 text-blue-800" : "border-slate-200 text-slate-500")}><option value="">後で設定</option>{freeImportSpots.filter((spot) => !takenByOthers.has(spot.id)).map((spot) => <option key={spot.id} value={spot.id}>{formatSpotLabel(spot)}</option>)}</select></td> : null}</tr>;
             })}</tbody></table></div>
-            {importRows.length > 20 ? <p className="text-center text-xs text-slate-500">先頭20件を表示しています</p> : null}
+            {kind === "employee" && importRows.length > 20 ? <p className="text-center text-xs text-slate-500">先頭20件を表示しています</p> : null}
           </div> : <div className="rounded-2xl border border-dashed border-slate-300 p-8 text-center"><FileJson className="mx-auto size-8 text-slate-300" /><p className="mt-2 text-sm font-bold text-slate-500">JSONファイルを選択してください</p><p className="mt-1 text-xs text-slate-400">配列、または {kind === "employee" ? "employees" : "vehicles"} 配列を含むJSONに対応</p></div>}
           <div className="grid grid-cols-2 gap-2 border-t border-slate-100 pt-4"><Button type="button" variant="ghost" disabled={submitting} onClick={closeImport}>キャンセル</Button><Button type="button" disabled={submitting || importRows.length === 0} onClick={submitImport}>{submitting ? "登録中…" : `${importRows.length}${kind === "employee" ? "人" : "台"}を登録`}</Button></div>
         </div>
@@ -323,11 +356,11 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
     </div> : null}
 
     {drawerOpen ? <div className="fixed inset-0 z-50 bg-slate-950/40 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget && !submitting) closeDrawer(); }}><aside ref={drawerRef} role="dialog" aria-modal="true" aria-busy={submitting} aria-label={kind === "employee" ? "社員情報" : "車両情報"} className="ml-auto flex h-full w-full max-w-md flex-col bg-white shadow-2xl"><div className="flex items-center justify-between border-b border-slate-100 p-5"><div><div className="flex items-center gap-2"><p className="text-xs font-bold text-blue-600">{editingEmployee || editingVehicle ? "編集" : "新規登録"}</p>{hasUnsavedChanges && !submitting ? <span className="rounded-full bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-700">未保存</span> : null}{submitting ? <span role="status" className="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700">保存中</span> : null}</div><h2 className="mt-1 text-xl font-black">{kind === "employee" ? editingEmployee ? "社員情報を編集" : "社員を追加" : editingVehicle ? "車両情報を編集" : "車両を追加"}</h2></div><button aria-label={submitting ? "保存中は閉じられません" : "閉じる"} disabled={submitting} onClick={() => closeDrawer()} className="grid size-10 place-items-center rounded-xl bg-slate-100 transition disabled:cursor-not-allowed disabled:opacity-40"><X className="size-4" /></button></div>
-      {kind === "employee" ? <form className="flex flex-1 flex-col overflow-y-auto p-5" onSubmit={submitEmployee}><fieldset disabled={submitting} className="flex min-h-0 min-w-0 flex-1 flex-col border-0 p-0"><div className="space-y-4"><Field label="社員番号"><input required autoFocus={!editingEmployee} maxLength={20} className={field} value={employeeForm.code} onChange={(event) => setEmployeeForm((current) => ({ ...current, code: event.target.value }))} placeholder="例：E007" />{editingEmployee && employeeForm.code.trim() !== editingEmployee.code ? <p className="mt-1 text-xs font-bold text-amber-700">変更すると、過去の利用履歴も新しい社員番号で表示されます</p> : null}</Field><Field label="氏名"><input required autoFocus={!!editingEmployee} className={field} value={employeeForm.name} onChange={(event) => setEmployeeForm((current) => ({ ...current, name: event.target.value }))} placeholder="例：山田 太郎" /></Field><Field label="部署"><select required className={field} value={employeeForm.department} onChange={(event) => setEmployeeForm((current) => ({ ...current, department: event.target.value }))}><option value="">{selectableDepartments.length ? "部署を選択してください" : "部署が登録されていません"}</option>{selectableDepartments.map((name) => <option key={name} value={name}>{name}{editingEmployee?.department === name && !data.departments.some((item) => item.name === name && item.active) ? "（利用停止中）" : ""}</option>)}</select><Link href="/settings/departments" className="mt-2 inline-flex min-h-9 items-center text-xs font-bold text-blue-700 underline decoration-blue-200 underline-offset-4">{selectableDepartments.length ? "部署を管理" : "部署を追加する"}</Link></Field><NfcField inputRef={nfcInput} value={employeeForm.nfcUid} scanning={scanning} duplicate={duplicateNfc?.name} onScan={beginNfcScan} onChange={(value) => setEmployeeForm((current) => ({ ...current, nfcUid: value }))} onDone={() => setScanning(false)} /></div><div className="mt-auto space-y-4 pt-6"><Button type="submit" className="w-full" disabled={submitting || !!duplicateNfc}>{submitting ? "保存中…" : editingEmployee ? "変更を保存" : "社員を登録"}</Button>{editingEmployee ? <ActiveControl kind="employee" active={editingEmployee.active} dirty={employeeDirty} onClick={() => setConfirmTarget({ id: editingEmployee.id, name: editingEmployee.name, active: editingEmployee.active, version: editingEmployee.version })} /> : null}</div></fieldset></form> : <form className="flex flex-1 flex-col overflow-y-auto p-5" onSubmit={submitVehicle}><fieldset disabled={submitting} className="flex min-h-0 min-w-0 flex-1 flex-col border-0 p-0"><div className="space-y-4"><Field label="車両番号"><input required autoFocus={!editingVehicle} disabled={!!editingVehicle} className={field} value={vehicleForm.code} onChange={(event) => setVehicleForm((current) => ({ ...current, code: event.target.value }))} placeholder="例：C09" /></Field><Field label="車両名"><input required autoFocus={!!editingVehicle} className={field} value={vehicleForm.name} onChange={(event) => setVehicleForm((current) => ({ ...current, name: event.target.value }))} placeholder="例：営業車9" /></Field><Field label="ナンバー"><input required className={field} value={vehicleForm.plateNumber} onChange={(event) => setVehicleForm((current) => ({ ...current, plateNumber: event.target.value }))} placeholder="例：品川 500 あ 12-34" /></Field>{!editingVehicle ? <Field label="駐車位置"><select required aria-label="登録時の駐車区画" className={field} value={vehicleForm.spotId} onChange={(event) => setVehicleForm((current) => ({ ...current, spotId: event.target.value }))}><option value="">駐車区画を選択してください</option><ParkingSpotOptions spots={data.spots} /><option value="later">後で設定（配置図には表示されません）</option></select><p className="mt-1 text-xs text-slate-500">登録と同時に配置図へ表示します。「後で設定」の場合は車両一覧から設定できます。</p></Field> : null}<Field label="車両装備"><div className="grid grid-cols-2 gap-2"><EquipmentToggle checked={vehicleForm.hasEtc} label="ETC付" onChange={(checked) => setVehicleForm((current) => ({ ...current, hasEtc: checked }))} /><EquipmentToggle checked={vehicleForm.hasNavigation} label="ナビ付" onChange={(checked) => setVehicleForm((current) => ({ ...current, hasNavigation: checked }))} /></div></Field><NfcField optional inputRef={nfcInput} value={vehicleForm.nfcUid} scanning={scanning} duplicate={duplicateNfc?.name} onScan={beginNfcScan} onChange={(value) => setVehicleForm((current) => ({ ...current, nfcUid: value }))} onDone={() => setScanning(false)} /><Field label="表示色"><span className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 px-3"><input aria-label="車両の表示色" type="color" className="h-7 w-10 cursor-pointer border-0 bg-transparent p-0" value={vehicleForm.color} onChange={(event) => setVehicleForm((current) => ({ ...current, color: event.target.value }))} /><span className="text-xs font-bold text-slate-500">{vehicleForm.color.toUpperCase()}</span></span></Field></div><div className="mt-auto space-y-4 pt-6"><Button type="submit" className="w-full" disabled={submitting || !!duplicateNfc}>{submitting ? "保存中…" : editingVehicle ? "変更を保存" : "車両を登録"}</Button>{editingVehicle ? <ActiveControl kind="vehicle" active={editingVehicle.active} dirty={vehicleDirty} blockedReason={editingVehicle.active && editingVehicle.status !== "AVAILABLE" ? editingVehicle.status === "MAINTENANCE" ? "整備中の車両は、整備を解除してから利用停止できます" : "利用中・予約中の車両は利用停止できません" : undefined} onClick={() => setConfirmTarget({ id: editingVehicle.id, name: editingVehicle.name, active: editingVehicle.active, version: editingVehicle.version })} /> : null}</div></fieldset></form>}
+      {kind === "employee" ? <form className="flex flex-1 flex-col overflow-y-auto p-5" onSubmit={submitEmployee}><fieldset disabled={submitting} className="flex min-h-0 min-w-0 flex-1 flex-col border-0 p-0"><div className="space-y-4"><Field label="社員番号"><RecordCodeInput kind="employee" autoFocus={!editingEmployee} value={employeeForm.code} onChange={(code) => setEmployeeForm((current) => ({ ...current, code }))} placeholder="例：E007" />{editingEmployee && normalizeRecordCode(employeeForm.code) !== editingEmployee.code ? <p className="mt-1 text-xs font-bold text-amber-700">変更すると、過去の利用履歴も新しい社員番号で表示されます</p> : null}</Field><Field label="氏名"><input required autoFocus={!!editingEmployee} className={field} value={employeeForm.name} onChange={(event) => setEmployeeForm((current) => ({ ...current, name: event.target.value }))} placeholder="例：山田 太郎" /></Field><Field label="部署"><select required className={field} value={employeeForm.department} onChange={(event) => setEmployeeForm((current) => ({ ...current, department: event.target.value }))}><option value="">{selectableDepartments.length ? "部署を選択してください" : "部署が登録されていません"}</option>{selectableDepartments.map((name) => <option key={name} value={name}>{name}{editingEmployee?.department === name && !data.departments.some((item) => item.name === name && item.active) ? "（利用停止中）" : ""}</option>)}</select><Link href="/settings/departments" className="mt-2 inline-flex min-h-9 items-center text-xs font-bold text-blue-700 underline decoration-blue-200 underline-offset-4">{selectableDepartments.length ? "部署を管理" : "部署を追加する"}</Link></Field><NfcField kind="employee" optional inputRef={nfcInput} value={employeeForm.nfcUid} scanning={scanning} duplicate={duplicateNfc?.name} onScan={beginNfcScan} onChange={(value) => setEmployeeForm((current) => ({ ...current, nfcUid: value }))} onDone={() => setScanning(false)} /></div><div className="mt-auto space-y-4 pt-6"><Button type="submit" className="w-full" disabled={submitting || !!duplicateNfc || employeeCodeInvalid}>{submitting ? "保存中…" : editingEmployee ? "変更を保存" : "社員を登録"}</Button>{editingEmployee ? <ActiveControl kind="employee" active={editingEmployee.active} dirty={employeeDirty} onClick={() => setConfirmTarget({ id: editingEmployee.id, name: editingEmployee.name, active: editingEmployee.active, version: editingEmployee.version })} /> : null}</div></fieldset></form> : <form className="flex flex-1 flex-col overflow-y-auto p-5" onSubmit={submitVehicle}><fieldset disabled={submitting} className="flex min-h-0 min-w-0 flex-1 flex-col border-0 p-0"><div className="space-y-4"><Field label="車両番号"><RecordCodeInput kind="vehicle" autoFocus={!editingVehicle} value={vehicleForm.code} onChange={(code) => setVehicleForm((current) => ({ ...current, code }))} placeholder="例：C018" />{editingVehicle && normalizeRecordCode(vehicleForm.code) !== editingVehicle.code ? <p className="mt-1 text-xs font-bold text-amber-700">変更すると、過去の利用履歴も新しい車両番号で表示されます</p> : null}</Field><Field label="車両名"><input required autoFocus={!!editingVehicle} className={field} value={vehicleForm.name} onChange={(event) => setVehicleForm((current) => ({ ...current, name: event.target.value }))} placeholder="例：営業車9" /></Field><Field label="ナンバー"><input required className={field} value={vehicleForm.plateNumber} onChange={(event) => setVehicleForm((current) => ({ ...current, plateNumber: event.target.value }))} placeholder="例：品川 500 あ 12-34" /></Field>{!editingVehicle ? <Field label="駐車位置"><select required aria-label="登録時の駐車区画" className={field} value={vehicleForm.spotId} onChange={(event) => setVehicleForm((current) => ({ ...current, spotId: event.target.value }))}><option value="">駐車区画を選択してください</option><ParkingSpotOptions spots={data.spots} /></select><p className="mt-1 text-xs text-slate-500">登録と同時に配置図へ表示します。場所が決まっていない場合は仮置き区画を選び、決まったら配置図の「位置変更」で移動してください。</p></Field> : null}<Field label="車両装備"><div className="grid grid-cols-2 gap-2"><EquipmentToggle checked={vehicleForm.hasEtc} label="ETC付" onChange={(checked) => setVehicleForm((current) => ({ ...current, hasEtc: checked }))} /><EquipmentToggle checked={vehicleForm.hasNavigation} label="ナビ付" onChange={(checked) => setVehicleForm((current) => ({ ...current, hasNavigation: checked }))} /></div></Field><NfcField kind="vehicle" optional inputRef={nfcInput} value={vehicleForm.nfcUid} scanning={scanning} duplicate={duplicateNfc?.name} onScan={beginNfcScan} onChange={(value) => setVehicleForm((current) => ({ ...current, nfcUid: value }))} onDone={() => setScanning(false)} /><Field label="表示色"><span className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 px-3"><input aria-label="車両の表示色" type="color" className="h-7 w-10 cursor-pointer border-0 bg-transparent p-0" value={vehicleForm.color} onChange={(event) => setVehicleForm((current) => ({ ...current, color: event.target.value }))} /><span className="text-xs font-bold text-slate-500">{vehicleForm.color.toUpperCase()}</span></span></Field></div><div className="mt-auto space-y-4 pt-6"><Button type="submit" className="w-full" disabled={submitting || !!duplicateNfc || vehicleCodeInvalid}>{submitting ? "保存中…" : editingVehicle ? "変更を保存" : "車両を登録"}</Button>{editingVehicle ? <ActiveControl kind="vehicle" active={editingVehicle.active} dirty={vehicleDirty} blockedReason={editingVehicle.active && editingVehicle.status !== "AVAILABLE" ? editingVehicle.status === "MAINTENANCE" ? "整備中の車両は、整備を解除してから利用停止できます" : "利用中・予約中の車両は利用停止できません" : editingVehicle.active && data.maintenances.some((item) => item.vehicleId === editingVehicle.id && item.status === "SCHEDULED") ? "整備予定がある車両は、予定を取り消してから利用停止できます" : undefined} onClick={() => setConfirmTarget({ id: editingVehicle.id, name: editingVehicle.name, active: editingVehicle.active, version: editingVehicle.version })} /> : null}</div></fieldset></form>}
     </aside></div> : null}
 
     {confirmTarget ? <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm"><div role="alertdialog" aria-modal="true" aria-busy={submitting} className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl"><span className={cn("mx-auto grid size-12 place-items-center rounded-full", confirmTarget.active ? "bg-rose-50 text-rose-600" : "bg-emerald-50 text-emerald-600")}>{confirmTarget.active ? <Power /> : <Check />}</span><h2 className="mt-4 text-center text-lg font-black">{confirmTarget.name}の利用を{confirmTarget.active ? "停止" : "再開"}しますか？</h2><ul className="mt-4 space-y-1.5 rounded-2xl bg-slate-50 p-4 text-xs text-slate-600">{activeChangeEffects(kind, confirmTarget.active).map((effect) => <li key={effect} className="flex gap-2"><span aria-hidden="true" className="text-slate-400">・</span><span>{effect}</span></li>)}</ul><div className="mt-5 grid grid-cols-2 gap-2"><Button autoFocus variant="ghost" disabled={submitting} onClick={() => setConfirmTarget(null)}>キャンセル</Button><Button disabled={submitting} variant={confirmTarget.active ? "danger" : "primary"} onClick={applyActiveChange}>{submitting ? "処理中…" : confirmTarget.active ? "利用を停止" : "利用を再開"}</Button></div></div></div> : null}
-    {maintenanceTarget ? <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm"><div role="alertdialog" aria-modal="true" aria-busy={submitting} className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl"><span className="mx-auto grid size-12 place-items-center rounded-full bg-amber-50 text-amber-700"><Wrench /></span><h2 className="mt-4 text-center text-lg font-black">{maintenanceTarget.maintenance ? "利用可能に戻しますか？" : "整備中に変更しますか？"}</h2><p className="mt-2 text-center text-sm text-slate-500">{maintenanceTarget.name}を{maintenanceTarget.maintenance ? "利用開始できる状態へ戻します。" : "利用開始の選択肢から一時的に除外します。駐車位置と履歴は保持されます。"}</p><div className="mt-5 grid grid-cols-2 gap-2"><Button autoFocus variant="ghost" disabled={submitting} onClick={() => setMaintenanceTarget(null)}>キャンセル</Button><Button disabled={submitting} onClick={applyMaintenanceChange}>{submitting ? "処理中…" : maintenanceTarget.maintenance ? "利用可能に戻す" : "整備中にする"}</Button></div></div></div> : null}
+    {maintenanceVehicle ? <MaintenanceDialog vehicle={maintenanceVehicle} data={data} mutate={mutate} fromSettings onClose={() => setMaintenanceVehicleId(null)} onDone={() => setHighlightId(maintenanceVehicle.id)} /> : null}
     {discardConfirm ? <div className="fixed inset-0 z-[70] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm"><div role="alertdialog" aria-modal="true" className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl"><span className="mx-auto grid size-12 place-items-center rounded-full bg-amber-50 text-amber-600"><X /></span><h2 className="mt-4 text-center text-lg font-black">入力内容を破棄しますか？</h2><p className="mt-2 text-center text-sm text-slate-500">保存していない変更があります。この操作は元に戻せません。</p><div className="mt-5 grid grid-cols-2 gap-2"><Button autoFocus variant="ghost" onClick={() => setDiscardConfirm(false)}>編集を続ける</Button><Button variant="danger" onClick={() => { setDiscardConfirm(false); closeDrawer(true); }}>破棄して閉じる</Button></div></div></div> : null}
   </>;
 }
@@ -337,36 +370,19 @@ function ParkingSpotOptions({ spots, vehicleId }: { spots: ParkingSpot[]; vehicl
   return <>{spots.filter((spot) => spot.enabled && (!spot.vehicle || spot.vehicle.id === vehicleId) && canUseSpot({ id: vehicleId ?? "" }, spot)).map((spot) => <option key={spot.id} value={spot.id}>{formatSpotLabel(spot)}</option>)}</>;
 }
 
-function VehicleParkingControl({ vehicle, spots, mutate }: { vehicle: Vehicle; spots: ParkingSpot[]; mutate: Mutate }) {
-  const [spotId, setSpotId] = useState(vehicle.parkingSpotId ?? "");
-  const [saving, setSaving] = useState(false);
-  useEffect(() => { setSpotId(vehicle.parkingSpotId ?? ""); }, [vehicle.parkingSpotId]);
-  const canMove = vehicle.active && vehicle.status === "AVAILABLE";
-  const selected = spots.find((spot) => spot.id === spotId);
-  const selectable = selected?.enabled && (!selected.vehicle || selected.vehicle.id === vehicle.id) && canUseSpot(vehicle, selected);
+// 駐車位置の変更は配置図で行う。一覧では位置を表示し、位置未設定の車両だけ配置図へ案内する。
+function VehicleLocation({ vehicle, spots, offSite }: { vehicle: Vehicle; spots: ParkingSpot[]; offSite?: boolean }) {
   const current = spots.find((spot) => spot.id === vehicle.parkingSpotId);
-  const save = async () => {
-    if (!canMove || !selectable || saving) return;
-    setSaving(true);
-    try {
-      await mutate({ action: "moveVehicle", vehicleId: vehicle.id, version: vehicle.version, spotId }, `${vehicle.name}を${formatSpotLabel(selected)}へ配置しました`);
-    } finally { setSaving(false); }
-  };
-  // 選択欄に現在の区画が出るため、ラベルは未確定・変更不可のときだけ表示する。
-  return <div className="space-y-1">
-    {!canMove || !current ? <p className={cn("text-xs font-bold", current ? "text-slate-500" : "text-amber-700")}>{current ? `駐車位置：${formatSpotLabel(current)}` : vehicle.status === "IN_USE" ? "出庫中" : "駐車位置未確定"}</p> : null}
-    {canMove ? <div className="flex max-w-sm gap-2">
-      <select aria-label={`${vehicle.name}の駐車区画`} disabled={saving} value={spotId} onChange={(event) => setSpotId(event.target.value)} className="min-h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-xs disabled:opacity-50">
-        <option value="">駐車区画を選択</option><ParkingSpotOptions spots={spots} vehicleId={vehicle.id} />
-      </select>
-      <button type="button" aria-label={`${vehicle.name}の駐車位置を設定`} disabled={saving || !selectable || spotId === vehicle.parkingSpotId} onClick={() => void save()} className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-lg bg-blue-600 px-3 text-xs font-bold text-white hover:bg-blue-700 disabled:opacity-40"><MapPin className="size-3.5" />{saving ? "保存中…" : "設定"}</button>
-    </div> : <p className="text-[11px] text-slate-400">{vehicle.status === "IN_USE" ? "返却時に駐車位置を指定します" : "利用可能な車両の駐車位置を設定できます"}</p>}
-  </div>;
+  if (current) return <span className="truncate text-xs font-bold text-slate-500">{formatSpotLabel(current)}{offSite ? "確保" : ""}</span>;
+  if (vehicle.status === "IN_USE") return <span className="text-xs font-bold text-slate-500">出庫中</span>;
+  if (!vehicle.active) return null;
+  if (vehicle.status !== "AVAILABLE") return <span className="text-xs font-bold text-amber-700">位置未設定</span>;
+  return <Link href={`/?placeVehicle=${encodeURIComponent(vehicle.id)}`} className="inline-flex min-h-7 items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2 text-xs font-bold text-amber-800 hover:border-amber-500"><MapPin className="size-3.5" />位置未設定・配置図で置く</Link>;
 }
 
 // 利用停止は誤操作を防ぐため編集画面に置き、一覧には停止中の行の「利用再開」だけを出す。
-function RowActions({ active, name, maintenance, maintenanceDisabled, onEdit, onResume, onMaintenance }: { active: boolean; name: string; maintenance?: boolean; maintenanceDisabled?: boolean; onEdit: () => void; onResume: () => void; onMaintenance?: () => void }) {
-  return <div className="flex justify-end gap-2">{onMaintenance ? <button type="button" disabled={maintenanceDisabled} onClick={onMaintenance} className={cn("inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-35", maintenance ? "border-emerald-200 text-emerald-700 hover:bg-emerald-50" : "border-amber-200 text-amber-700 hover:bg-amber-50")} aria-label={`${name}を${maintenance ? "利用可能に戻す" : "整備中にする"}`}><Wrench className="size-3.5" /><span className="hidden md:inline">{maintenance ? "整備解除" : "整備"}</span></button> : null}<button type="button" onClick={onEdit} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:bg-slate-50" aria-label={`${name}を編集`}><Pencil className="size-3.5" /><span className="hidden md:inline">編集</span></button>{!active ? <button type="button" onClick={onResume} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-emerald-200 px-3 text-xs font-bold text-emerald-700 hover:bg-emerald-50" aria-label={`${name}の利用を再開`}><Power className="size-3.5" /><span className="hidden md:inline">利用再開</span></button> : null}</div>;
+function RowActions({ active, name, maintenance, maintenanceScheduled, maintenanceDisabled, onEdit, onResume, onMaintenance }: { active: boolean; name: string; maintenance?: boolean; maintenanceScheduled?: boolean; maintenanceDisabled?: boolean; onEdit: () => void; onResume: () => void; onMaintenance?: () => void }) {
+  return <div className="flex justify-end gap-2">{onMaintenance ? <button type="button" disabled={maintenanceDisabled} onClick={onMaintenance} className={cn("relative inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-35", maintenance ? "border-emerald-200 text-emerald-700 hover:bg-emerald-50" : "border-amber-200 text-amber-700 hover:bg-amber-50")} aria-label={`${name}の整備${maintenance ? "（戻す・解除）" : maintenanceScheduled ? "（予定あり）" : ""}`}><Wrench className="size-3.5" /><span className="hidden md:inline">{maintenance ? "戻す・解除" : "整備"}</span>{maintenanceScheduled ? <span aria-hidden="true" className="absolute -right-1 -top-1 size-2.5 rounded-full bg-amber-500 ring-2 ring-white" /> : null}</button> : null}<button type="button" onClick={onEdit} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:bg-slate-50" aria-label={`${name}を編集`}><Pencil className="size-3.5" /><span className="hidden md:inline">編集</span></button>{!active ? <button type="button" onClick={onResume} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-emerald-200 px-3 text-xs font-bold text-emerald-700 hover:bg-emerald-50" aria-label={`${name}の利用を再開`}><Power className="size-3.5" /><span className="hidden md:inline">利用再開</span></button> : null}</div>;
 }
 
 // 利用停止・再開でサーバー側が行う処理を、確認画面で利用者へ示す。
@@ -398,8 +414,8 @@ function ActiveControl({ kind, active, dirty, blockedReason, onClick }: { kind: 
   </div>;
 }
 
-function VehicleStatusBadge({ vehicle, className }: { vehicle: Pick<Vehicle, "active" | "status">; className?: string }) {
-  const label = !vehicle.active ? "利用停止中" : vehicle.status === "AVAILABLE" ? "利用可能" : vehicle.status === "IN_USE" ? "利用中" : vehicle.status === "MAINTENANCE" ? "整備中" : vehicle.status;
+function VehicleStatusBadge({ vehicle, offSite, className }: { vehicle: Pick<Vehicle, "active" | "status">; offSite?: boolean; className?: string }) {
+  const label = !vehicle.active ? "利用停止中" : vehicle.status === "AVAILABLE" ? "利用可能" : vehicle.status === "IN_USE" ? "利用中" : vehicle.status === "MAINTENANCE" ? offSite ? "車検で外出" : "整備中" : vehicle.status;
   return <span className={cn("inline-block w-fit shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold", !vehicle.active ? "bg-slate-200 text-slate-600" : vehicle.status === "AVAILABLE" ? "bg-emerald-50 text-emerald-700" : vehicle.status === "MAINTENANCE" ? "bg-amber-100 text-amber-800" : "bg-blue-50 text-blue-700", className)}>{label}</span>;
 }
 
@@ -418,7 +434,7 @@ function EquipmentToggle({ checked, label, onChange }: { checked: boolean; label
   </label>;
 }
 
-function NfcField({ inputRef, value, scanning, duplicate, onScan, onChange, onDone, optional = false }: { optional?: boolean; inputRef: React.RefObject<HTMLInputElement | null>; value: string; scanning: boolean; duplicate?: string; onScan: () => void; onChange: (value: string) => void; onDone: () => void }) {
+function NfcField({ kind, inputRef, value, scanning, duplicate, onScan, onChange, onDone, optional = false }: { kind: "employee" | "vehicle"; optional?: boolean; inputRef: React.RefObject<HTMLInputElement | null>; value: string; scanning: boolean; duplicate?: string; onScan: () => void; onChange: (value: string) => void; onDone: () => void }) {
   const [timedOut, setTimedOut] = useState(false);
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
@@ -431,7 +447,84 @@ function NfcField({ inputRef, value, scanning, duplicate, onScan, onChange, onDo
   const bridgeStatus = useNfcBridge(scanning, (uid) => { setTimedOut(false); onChange(uid); onDone(); });
   const statusText = nfcBridgeStatusText(bridgeStatus);
   const changeValue = (next: string) => { setTimedOut(false); onChange(next); };
-  return <Field label={optional ? "NFC UID（任意）" : "NFC UID"}><div className={cn("rounded-2xl border p-3", scanning ? "border-blue-300 bg-blue-50" : timedOut ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-slate-50")}><div className="mb-2 flex items-center justify-between gap-2"><div className="flex items-center gap-2"><Nfc className={cn("size-5", scanning ? "animate-pulse text-blue-600" : timedOut ? "text-amber-600" : "text-slate-400")} /><span className="text-xs font-bold text-slate-600">{scanning ? "タグをかざしてください" : timedOut ? "読み取りを確認できませんでした" : "NFCタグ"}</span></div><button type="button" onClick={() => { if (scanning) onDone(); else { setTimedOut(false); onScan(); } }} className={cn("shrink-0 rounded-lg bg-white px-3 py-1.5 text-xs font-bold shadow-sm", scanning ? "text-slate-600" : "text-blue-700")}>{scanning ? "読取を停止" : timedOut ? "再試行" : "NFC読取"}</button></div><input ref={inputRef} required={!optional} className={field} value={value} onChange={(event) => changeValue(event.target.value)} onBlur={() => value && changeValue(normalizeNfcUid(value))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); changeValue(normalizeNfcUid(value)); onDone(); } }} placeholder="UIDを入力またはタグを読み取り" />{duplicate ? <p className="mt-2 text-xs font-bold text-rose-600">このUIDは「{duplicate}」で登録済みです</p> : timedOut ? <p role="status" className="mt-2 text-[11px] font-bold text-amber-800">15秒以内に読み取れませんでした。再試行するか、UIDを手入力してください。</p> : scanning ? <p role="status" aria-live="polite" className={cn("mt-2 text-[11px]", bridgeStatus === "ready" ? "font-bold text-emerald-700" : bridgeStatus === "offline" ? "text-amber-700" : "text-blue-600")}>{statusText}</p> : null}</div></Field>;
+  // 社員はカード、車両はタグを使う。
+  const medium = kind === "employee" ? "カード" : "タグ";
+  return <Field label={optional ? "NFC UID（任意）" : "NFC UID"}><div className={cn("rounded-2xl border p-3", scanning ? "border-blue-300 bg-blue-50" : timedOut ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-slate-50")}><div className="mb-2 flex items-center justify-between gap-2"><div className="flex items-center gap-2"><Nfc className={cn("size-5", scanning ? "animate-pulse text-blue-600" : timedOut ? "text-amber-600" : "text-slate-400")} /><span className="text-xs font-bold text-slate-600">{scanning ? `${medium}をかざしてください` : timedOut ? "読み取りを確認できませんでした" : `NFC${medium}`}</span></div><button type="button" onClick={() => { if (scanning) onDone(); else { setTimedOut(false); onScan(); } }} className={cn("shrink-0 rounded-lg bg-white px-3 py-1.5 text-xs font-bold shadow-sm", scanning ? "text-slate-600" : "text-blue-700")}>{scanning ? "読取を停止" : timedOut ? "再試行" : "NFC読取"}</button></div><input ref={inputRef} required={!optional} className={field} value={value} onChange={(event) => changeValue(event.target.value)} onBlur={() => value && changeValue(normalizeNfcUid(value))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); changeValue(normalizeNfcUid(value)); onDone(); } }} placeholder={`UIDを入力または${medium}を読み取り`} />{duplicate ? <p className="mt-2 text-xs font-bold text-rose-600">このUIDは「{duplicate}」で登録済みです</p> : timedOut ? <p role="status" className="mt-2 text-[11px] font-bold text-amber-800">15秒以内に読み取れませんでした。再試行するか、UIDを手入力してください。</p> : scanning ? <p role="status" aria-live="polite" className={cn("mt-2 text-[11px]", bridgeStatus === "ready" ? "font-bold text-emerald-700" : bridgeStatus === "offline" ? "text-amber-700" : "text-blue-600")}>{statusText}</p> : null}{scanning ? <NfcBridgeHelp status={bridgeStatus} className="mt-2" /> : null}</div></Field>;
+}
+
+type NfcOwner = { kind: "employee"; item: Employee } | { kind: "vehicle"; item: Vehicle };
+
+// 手元のカード・タグがどの社員・車両のものかを確かめる。利用停止中で、再開すると戻る割り当ても出す。
+function NfcCheckDialog({ data, kind, onOpen, onClose }: { data: DashboardData; kind: "employee" | "vehicle"; onOpen: (owner: NfcOwner) => void; onClose: () => void }) {
+  const [scanning, setScanning] = useState(true);
+  const [timedOut, setTimedOut] = useState(false);
+  const [input, setInput] = useState("");
+  const [uid, setUid] = useState("");
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    if (!scanning) return;
+    setTimedOut(false);
+    const timer = window.setTimeout(() => { setTimedOut(true); setScanning(false); }, NFC_SCAN_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [scanning]);
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); onCloseRef.current(); } };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+  const bridgeStatus = useNfcBridge(scanning, (read) => { setInput(read); setUid(read); setScanning(false); });
+  const check = () => { const next = normalizeNfcUid(input); setInput(next); setUid(next); setScanning(false); };
+  // 有効な割り当てを先に出す。
+  const owners = useMemo<NfcOwner[]>(() => uid ? [
+    ...data.employees.filter((person) => sameNfcUid(person.nfcUid, uid)).map((item) => ({ kind: "employee" as const, item })),
+    ...data.vehicles.filter((vehicle) => sameNfcUid(vehicle.nfcUid, uid)).map((item) => ({ kind: "vehicle" as const, item })),
+  ].sort((a, b) => Number(b.item.active) - Number(a.item.active)) : [], [data.employees, data.vehicles, uid]);
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div role="dialog" aria-modal="true" aria-label="NFCを確認" className="w-full max-w-md rounded-3xl bg-white shadow-2xl">
+      <div className="flex items-start justify-between border-b border-slate-100 p-5">
+        <div><p className="text-xs font-bold text-blue-600">NFC確認</p><h2 className="mt-1 text-xl font-black">手元のカード・タグを確認</h2><p className="mt-1 text-xs text-slate-500">読み取ったUIDを割り当てている社員・車両を表示します。</p></div>
+        <button type="button" aria-label="閉じる" onClick={onClose} className="grid size-10 place-items-center rounded-xl bg-slate-100"><X className="size-4" /></button>
+      </div>
+      <div className="space-y-4 p-5">
+        <div className={cn("rounded-2xl border p-3", scanning ? "border-blue-300 bg-blue-50" : timedOut ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-slate-50")}>
+          <div className="mb-2 flex items-center justify-between gap-2"><div className="flex items-center gap-2"><Nfc className={cn("size-5", scanning ? "animate-pulse text-blue-600" : timedOut ? "text-amber-600" : "text-slate-400")} /><span className="text-xs font-bold text-slate-600">{scanning ? "カード・タグをかざしてください" : timedOut ? "読み取りを確認できませんでした" : "NFCカード・タグ"}</span></div><button type="button" onClick={() => setScanning((current) => !current)} className={cn("shrink-0 rounded-lg bg-white px-3 py-1.5 text-xs font-bold shadow-sm", scanning ? "text-slate-600" : "text-blue-700")}>{scanning ? "読取を停止" : uid || timedOut ? "もう一度読み取る" : "NFC読取"}</button></div>
+          <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); check(); }}><input aria-label="確認するNFC UID" className={cn(field, "font-mono")} value={input} onChange={(event) => setInput(event.target.value)} placeholder="UIDを入力または読み取り" /><Button type="submit" variant="secondary" disabled={!input.trim()} className="shrink-0">確認</Button></form>
+          {scanning ? <p role="status" aria-live="polite" className={cn("mt-2 text-[11px]", bridgeStatus === "ready" ? "font-bold text-emerald-700" : bridgeStatus === "offline" ? "text-amber-700" : "text-blue-600")}>{nfcBridgeStatusText(bridgeStatus)}</p> : timedOut ? <p role="status" className="mt-2 text-[11px] font-bold text-amber-800">15秒以内に読み取れませんでした。もう一度読み取るか、UIDを入力してください。</p> : null}
+          {scanning ? <NfcBridgeHelp status={bridgeStatus} className="mt-2" /> : null}
+        </div>
+        {uid ? <div role="status" aria-live="polite" className="space-y-2">
+          <p className="text-xs font-bold text-slate-500">UID <span className="font-mono text-slate-800">{uid}</span></p>
+          {owners.length === 0 ? <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4"><p className="text-sm font-black text-amber-800">どの社員・車両にも割り当てていません</p><p className="mt-1 text-xs text-amber-700">社員・車両の編集画面で、このUIDを登録できます。</p></div> : owners.map((owner) => {
+            const href = `/settings/${owner.kind === "employee" ? "employees" : "vehicles"}?q=${encodeURIComponent(owner.item.code)}${owner.item.active ? "" : "&status=inactive"}`;
+            const action = "inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-blue-700 hover:bg-blue-50";
+            return <div key={owner.item.id} className={cn("flex items-center gap-3 rounded-2xl border p-3", owner.item.active ? "border-emerald-200 bg-emerald-50/60" : "border-slate-200 bg-slate-50")}>
+              <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white">{owner.kind === "employee" ? <UserRound className="size-5 text-slate-500" /> : <CarFront className="size-5" style={{ color: owner.item.color }} />}</span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-bold text-slate-500">{owner.kind === "employee" ? "社員" : "車両"} <span className="font-mono">{owner.item.code}</span></p>
+                <p className="truncate text-sm font-black">{owner.item.name}<span className="ml-1.5 text-xs font-bold text-slate-500">{owner.kind === "employee" ? owner.item.department : owner.item.plateNumber}</span></p>
+                <p className={cn("mt-0.5 text-[11px] font-bold", owner.item.active ? "text-emerald-700" : "text-slate-500")}>{owner.item.active ? "割り当て中" : "利用停止中のため割り当て解除済み（再開すると戻ります）"}</p>
+              </div>
+              {owner.kind === kind ? <button type="button" onClick={() => onOpen(owner)} className={action}><Pencil className="size-3.5" />編集</button> : <Link href={href} className={action}>{owner.kind === "employee" ? "社員登録" : "車両登録"}で開く</Link>}
+            </div>;
+          })}
+        </div> : null}
+      </div>
+    </div>
+  </div>;
+}
+
+// 英字1文字＋数字3桁以外は入力できないようにする。日本語入力の変換中は、確定してからそろえる。
+function RecordCodeInput({ kind, value, onChange, autoFocus, placeholder }: { kind: "employee" | "vehicle"; value: string; onChange: (code: string) => void; autoFocus: boolean; placeholder: string }) {
+  const [focused, setFocused] = useState(false);
+  const incomplete = !!value && !isRecordCode(value) && !focused;
+  return <>
+    <input required autoFocus={autoFocus} autoCapitalize="characters" autoComplete="off" spellCheck={false} aria-invalid={incomplete} className={cn(field, "font-mono uppercase", incomplete && "border-rose-300")} value={value} placeholder={placeholder}
+      onChange={(event) => onChange((event.nativeEvent as InputEvent).isComposing ? event.target.value : sanitizeRecordCodeInput(event.target.value))}
+      onCompositionEnd={(event) => onChange(sanitizeRecordCodeInput(event.currentTarget.value))}
+      onFocus={() => setFocused(true)} onBlur={() => { setFocused(false); onChange(sanitizeRecordCodeInput(value)); }} />
+    <span className={cn("mt-1 block text-xs", incomplete ? "font-bold text-rose-600" : "text-slate-500")}>{incomplete ? recordCodeMessage(kind) : `英字1文字＋数字3桁（例：${RECORD_CODE_EXAMPLES[kind]}）。小文字や全角は自動でそろえます`}</span>
+  </>;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-600">{label}</span>{children}</label>; }

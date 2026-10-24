@@ -24,7 +24,7 @@ FleetFlowを別のURLで開く場合は、そのOriginを指定します。
 powershell -ExecutionPolicy Bypass -File .\nfc-bridge\install.ps1 -AllowedOrigins "http://fleetflow.local;http://localhost:3035"
 ```
 
-インストール先は `%LOCALAPPDATA%\FleetFlow\NfcBridge` です。Windowsログイン時にNFC Bridgeだけを自動起動します。デスクトップショートカットは作成しません。
+インストール先は `%LOCALAPPDATA%\FleetFlow\NfcBridge` です。Windowsログイン時にNFC Bridgeだけを自動起動します。デスクトップショートカットは作成しません。あわせて`fleetflow-nfc://`を登録し、FleetFlow画面の「連携ソフトを起動」からNFC Bridgeを起動できるようにします（起動するだけで、URLの内容は使いません）。この機能より前にインストールしたPCでは、もう一度インストールすると使えるようになります。
 
 通常はプロジェクト直下の `FleetFlow Start.cmd` をダブルクリックしてください。Docker Desktop、FleetFlow本体、DB、NFC連携ソフトを順番に確認・起動し、準備完了後にブラウザーを開きます。`FleetFlow Status.cmd` では本体、NFC連携ソフト、NFCリーダーの状態を確認できます。
 

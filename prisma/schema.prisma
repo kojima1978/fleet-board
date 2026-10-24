@@ -23,6 +23,19 @@ enum ParkingSpotRole {
   HOLDING
 }
 
+// 整備の種類。ON_SITEは故障・点検で駐車場内に置いたまま、OFF_SITEは車検・修理で外出し元の区画を確保しておく。
+enum MaintenanceKind {
+  ON_SITE
+  OFF_SITE
+}
+
+enum MaintenanceStatus {
+  SCHEDULED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
 enum TripStatus {
   RESERVED
   IN_USE
@@ -87,6 +100,8 @@ model NfcAssignment {
   nfcTag     NfcTag    @relation(fields: [nfcTagId], references: [id])
   validFrom  DateTime  @default(now())
   validTo    DateTime?
+  // 設定画面でUIDを消して外した割り当て。利用停止で外したものと区別し、再開しても戻さない。
+  cleared    Boolean   @default(false)
   createdAt  DateTime  @default(now())
 
   @@index([employeeId, validTo])
@@ -110,6 +125,7 @@ model Vehicle {
   parkingSpot   ParkingSpot?  @relation(fields: [parkingSpotId], references: [id])
   nfcAssignments NfcAssignment[]
   trips         Trip[]
+  maintenances  VehicleMaintenance[]
   version       Int           @default(1)
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
@@ -136,6 +152,7 @@ model ParkingSpot {
   enabled     Boolean  @default(true)
   role        ParkingSpotRole @default(REGULAR)
   dedicatedVehicleId String?
+  label       String?
   vehicle     Vehicle?
   version     Int      @default(1)
 }
@@ -161,6 +178,27 @@ model Trip {
 
   @@index([plannedStart, plannedEnd])
   @@index([vehicleId, status])
+}
+
+// 車両の整備記録。予定（SCHEDULED）の期間は予約できない。plannedEndは戻り予定で、未定ならnull。
+model VehicleMaintenance {
+  id             String            @id @default(cuid())
+  vehicleId      String
+  vehicle        Vehicle           @relation(fields: [vehicleId], references: [id])
+  kind           MaintenanceKind
+  status         MaintenanceStatus @default(SCHEDULED)
+  note           String?
+  plannedStart   DateTime
+  plannedEnd     DateTime?
+  actualStart    DateTime?
+  actualEnd      DateTime?
+  returnSpotCode String?
+  version        Int               @default(1)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@index([vehicleId, status])
+  @@index([plannedStart, plannedEnd])
 }
 
 model AuditLog {

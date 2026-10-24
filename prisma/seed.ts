@@ -1,6 +1,6 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "./generated/client";
-import { defaultSpotRoles, parkingSpotGeometry } from "./parking-spot-seed";
+import { defaultSpotRoles, syncParkingSpots } from "./parking-spot-seed";
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) });
 
@@ -10,28 +10,19 @@ const people = [
 ];
 
 const cars = [
-  ["C01", "アクア 1", "品川 300 あ 12-34", "#2563eb"], ["C02", "アクア 2", "品川 300 あ 56-78", "#0891b2"],
-  ["C03", "プリウス", "品川 330 い 88-01", "#7c3aed"], ["C04", "ノート", "品川 500 う 22-45", "#ea580c"],
-  ["C05", "ハイエース", "品川 400 え 90-12", "#475569"], ["C06", "フリード", "品川 500 お 31-67", "#16a34a"],
-  ["C07", "サクラ", "品川 580 か 10-08", "#db2777"], ["C08", "プロボックス", "品川 400 き 73-19", "#ca8a04"],
-  ["C09", "シエンタ", "品川 500 く 24-68", "#0f766e"], ["C10", "フィット", "品川 500 け 35-79", "#9333ea"],
-  ["C11", "タウンエース", "品川 400 こ 46-80", "#0369a1"], ["C12", "キャラバン", "品川 400 さ 57-91", "#b45309"],
-  ["C13", "N-BOX", "品川 580 し 68-02", "#be123c"],
-  ["C14", "ヴォクシー", "品川 500 す 79-13", "#1d4ed8"], ["C15", "ヤリス", "品川 500 せ 80-24", "#059669"],
-  ["C16", "エブリイ", "品川 400 そ 91-35", "#64748b"], ["C17", "ルーミー", "品川 500 た 02-46", "#c026d3"],
+  ["C001", "アクア 1", "品川 300 あ 12-34", "#2563eb"], ["C002", "アクア 2", "品川 300 あ 56-78", "#0891b2"],
+  ["C003", "プリウス", "品川 330 い 88-01", "#7c3aed"], ["C004", "ノート", "品川 500 う 22-45", "#ea580c"],
+  ["C005", "ハイエース", "品川 400 え 90-12", "#475569"], ["C006", "フリード", "品川 500 お 31-67", "#16a34a"],
+  ["C007", "サクラ", "品川 580 か 10-08", "#db2777"], ["C008", "プロボックス", "品川 400 き 73-19", "#ca8a04"],
+  ["C009", "シエンタ", "品川 500 く 24-68", "#0f766e"], ["C010", "フィット", "品川 500 け 35-79", "#9333ea"],
+  ["C011", "タウンエース", "品川 400 こ 46-80", "#0369a1"], ["C012", "キャラバン", "品川 400 さ 57-91", "#b45309"],
+  ["C013", "N-BOX", "品川 580 し 68-02", "#be123c"],
+  ["C014", "ヴォクシー", "品川 500 す 79-13", "#1d4ed8"], ["C015", "ヤリス", "品川 500 せ 80-24", "#059669"],
+  ["C016", "エブリイ", "品川 400 そ 91-35", "#64748b"], ["C017", "ルーミー", "品川 500 た 02-46", "#c026d3"],
 ];
 
 async function main() {
-  const existingSpots = await prisma.parkingSpot.findMany();
-  const positionedSpots = parkingSpotGeometry.map((geometry) => ({ geometry, spot: existingSpots.find((spot) => Math.abs(spot.x - geometry.x) < 0.01 && Math.abs(spot.y - geometry.y) < 0.01) }));
-  if (positionedSpots.every(({ spot }) => spot)) {
-    await prisma.$transaction(async (tx) => {
-      for (const [index, { spot }] of positionedSpots.entries()) await tx.parkingSpot.update({ where: { id: spot!.id }, data: { code: `__renumber_${index + 1}` } });
-      for (const { geometry, spot } of positionedSpots) await tx.parkingSpot.update({ where: { id: spot!.id }, data: geometry });
-    });
-  } else {
-    for (const geometry of parkingSpotGeometry) await prisma.parkingSpot.upsert({ where: { code: geometry.code }, update: geometry, create: { ...geometry, role: defaultSpotRoles[geometry.code] ?? "REGULAR" } });
-  }
+  await syncParkingSpots(prisma);
   // 役割の列を追加したばかりの開発DBにだけ初期の役割を入れ、設定画面で変えた役割は上書きしない。
   const rolesMissing = await prisma.parkingSpot.count({ where: { role: { not: "REGULAR" } } }) === 0;
   if (rolesMissing) {
@@ -61,7 +52,7 @@ async function main() {
     const [code, name, plateNumber, color] = cars[i];
     const existingVehicle = existingByCode.get(code);
     const vehicleNumber = await prisma.vehicleNumber.upsert({ where: { code }, update: {}, create: { code } });
-    const dedicatedSpot = code === "C07" ? spots.find((spot) => spot.code === "19" && !occupiedSpotIds.has(spot.id)) : undefined;
+    const dedicatedSpot = code === "C007" ? spots.find((spot) => spot.code === "19" && !occupiedSpotIds.has(spot.id)) : undefined;
     const freeSpot = existingVehicle ? undefined : dedicatedSpot ?? spots.find((spot) => !occupiedSpotIds.has(spot.id) && !nonRegularCodes.has(spot.code)) ?? spots.find((spot) => !occupiedSpotIds.has(spot.id));
     if (existingVehicle) await prisma.vehicle.update({ where: { id: existingVehicle.id }, data: { name, plateNumber, color } });
     else {
@@ -71,7 +62,7 @@ async function main() {
     }
     if (freeSpot) occupiedSpotIds.add(freeSpot.id);
   }
-  const sakura = await prisma.vehicle.findFirst({ where: { vehicleNumber: { code: "C07" }, active: true } });
+  const sakura = await prisma.vehicle.findFirst({ where: { vehicleNumber: { code: "C007" }, active: true } });
   if (rolesMissing && sakura) await prisma.parkingSpot.updateMany({ where: { code: "19", role: "REGULAR" }, data: { role: "DEDICATED", dedicatedVehicleId: sakura.id } });
   const employees = await prisma.employee.findMany({ orderBy: { employeeNumber: { code: "asc" } } });
   const vehicles = await prisma.vehicle.findMany({ orderBy: { vehicleNumber: { code: "asc" } } });

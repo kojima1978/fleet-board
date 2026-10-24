@@ -7,19 +7,29 @@ import { FUEL_LEVEL_MAX, formatFuelLevel } from "@/lib/fuel-level";
 import { getBackupStatus } from "@/lib/backup-status";
 import { isSameOriginRequest, readJsonBody } from "@/lib/request-security";
 import { getApplicationSystemStatus } from "@/lib/system-status";
-import { canUseSpot, formatSpotLabel, PARKING_SPOT_ROLES, SPOT_ROLE_LABELS } from "@/lib/parking-spots";
+import { canUseSpot, formatSpotLabel, PARKING_SPOT_ROLES, SPOT_LABEL_MAX_LENGTH, SPOT_ROLE_LABELS } from "@/lib/parking-spots";
+import { isRecordCode, normalizeRecordCode, recordCodeMessage } from "@/lib/record-codes";
+import { formatMaintenanceTime, MAINTENANCE_KIND_SHORT_LABELS, MAINTENANCE_KINDS, MAINTENANCE_MAX_DAYS, MAINTENANCE_NOTE_MAX, MAINTENANCE_SCHEDULE_DAYS_AHEAD, maintenanceConflictMessage } from "@/lib/maintenance";
 import type { Prisma } from "@/prisma/generated/client";
 
 export const dynamic = "force-dynamic";
 const activeOperationIds = new Set<string>();
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-function withVehicleCode<T extends { id: string; name: string; plateNumber: string; color: string; hasEtc: boolean; hasNavigation: boolean; fuelLevel: number | null; status: "AVAILABLE" | "RESERVED" | "IN_USE" | "MAINTENANCE"; parkingSpotId: string | null; active: boolean; version: number; vehicleNumber: { code: string }; nfcAssignments: { nfcTag: { uid: string } }[] }>(vehicle: T) {
-  return { id: vehicle.id, code: vehicle.vehicleNumber.code, name: vehicle.name, plateNumber: vehicle.plateNumber, nfcUid: vehicle.nfcAssignments[0]?.nfcTag.uid ?? "", color: vehicle.color, hasEtc: vehicle.hasEtc, hasNavigation: vehicle.hasNavigation, fuelLevel: vehicle.fuelLevel, status: vehicle.status, parkingSpotId: vehicle.parkingSpotId, active: vehicle.active, version: vehicle.version };
+type LatestNfcAssignment = { cleared: boolean; nfcTag: { id: string; uid: string } };
+
+// 最新の割り当て（利用停止中は再開で戻すカード）。UIDを消して外したものは戻さない。
+function restorableNfcTag(assignments: LatestNfcAssignment[]) {
+  const latest = assignments[0];
+  return latest && !latest.cleared ? latest.nfcTag : undefined;
 }
 
-function withEmployeeCode<T extends { id: string; name: string; active: boolean; version: number; employeeNumber: { code: string }; department: { name: string }; nfcAssignments: { nfcTag: { uid: string } }[] }>(employee: T) {
-  return { id: employee.id, code: employee.employeeNumber.code, name: employee.name, department: employee.department.name, nfcUid: employee.nfcAssignments[0]?.nfcTag.uid ?? "", active: employee.active, version: employee.version };
+function withVehicleCode<T extends { id: string; name: string; plateNumber: string; color: string; hasEtc: boolean; hasNavigation: boolean; fuelLevel: number | null; status: "AVAILABLE" | "RESERVED" | "IN_USE" | "MAINTENANCE"; parkingSpotId: string | null; active: boolean; version: number; vehicleNumber: { code: string }; nfcAssignments: LatestNfcAssignment[] }>(vehicle: T) {
+  return { id: vehicle.id, code: vehicle.vehicleNumber.code, name: vehicle.name, plateNumber: vehicle.plateNumber, nfcUid: restorableNfcTag(vehicle.nfcAssignments)?.uid ?? "", color: vehicle.color, hasEtc: vehicle.hasEtc, hasNavigation: vehicle.hasNavigation, fuelLevel: vehicle.fuelLevel, status: vehicle.status, parkingSpotId: vehicle.parkingSpotId, active: vehicle.active, version: vehicle.version };
+}
+
+function withEmployeeCode<T extends { id: string; name: string; active: boolean; version: number; employeeNumber: { code: string }; department: { name: string }; nfcAssignments: LatestNfcAssignment[] }>(employee: T) {
+  return { id: employee.id, code: employee.employeeNumber.code, name: employee.name, department: employee.department.name, nfcUid: restorableNfcTag(employee.nfcAssignments)?.uid ?? "", active: employee.active, version: employee.version };
 }
 
 function todayInTokyo() {
@@ -55,6 +65,11 @@ async function expireStaleReservations(now = new Date()) {
   });
 }
 
+// rowを渡すと、JSON取込の何件目かを添えて知らせる。
+function assertRecordCode(code: string, kind: "employee" | "vehicle", row?: number) {
+  if (!isRecordCode(code)) throw new Error(`${row ? `${row}件目の` : ""}${recordCodeMessage(kind)}`);
+}
+
 async function assertNfcAvailable(nfcUid: string, exclude?: { employeeId?: string; vehicleId?: string }) {
   const assignment = await prisma.nfcAssignment.findFirst({ where: { validTo: null, nfcTag: { uid: { equals: nfcUid, mode: "insensitive" } } }, select: { employeeId: true, vehicleId: true, employee: { select: { name: true } }, vehicle: { select: { name: true } } } });
   const ownedByExcludedEmployee = assignment?.employeeId === exclude?.employeeId;
@@ -69,19 +84,32 @@ const optionalNfcUidSchema = z.preprocess(
   nfcUidSchema.optional(),
 );
 const idSchema = z.string().trim().min(1).max(100);
+// 形式（英字1文字＋数字3桁）は、どの項目が誤りかを伝えるため各処理で確かめる。DBの制約でも同じ形式に限る。
+const recordCodeSchema = z.string().max(20).transform(normalizeRecordCode).pipe(z.string().min(1));
+// 区画番号は配置図の小さな枠に出すため短くし、全角数字は半角へそろえる。
+// 表示名は区画の枠に収まる長さにする。空欄なら用途から自動で決める。
+const spotLabelSchema = z.string().transform((value) => value.normalize("NFKC").trim()).pipe(z.string().max(SPOT_LABEL_MAX_LENGTH, `表示名は${SPOT_LABEL_MAX_LENGTH}文字以内で入力してください`)).transform((value) => value || null);
+const spotCodeSchema = z.string().transform((value) => value.normalize("NFKC").trim()).pipe(z.string().min(1, "区画番号を入力してください").max(12, "区画番号は12文字以内で入力してください").regex(/^\S+$/, "区画番号に空白は使えません"));
 // 空白の違いで同じ部署が二重に登録されないよう、連続する空白を1つにまとめる。
 const departmentNameSchema = z.string().trim().min(1).max(50).transform((value) => value.replace(/\s+/g, " "));
 const actorSchema = { actorName: z.string().trim().max(50).optional(), actorEmployeeId: idSchema.optional() };
-const employeeImportItemSchema = z.object({ code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), department: departmentNameSchema, nfcUid: optionalNfcUidSchema });
-const vehicleImportItemSchema = z.object({ code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#2563eb"), hasEtc: z.boolean().default(false), hasNavigation: z.boolean().default(false) });
+const employeeImportItemSchema = z.object({ code: recordCodeSchema, name: z.string().trim().min(1).max(50), department: departmentNameSchema, nfcUid: optionalNfcUidSchema });
+const vehicleImportItemSchema = z.object({ code: recordCodeSchema, name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#2563eb"), hasEtc: z.boolean().default(false), hasNavigation: z.boolean().default(false), spotId: idSchema.optional() });
+const maintenanceNoteSchema = z.string().trim().max(MAINTENANCE_NOTE_MAX).nullable().optional().transform((value) => value || null);
 const actionSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("createEmployee"), code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), department: departmentNameSchema, nfcUid: nfcUidSchema }),
-  z.object({ action: z.literal("createVehicle"), code: z.string().trim().min(1).max(20), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, spotId: idSchema.optional(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().default(false), hasNavigation: z.boolean().default(false) }),
-  z.object({ action: z.literal("updateEmployee"), id: idSchema, version: z.number().int().nonnegative(), code: z.string().trim().min(1).max(20).optional(), name: z.string().trim().min(1).max(50), department: departmentNameSchema, nfcUid: nfcUidSchema }),
-  z.object({ action: z.literal("updateVehicle"), id: idSchema, version: z.number().int().nonnegative(), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().optional(), hasNavigation: z.boolean().optional() }),
+  z.object({ action: z.literal("createEmployee"), code: recordCodeSchema, name: z.string().trim().min(1).max(50), department: departmentNameSchema, nfcUid: optionalNfcUidSchema }),
+  z.object({ action: z.literal("createVehicle"), code: recordCodeSchema, name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, spotId: idSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().default(false), hasNavigation: z.boolean().default(false) }),
+  z.object({ action: z.literal("updateEmployee"), id: idSchema, version: z.number().int().nonnegative(), code: recordCodeSchema.optional(), name: z.string().trim().min(1).max(50), department: departmentNameSchema, nfcUid: optionalNfcUidSchema }),
+  z.object({ action: z.literal("updateVehicle"), id: idSchema, version: z.number().int().nonnegative(), code: recordCodeSchema.optional(), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().optional(), hasNavigation: z.boolean().optional() }),
   z.object({ action: z.literal("setEmployeeActive"), id: idSchema, version: z.number().int().nonnegative(), active: z.boolean() }),
   z.object({ action: z.literal("setVehicleActive"), id: idSchema, version: z.number().int().nonnegative(), active: z.boolean() }),
-  z.object({ action: z.literal("setVehicleMaintenance"), id: idSchema, version: z.number().int().nonnegative(), maintenance: z.boolean() }),
+  // maintenanceIdを渡すと、登録済みの整備予定を開始する。plannedEndは戻り予定で、nullなら未定。
+  z.object({ action: z.literal("startMaintenance"), vehicleId: idSchema, version: z.number().int().nonnegative(), kind: z.enum(MAINTENANCE_KINDS), note: maintenanceNoteSchema, plannedEnd: z.string().datetime().nullable().optional(), maintenanceId: idSchema.optional() }),
+  z.object({ action: z.literal("scheduleMaintenance"), vehicleId: idSchema, kind: z.enum(MAINTENANCE_KINDS), note: maintenanceNoteSchema, plannedStart: z.string().datetime(), plannedEnd: z.string().datetime() }),
+  z.object({ action: z.literal("updateMaintenance"), maintenanceId: idSchema, version: z.number().int().nonnegative(), note: maintenanceNoteSchema, plannedStart: z.string().datetime().optional(), plannedEnd: z.string().datetime().nullable().optional() }),
+  z.object({ action: z.literal("cancelMaintenance"), maintenanceId: idSchema, version: z.number().int().nonnegative() }),
+  // spotIdを省くと、整備前の区画（車検で外出中も確保していた区画）に戻す。
+  z.object({ action: z.literal("endMaintenance"), vehicleId: idSchema, version: z.number().int().nonnegative(), spotId: idSchema.optional(), fromSettings: z.boolean().optional(), ...actorSchema }),
   z.object({ action: z.literal("importEmployees"), items: z.array(employeeImportItemSchema).min(1).max(500) }),
   z.object({ action: z.literal("importVehicles"), items: z.array(vehicleImportItemSchema).min(1).max(500) }),
   z.object({ action: z.literal("start"), employeeId: idSchema, vehicleId: idSchema, minutes: z.number().int().min(15).max(10_080), ...actorSchema }),
@@ -93,7 +121,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("setTripEnd"), tripId: idSchema, version: z.number().int().nonnegative(), plannedEnd: z.string().datetime(), ...actorSchema }),
   z.object({ action: z.literal("cancelTrip"), tripId: idSchema, version: z.number().int().nonnegative(), ...actorSchema }),
   z.object({ action: z.literal("moveVehicle"), vehicleId: idSchema, version: z.number().int().nonnegative(), spotId: idSchema, ...actorSchema }),
-  z.object({ action: z.literal("updateSpotRole"), id: idSchema, version: z.number().int().nonnegative(), role: z.enum(PARKING_SPOT_ROLES), dedicatedVehicleId: idSchema.nullable() }),
+  z.object({ action: z.literal("updateSpot"), id: idSchema, version: z.number().int().nonnegative(), code: spotCodeSchema, label: spotLabelSchema.nullable(), role: z.enum(PARKING_SPOT_ROLES), dedicatedVehicleId: idSchema.nullable() }),
   z.object({ action: z.literal("setFuelLevel"), vehicleId: idSchema, version: z.number().int().nonnegative(), fuelLevel: z.number().int().min(0).max(FUEL_LEVEL_MAX), ...actorSchema }),
   z.object({ action: z.literal("createDepartment"), name: departmentNameSchema }),
   z.object({ action: z.literal("renameDepartment"), id: idSchema, version: z.number().int().nonnegative(), name: departmentNameSchema }),
@@ -121,11 +149,49 @@ async function findSelectableDepartment(tx: Prisma.TransactionClient, name: stri
 }
 
 // 専用区画に別の車を置こうとしたら止める。vehicleIdがnullなら、これから登録する車両として扱う。
-async function assertSpotAllowsVehicle(tx: Prisma.TransactionClient, spot: { code: string; role: (typeof PARKING_SPOT_ROLES)[number]; dedicatedVehicleId: string | null }, vehicleId: string | null) {
+async function assertSpotAllowsVehicle(tx: Prisma.TransactionClient, spot: { code: string; role: (typeof PARKING_SPOT_ROLES)[number]; dedicatedVehicleId: string | null; label: string | null }, vehicleId: string | null) {
   if (canUseSpot({ id: vehicleId ?? "" }, spot)) return;
   const dedicated = spot.dedicatedVehicleId ? await tx.vehicle.findUnique({ where: { id: spot.dedicatedVehicleId }, select: { name: true } }) : null;
   throw new Error(`${formatSpotLabel({ ...spot, dedicatedVehicleName: dedicated?.name ?? null })}には他の車両を駐車できません`);
 }
+
+// 利用再開した車両は、空いている仮置き区画へ置く。取り合いは仮置き用のロックで順番にする。
+async function takeFreeHoldingSpot(tx: Prisma.TransactionClient) {
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('fleet-holding-spots'))::text AS holding_lock`;
+  const candidates = await tx.parkingSpot.findMany({ where: { role: "HOLDING", enabled: true, vehicle: { is: null } }, orderBy: { code: "asc" }, select: { id: true } });
+  for (const candidate of candidates) {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-spot:${candidate.id}`}))::text AS spot_lock`;
+    // ロック待ちの間に配置図から車が置かれていないかを確かめる。
+    const spot = await tx.parkingSpot.findUnique({ where: { id: candidate.id }, include: { vehicle: { select: { id: true } } } });
+    if (spot?.enabled && spot.role === "HOLDING" && !spot.vehicle) return spot;
+  }
+  return null;
+}
+
+// 車両の整備予定・整備中の期間と重なる記録を探す。戻り予定が未定の整備は、終わりのない期間として扱う。
+function findMaintenanceOverlap(tx: Prisma.TransactionClient, vehicleId: string, start: Date, end: Date, excludeId?: string) {
+  return tx.vehicleMaintenance.findFirst({
+    where: { vehicleId, id: excludeId ? { not: excludeId } : undefined, status: { in: ["SCHEDULED", "ACTIVE"] }, plannedStart: { lt: end }, OR: [{ plannedEnd: null }, { plannedEnd: { gt: start } }] },
+    orderBy: { plannedStart: "asc" },
+  });
+}
+
+async function assertNoMaintenanceOverlap(tx: Prisma.TransactionClient, vehicleId: string, start: Date, end: Date) {
+  const maintenance = await findMaintenanceOverlap(tx, vehicleId, start, end);
+  if (maintenance) throw new Error(maintenanceConflictMessage(maintenance));
+}
+
+// 整備の期間と重なる利用予定を探す。endがnullなら戻りが未定なので、start以降の予定はすべて重なる。
+async function assertNoTripOverlap(tx: Prisma.TransactionClient, vehicleId: string, start: Date, end: Date | null) {
+  const trip = await tx.trip.findFirst({
+    where: { vehicleId, status: { in: ["RESERVED", "IN_USE"] }, plannedEnd: { gt: start }, ...(end ? { plannedStart: { lt: end } } : {}) },
+    include: { employee: { select: { name: true } } },
+    orderBy: { plannedStart: "asc" },
+  });
+  if (trip) throw new Error(`${trip.employee.name}さんの${trip.status === "IN_USE" ? "利用" : "予約"}（${formatMaintenanceTime(trip.plannedStart)}〜${formatMaintenanceTime(trip.plannedEnd)}）と重なっています。先に予約を移動または取り消してください`);
+}
+
+const lockVehicle = (tx: Prisma.TransactionClient, vehicleId: string) => tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-vehicle:${vehicleId}`}))::text AS vehicle_lock`;
 
 export async function GET(request: Request) {
   await expireStaleReservations();
@@ -137,7 +203,7 @@ export async function GET(request: Request) {
   const requestedDays = Number(url.searchParams.get("days"));
   const days = requestedDays === 1 || requestedDays === 3 ? requestedDays : 3;
   const dayEnd = new Date(dayStart.getTime() + days * 24 * 60 * 60_000);
-  const [employees, departments, vehicles, spots, trips, nextReservations, backup, system] = await Promise.all([
+  const [employees, departments, vehicles, spots, trips, nextReservations, maintenances, backup, system] = await Promise.all([
     prisma.employee.findMany({ include: { employeeNumber: true, department: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } }, orderBy: { employeeNumber: { code: "asc" } } }),
     prisma.department.findMany({ include: { _count: { select: { employees: { where: { active: true } } } } }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
     prisma.vehicle.findMany({ include: { vehicleNumber: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } }, orderBy: { vehicleNumber: { code: "asc" } } }),
@@ -156,6 +222,11 @@ export async function GET(request: Request) {
       where: { status: "RESERVED", vehicle: { trips: { some: { status: "IN_USE" } } } },
       include: { employee: { include: { employeeNumber: true, department: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } } }, vehicle: { include: { vehicleNumber: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } } } }, orderBy: { plannedStart: "asc" },
     }),
+    // 予定と整備中は範囲に関係なく返す。設定画面の予定一覧と、地図の「車検で不在」表示に使う。
+    prisma.vehicleMaintenance.findMany({
+      where: { OR: [{ status: { in: ["SCHEDULED", "ACTIVE"] } }, { status: "COMPLETED", actualStart: { lt: dayEnd }, actualEnd: { gt: dayStart } }] },
+      orderBy: { plannedStart: "asc" },
+    }),
     getBackupStatus(),
     getApplicationSystemStatus(),
   ]);
@@ -166,6 +237,7 @@ export async function GET(request: Request) {
     spots: spots.map((spot) => ({ ...spot, dedicatedVehicleName: vehicles.find((vehicle) => vehicle.id === spot.dedicatedVehicleId)?.name ?? null, vehicle: spot.vehicle ? withVehicleCode(spot.vehicle) : null })),
     trips: trips.map((trip) => ({ ...trip, employee: withEmployeeCode(trip.employee), vehicle: withVehicleCode(trip.vehicle) })),
     nextReservations: nextReservations.map((trip) => ({ ...trip, employee: withEmployeeCode(trip.employee), vehicle: withVehicleCode(trip.vehicle) })),
+    maintenances,
     system: {
       backupLatestAt: backup.latestAt,
       backupVerifiedAt: backup.verifiedAt,
@@ -206,28 +278,31 @@ export async function POST(request: Request) {
       auditActor = { actorEmployeeId: actor.id, actorName: actor.name };
     }
     if (input.action === "createEmployee") {
-      await assertNfcAvailable(input.nfcUid);
+      assertRecordCode(input.code, "employee");
+      if (input.nfcUid) await assertNfcAvailable(input.nfcUid);
       await prisma.$transaction(async (tx) => {
         const employeeNumber = await tx.employeeNumber.upsert({ where: { code: input.code }, update: {}, create: { code: input.code } });
         const department = await findSelectableDepartment(tx, input.department);
         const assigned = await tx.employee.findFirst({ where: { employeeNumberId: employeeNumber.id, active: true }, select: { name: true } });
         if (assigned) throw new Error(`社員番号${input.code}は「${assigned.name}」で使用中です。旧社員の利用を停止してから登録してください`);
         const employee = await tx.employee.create({ data: { employeeNumberId: employeeNumber.id, departmentId: department.id, name: input.name } });
-        const nfcTag = await tx.nfcTag.upsert({ where: { uid: input.nfcUid }, update: {}, create: { uid: input.nfcUid } });
-        await tx.nfcAssignment.create({ data: { employeeId: employee.id, nfcTagId: nfcTag.id } });
+        if (input.nfcUid) {
+          const nfcTag = await tx.nfcTag.upsert({ where: { uid: input.nfcUid }, update: {}, create: { uid: input.nfcUid } });
+          await tx.nfcAssignment.create({ data: { employeeId: employee.id, nfcTagId: nfcTag.id } });
+        }
         await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "社員登録", targetType: "Employee", targetId: employee.id, description: `${input.code} ${employee.name}を登録` } });
       });
     }
     if (input.action === "createVehicle") {
+      assertRecordCode(input.code, "vehicle");
       if (input.nfcUid) await assertNfcAvailable(input.nfcUid);
       await prisma.$transaction(async (tx) => {
-        if (input.spotId) {
-          await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-spot:${input.spotId}`}))::text AS spot_lock`;
-          const spot = await tx.parkingSpot.findUnique({ where: { id: input.spotId }, include: { vehicle: true } });
-          if (!spot || !spot.enabled) throw new Error("選択した駐車区画は利用できません");
-          if (spot.vehicle) throw new Error(`区画${spot.code}は使用中です`);
-          await assertSpotAllowsVehicle(tx, spot, null);
-        }
+        // 新車は必ず区画を選んで登録する。場所が決まっていない車は仮置き区画を選ぶ。
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-spot:${input.spotId}`}))::text AS spot_lock`;
+        const spot = await tx.parkingSpot.findUnique({ where: { id: input.spotId }, include: { vehicle: true } });
+        if (!spot || !spot.enabled) throw new Error("選択した駐車区画は利用できません");
+        if (spot.vehicle) throw new Error(`区画${spot.code}は使用中です`);
+        await assertSpotAllowsVehicle(tx, spot, null);
         const vehicleNumber = await tx.vehicleNumber.upsert({ where: { code: input.code }, update: {}, create: { code: input.code } });
         const assigned = await tx.vehicle.findFirst({ where: { vehicleNumberId: vehicleNumber.id, active: true }, select: { name: true } });
         if (assigned) throw new Error(`車両番号${input.code}は「${assigned.name}」で使用中です。旧車両の利用を停止してから登録してください`);
@@ -240,7 +315,8 @@ export async function POST(request: Request) {
       });
     }
     if (input.action === "updateEmployee") {
-      await assertNfcAvailable(input.nfcUid, { employeeId: input.id });
+      if (input.code !== undefined) assertRecordCode(input.code, "employee");
+      if (input.nfcUid) await assertNfcAvailable(input.nfcUid, { employeeId: input.id });
       await prisma.$transaction(async (tx) => {
         const employee = await tx.employee.findUniqueOrThrow({ where: { id: input.id }, include: { employeeNumber: true, nfcAssignments: { where: { validTo: null }, include: { nfcTag: true }, take: 1 } } });
         const department = await findSelectableDepartment(tx, input.department, employee.departmentId);
@@ -257,34 +333,52 @@ export async function POST(request: Request) {
         }
         const updated = await tx.employee.updateMany({ where: { id: input.id, version: input.version }, data: { name: input.name, departmentId: department.id, employeeNumberId, version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
+        // 付け替え前の番号は、ほかの社員が使っていなければ消して残さない。
+        if (codeChanged) await tx.employeeNumber.deleteMany({ where: { id: employee.employeeNumberId, employees: { none: {} } } });
         const currentUid = employee.nfcAssignments[0]?.nfcTag.uid;
         if (currentUid !== input.nfcUid) {
           if (!employee.active) throw new Error("無効な社員のNFCカードは変更できません。先に社員を再有効化してください");
           const changedAt = new Date();
-          await tx.nfcAssignment.updateMany({ where: { employeeId: employee.id, validTo: null }, data: { validTo: changedAt } });
-          const nfcTag = await tx.nfcTag.upsert({ where: { uid: input.nfcUid }, update: {}, create: { uid: input.nfcUid } });
-          await tx.nfcAssignment.create({ data: { employeeId: employee.id, nfcTagId: nfcTag.id, validFrom: changedAt } });
+          await tx.nfcAssignment.updateMany({ where: { employeeId: employee.id, validTo: null }, data: { validTo: changedAt, cleared: !input.nfcUid } });
+          if (input.nfcUid) {
+            const nfcTag = await tx.nfcTag.upsert({ where: { uid: input.nfcUid }, update: {}, create: { uid: input.nfcUid } });
+            await tx.nfcAssignment.create({ data: { employeeId: employee.id, nfcTagId: nfcTag.id, validFrom: changedAt } });
+          }
         }
         await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "社員情報修正", targetType: "Employee", targetId: input.id, description: codeChanged ? `${input.name}の登録情報を修正（社員番号 ${employee.employeeNumber.code}→${input.code}）` : `${input.name}の登録情報を修正` } });
       });
     }
     if (input.action === "updateVehicle") {
+      if (input.code !== undefined) assertRecordCode(input.code, "vehicle");
       if (input.nfcUid) await assertNfcAvailable(input.nfcUid, { vehicleId: input.id });
       await prisma.$transaction(async (tx) => {
-        const vehicle = await tx.vehicle.findUniqueOrThrow({ where: { id: input.id }, include: { nfcAssignments: { where: { validTo: null }, include: { nfcTag: true }, take: 1 } } });
-        const updated = await tx.vehicle.updateMany({ where: { id: input.id, version: input.version }, data: { name: input.name, plateNumber: input.plateNumber, color: input.color, ...(input.hasEtc === undefined ? {} : { hasEtc: input.hasEtc }), ...(input.hasNavigation === undefined ? {} : { hasNavigation: input.hasNavigation }), version: { increment: 1 } } });
+        const vehicle = await tx.vehicle.findUniqueOrThrow({ where: { id: input.id }, include: { vehicleNumber: true, nfcAssignments: { where: { validTo: null }, include: { nfcTag: true }, take: 1 } } });
+        // 車両番号は他の（無効な）車両と共有され得るため、番号の行は書き換えず付け替える。
+        const codeChanged = input.code !== undefined && input.code !== vehicle.vehicleNumber.code;
+        let vehicleNumberId = vehicle.vehicleNumberId;
+        if (codeChanged) {
+          const vehicleNumber = await tx.vehicleNumber.upsert({ where: { code: input.code! }, update: {}, create: { code: input.code! } });
+          if (vehicle.active) {
+            const assigned = await tx.vehicle.findFirst({ where: { vehicleNumberId: vehicleNumber.id, active: true, id: { not: vehicle.id } }, select: { name: true } });
+            if (assigned) throw new Error(`車両番号${input.code}は「${assigned.name}」で使用中です`);
+          }
+          vehicleNumberId = vehicleNumber.id;
+        }
+        const updated = await tx.vehicle.updateMany({ where: { id: input.id, version: input.version }, data: { vehicleNumberId, name: input.name, plateNumber: input.plateNumber, color: input.color, ...(input.hasEtc === undefined ? {} : { hasEtc: input.hasEtc }), ...(input.hasNavigation === undefined ? {} : { hasNavigation: input.hasNavigation }), version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
+        // 付け替え前の番号は、ほかの車両が使っていなければ消して残さない。
+        if (codeChanged) await tx.vehicleNumber.deleteMany({ where: { id: vehicle.vehicleNumberId, vehicles: { none: {} } } });
         const currentUid = vehicle.nfcAssignments[0]?.nfcTag.uid;
         if (currentUid !== input.nfcUid) {
           if (!vehicle.active) throw new Error("無効な車両のNFCタグは変更できません。先に車両を再有効化してください");
           const changedAt = new Date();
-          await tx.nfcAssignment.updateMany({ where: { vehicleId: vehicle.id, validTo: null }, data: { validTo: changedAt } });
+          await tx.nfcAssignment.updateMany({ where: { vehicleId: vehicle.id, validTo: null }, data: { validTo: changedAt, cleared: !input.nfcUid } });
           if (input.nfcUid) {
             const nfcTag = await tx.nfcTag.upsert({ where: { uid: input.nfcUid }, update: {}, create: { uid: input.nfcUid } });
             await tx.nfcAssignment.create({ data: { vehicleId: vehicle.id, nfcTagId: nfcTag.id, validFrom: changedAt } });
           }
         }
-        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "車両情報修正", targetType: "Vehicle", targetId: input.id, description: `${input.name}の登録情報を修正` } });
+        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "車両情報修正", targetType: "Vehicle", targetId: input.id, description: codeChanged ? `${input.name}の登録情報を修正（車両番号 ${vehicle.vehicleNumber.code}→${input.code}）` : `${input.name}の登録情報を修正` } });
       });
     }
     if (input.action === "setEmployeeActive") {
@@ -297,8 +391,8 @@ export async function POST(request: Request) {
         if (input.active) {
           const assigned = await tx.employee.findFirst({ where: { employeeNumberId: employee.employeeNumberId, active: true, id: { not: employee.id } }, select: { name: true } });
           if (assigned) throw new Error(`この社員番号は「${assigned.name}」で使用中のため利用再開できません`);
-          // NFCは任意のため、カード履歴がなければカードなしで再開する。
-          const latestTag = employee.nfcAssignments[0]?.nfcTag;
+          // NFCは任意のため、戻すカードがなければカードなしで再開する。
+          const latestTag = restorableNfcTag(employee.nfcAssignments);
           if (latestTag) {
             const cardOwner = await tx.nfcAssignment.findFirst({ where: { nfcTagId: latestTag.id, validTo: null }, select: { employee: { select: { name: true } }, vehicle: { select: { name: true } } } });
             const owner = cardOwner?.employee?.name ?? cardOwner?.vehicle?.name;
@@ -316,10 +410,11 @@ export async function POST(request: Request) {
       await prisma.$transaction(async (tx) => {
         const vehicle = await tx.vehicle.findUniqueOrThrow({ where: { id: input.id }, include: { nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } } });
         if (!input.active && vehicle.status !== "AVAILABLE") throw new Error("利用中・予約中・整備中の車両は利用停止できません");
+        if (!input.active && await tx.vehicleMaintenance.findFirst({ where: { vehicleId: input.id, status: "SCHEDULED" }, select: { id: true } })) throw new Error("整備予定がある車両は利用停止できません。先に整備予定を取り消してください");
         if (input.active) {
           const assigned = await tx.vehicle.findFirst({ where: { vehicleNumberId: vehicle.vehicleNumberId, active: true, id: { not: vehicle.id } }, select: { name: true } });
           if (assigned) throw new Error(`この車両番号は「${assigned.name}」で使用中のため利用再開できません`);
-          const latestTag = vehicle.nfcAssignments[0]?.nfcTag;
+          const latestTag = restorableNfcTag(vehicle.nfcAssignments);
           if (latestTag) {
             const tagOwner = await tx.nfcAssignment.findFirst({ where: { nfcTagId: latestTag.id, validTo: null }, select: { employee: { select: { name: true } }, vehicle: { select: { name: true } } } });
             const owner = tagOwner?.employee?.name ?? tagOwner?.vehicle?.name;
@@ -327,24 +422,117 @@ export async function POST(request: Request) {
             await tx.nfcAssignment.create({ data: { vehicleId: vehicle.id, nfcTagId: latestTag.id } });
           }
         }
-        const updated = await tx.vehicle.updateMany({ where: { id: input.id, version: input.version }, data: { active: input.active, parkingSpotId: input.active ? vehicle.parkingSpotId : null, version: { increment: 1 } } });
+        // 利用停止で区画を空けているため、再開時は空いている仮置き区画へ置く。空きがなければ位置未設定のまま再開する。
+        const holdingSpot = input.active && !vehicle.active && !vehicle.parkingSpotId ? await takeFreeHoldingSpot(tx) : null;
+        const updated = await tx.vehicle.updateMany({ where: { id: input.id, version: input.version }, data: { active: input.active, parkingSpotId: input.active ? vehicle.parkingSpotId ?? holdingSpot?.id ?? null : null, version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
         if (!input.active) await tx.nfcAssignment.updateMany({ where: { vehicleId: vehicle.id, validTo: null }, data: { validTo: new Date() } });
-        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: input.active ? "車両再有効化" : "車両無効化", targetType: "Vehicle", targetId: input.id, description: input.active ? "車両を再有効化" : "車両を無効化" } });
+        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: input.active ? "車両再有効化" : "車両無効化", targetType: "Vehicle", targetId: input.id, description: input.active ? `車両を再有効化${holdingSpot ? `（仮置き${holdingSpot.code}）` : ""}` : "車両を無効化" } });
       });
     }
-    if (input.action === "setVehicleMaintenance") {
+    if (input.action === "startMaintenance") {
+      const now = new Date();
+      const plannedEnd = input.plannedEnd ? new Date(input.plannedEnd) : null;
+      if (plannedEnd && plannedEnd <= now) throw new Error("戻り予定は現在時刻より後にしてください");
+      if (plannedEnd && plannedEnd.getTime() > now.getTime() + MAINTENANCE_MAX_DAYS * 24 * 60 * 60_000) throw new Error(`戻り予定は${MAINTENANCE_MAX_DAYS}日以内で指定してください`);
       await prisma.$transaction(async (tx) => {
-        const vehicle = await tx.vehicle.findUniqueOrThrow({ where: { id: input.id }, select: { id: true, name: true, active: true, status: true } });
-        if (!vehicle.active) throw new Error("無効な車両は整備状態を変更できません");
-        if (vehicle.status !== "AVAILABLE" && vehicle.status !== "MAINTENANCE") throw new Error("利用中または予約中の車両は整備状態へ変更できません");
-        const nextStatus = input.maintenance ? "MAINTENANCE" : "AVAILABLE";
-        const updated = await tx.vehicle.updateMany({ where: { id: input.id, version: input.version, status: vehicle.status }, data: { status: nextStatus, version: { increment: 1 } } });
+        await lockVehicle(tx, input.vehicleId);
+        const vehicle = await tx.vehicle.findUniqueOrThrow({ where: { id: input.vehicleId }, select: { name: true, active: true, status: true, parkingSpot: { select: { code: true } } } });
+        if (!vehicle.active) throw new Error("無効な車両は整備中にできません");
+        if (vehicle.status === "MAINTENANCE") throw new Error("この車両はすでに整備中です");
+        if (vehicle.status !== "AVAILABLE") throw new Error("利用中の車両は整備中にできません。返却してから変更してください");
+        // 故障はすぐ記録できるよう、今すぐの開始は予約と重なっても止めない。車検で外出しても区画は外さず確保する。
+        const updated = await tx.vehicle.updateMany({ where: { id: input.vehicleId, version: input.version, status: "AVAILABLE" }, data: { status: "MAINTENANCE", version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
-        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: input.maintenance ? "車両整備開始" : "車両整備解除", targetType: "Vehicle", targetId: input.id, description: input.maintenance ? `${vehicle.name}を整備中に変更` : `${vehicle.name}を利用可能に変更` } });
+        const data = { kind: input.kind, note: input.note, status: "ACTIVE" as const, plannedStart: now, plannedEnd, actualStart: now };
+        if (input.maintenanceId) {
+          const started = await tx.vehicleMaintenance.updateMany({ where: { id: input.maintenanceId, vehicleId: input.vehicleId, status: "SCHEDULED" }, data: { ...data, version: { increment: 1 } } });
+          if (started.count !== 1) throw new Error("この整備予定は開始できません。最新状態を確認してください");
+        } else {
+          await tx.vehicleMaintenance.create({ data: { vehicleId: input.vehicleId, ...data } });
+        }
+        const kept = input.kind === "OFF_SITE" && vehicle.parkingSpot ? `。区画${vehicle.parkingSpot.code}は確保` : "";
+        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "車両整備開始", targetType: "Vehicle", targetId: input.vehicleId, description: `${vehicle.name}を${MAINTENANCE_KIND_SHORT_LABELS[input.kind]}に変更${plannedEnd ? `（戻り予定 ${formatMaintenanceTime(plannedEnd)}）` : ""}${kept}` } });
+      });
+    }
+    if (input.action === "scheduleMaintenance") {
+      const now = new Date();
+      const plannedStart = new Date(input.plannedStart);
+      const plannedEnd = new Date(input.plannedEnd);
+      if (plannedStart.getTime() < now.getTime() - 60_000) throw new Error("開始予定は現在時刻より後にしてください");
+      if (plannedStart.getTime() > now.getTime() + MAINTENANCE_SCHEDULE_DAYS_AHEAD * 24 * 60 * 60_000) throw new Error("整備予定は1年先までで登録してください");
+      if (plannedEnd <= plannedStart) throw new Error("戻り予定は開始予定より後にしてください");
+      if (plannedEnd.getTime() - plannedStart.getTime() > MAINTENANCE_MAX_DAYS * 24 * 60 * 60_000) throw new Error(`整備期間は${MAINTENANCE_MAX_DAYS}日以内で指定してください`);
+      await prisma.$transaction(async (tx) => {
+        await lockVehicle(tx, input.vehicleId);
+        const vehicle = await tx.vehicle.findUniqueOrThrow({ where: { id: input.vehicleId }, select: { name: true, active: true } });
+        if (!vehicle.active) throw new Error("無効な車両には整備予定を登録できません");
+        await assertNoTripOverlap(tx, input.vehicleId, plannedStart, plannedEnd);
+        await assertNoMaintenanceOverlap(tx, input.vehicleId, plannedStart, plannedEnd);
+        const maintenance = await tx.vehicleMaintenance.create({ data: { vehicleId: input.vehicleId, kind: input.kind, note: input.note, plannedStart, plannedEnd } });
+        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "整備予定登録", targetType: "VehicleMaintenance", targetId: maintenance.id, description: `${vehicle.name}の${MAINTENANCE_KIND_SHORT_LABELS[input.kind]}を${formatMaintenanceTime(plannedStart)}〜${formatMaintenanceTime(plannedEnd)}で予定` } });
+      });
+    }
+    if (input.action === "updateMaintenance") {
+      const now = new Date();
+      await prisma.$transaction(async (tx) => {
+        const current = await tx.vehicleMaintenance.findUniqueOrThrow({ where: { id: input.maintenanceId }, include: { vehicle: { select: { name: true } } } });
+        await lockVehicle(tx, current.vehicleId);
+        if (current.status !== "SCHEDULED" && current.status !== "ACTIVE") throw new Error("完了・取消済みの整備は変更できません");
+        const scheduled = current.status === "SCHEDULED";
+        // 整備中は開始日時を動かさない。戻り予定と備考だけを直す。
+        const plannedStart = scheduled && input.plannedStart ? new Date(input.plannedStart) : current.plannedStart;
+        const plannedEnd = input.plannedEnd === undefined ? current.plannedEnd : input.plannedEnd ? new Date(input.plannedEnd) : null;
+        if (scheduled && !plannedEnd) throw new Error("整備予定には戻り予定が必要です");
+        if (scheduled && plannedStart.getTime() !== current.plannedStart.getTime() && plannedStart.getTime() < now.getTime() - 60_000) throw new Error("開始予定は現在時刻より後にしてください");
+        if (plannedEnd && plannedEnd <= (scheduled ? plannedStart : now)) throw new Error(scheduled ? "戻り予定は開始予定より後にしてください" : "戻り予定は現在時刻より後にしてください");
+        if (plannedEnd && plannedEnd.getTime() - Math.max(plannedStart.getTime(), now.getTime()) > MAINTENANCE_MAX_DAYS * 24 * 60 * 60_000) throw new Error(`整備期間は${MAINTENANCE_MAX_DAYS}日以内で指定してください`);
+        await assertNoTripOverlap(tx, current.vehicleId, scheduled ? plannedStart : now, plannedEnd);
+        const overlap = await findMaintenanceOverlap(tx, current.vehicleId, plannedStart, plannedEnd ?? new Date("9999-12-31T00:00:00Z"), current.id);
+        if (overlap) throw new Error(maintenanceConflictMessage(overlap));
+        const updated = await tx.vehicleMaintenance.updateMany({ where: { id: current.id, version: input.version, status: current.status }, data: { note: input.note, plannedStart, plannedEnd, version: { increment: 1 } } });
+        if (updated.count !== 1) throw new Error("CONFLICT");
+        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: scheduled ? "整備予定変更" : "整備内容変更", targetType: "VehicleMaintenance", targetId: current.id, description: `${current.vehicle.name}の${scheduled ? `整備予定を${formatMaintenanceTime(plannedStart)}〜` : "戻り予定を"}${plannedEnd ? formatMaintenanceTime(plannedEnd) : "未定"}に変更` } });
+      });
+    }
+    if (input.action === "cancelMaintenance") {
+      await prisma.$transaction(async (tx) => {
+        const current = await tx.vehicleMaintenance.findUniqueOrThrow({ where: { id: input.maintenanceId }, include: { vehicle: { select: { name: true } } } });
+        if (current.status !== "SCHEDULED") throw new Error("開始前の整備予定だけ取り消せます");
+        const updated = await tx.vehicleMaintenance.updateMany({ where: { id: current.id, version: input.version, status: "SCHEDULED" }, data: { status: "CANCELLED", version: { increment: 1 } } });
+        if (updated.count !== 1) throw new Error("CONFLICT");
+        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "整備予定取消", targetType: "VehicleMaintenance", targetId: current.id, description: `${current.vehicle.name}の${formatMaintenanceTime(current.plannedStart)}からの整備予定を取り消し` } });
+      });
+    }
+    if (input.action === "endMaintenance") {
+      const actor = input.fromSettings ? { actorEmployeeId: null, actorName: "設定画面" } : auditActor;
+      await prisma.$transaction(async (tx) => {
+        if (input.spotId) await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-spot:${input.spotId}`}))::text AS spot_lock`;
+        await lockVehicle(tx, input.vehicleId);
+        const vehicle = await tx.vehicle.findUniqueOrThrow({ where: { id: input.vehicleId }, select: { name: true, status: true, parkingSpotId: true, parkingSpot: { select: { code: true } } } });
+        if (vehicle.status !== "MAINTENANCE") throw new Error("この車両は整備中ではありません");
+        // 整備記録を作る前から整備中だった車両は記録がないため、車両の状態だけを戻す。
+        const active = await tx.vehicleMaintenance.findFirst({ where: { vehicleId: input.vehicleId, status: "ACTIVE" }, orderBy: { plannedStart: "desc" } });
+        let spotId = vehicle.parkingSpotId;
+        let spotCode = vehicle.parkingSpot?.code ?? null;
+        if (input.spotId && input.spotId !== vehicle.parkingSpotId) {
+          const target = await tx.parkingSpot.findUniqueOrThrow({ where: { id: input.spotId }, include: { vehicle: { select: { id: true } } } });
+          if (!target.enabled) throw new Error("選択した駐車区画は利用できません");
+          if (target.vehicle && target.vehicle.id !== input.vehicleId) throw new Error(`区画${target.code}は使用中です`);
+          await assertSpotAllowsVehicle(tx, target, input.vehicleId);
+          spotId = target.id;
+          spotCode = target.code;
+        }
+        const updated = await tx.vehicle.updateMany({ where: { id: input.vehicleId, version: input.version, status: "MAINTENANCE" }, data: { status: "AVAILABLE", parkingSpotId: spotId, version: { increment: 1 } } });
+        if (updated.count !== 1) throw new Error("CONFLICT");
+        if (active) await tx.vehicleMaintenance.update({ where: { id: active.id }, data: { status: "COMPLETED", actualEnd: new Date(), returnSpotCode: spotCode, version: { increment: 1 } } });
+        const offSite = active?.kind === "OFF_SITE";
+        const moved = spotId !== vehicle.parkingSpotId && spotCode ? `（区画${spotCode}へ移動）` : "";
+        await tx.auditLog.create({ data: { operationId, ...actor, action: offSite ? "車検・修理から戻り" : "車両整備解除", targetType: "Vehicle", targetId: input.vehicleId, description: offSite ? `${vehicle.name}が戻り、${spotCode ? `区画${spotCode}へ駐車` : "駐車位置は未設定"}` : `${vehicle.name}を利用可能に変更${moved}` } });
       });
     }
     if (input.action === "importEmployees") {
+      input.items.forEach((item, index) => assertRecordCode(item.code, "employee", index + 1));
       const codes = new Set<string>();
       const nfcUids = new Set<string>();
       for (const item of input.items) {
@@ -384,10 +572,16 @@ export async function POST(request: Request) {
       });
     }
     if (input.action === "importVehicles") {
+      input.items.forEach((item, index) => assertRecordCode(item.code, "vehicle", index + 1));
       const codes = new Set<string>();
       const plates = new Set<string>();
       const nfcUids = new Set<string>();
+      const spotIds = new Set<string>();
       for (const item of input.items) {
+        if (item.spotId) {
+          if (spotIds.has(item.spotId)) throw new Error("JSON内で同じ駐車区画が複数の車両に割り当てられています");
+          spotIds.add(item.spotId);
+        }
         const codeKey = item.code.toLocaleUpperCase("ja");
         const plateKey = item.plateNumber.replace(/\s/g, "").toLocaleUpperCase("ja");
         if (codes.has(codeKey)) throw new Error(`JSON内で車両番号${item.code}が重複しています`);
@@ -402,7 +596,15 @@ export async function POST(request: Request) {
       await prisma.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('fleet-import-vehicles'))::text AS import_lock`;
         if (await tx.auditLog.findUnique({ where: { operationId }, select: { id: true } })) return;
+        // 区画を割り当てる場合は、配置図の移動や新規登録と同じ区画ロックを順番に取る。
+        for (const spotId of [...spotIds].sort()) await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-spot:${spotId}`}))::text AS spot_lock`;
         for (const item of input.items) {
+          if (item.spotId) {
+            const spot = await tx.parkingSpot.findUnique({ where: { id: item.spotId }, include: { vehicle: true } });
+            if (!spot || !spot.enabled) throw new Error(`${item.name}に選択した駐車区画は利用できません`);
+            if (spot.vehicle) throw new Error(`区画${spot.code}は使用中です`);
+            await assertSpotAllowsVehicle(tx, spot, null);
+          }
           const vehicleNumber = await tx.vehicleNumber.upsert({ where: { code: item.code }, update: {}, create: { code: item.code } });
           const existingVehicle = await tx.vehicle.findFirst({ where: { vehicleNumberId: vehicleNumber.id, active: true }, select: { name: true } });
           if (existingVehicle) throw new Error(`車両番号${item.code}は「${existingVehicle.name}」で使用中です`);
@@ -413,13 +615,13 @@ export async function POST(request: Request) {
             const nfcOwner = existingNfc?.employee?.name ?? existingNfc?.vehicle?.name;
             if (nfcOwner) throw new Error(`NFC UID ${item.nfcUid}は「${nfcOwner}」で使用中です`);
           }
-          const vehicle = await tx.vehicle.create({ data: { vehicleNumberId: vehicleNumber.id, name: item.name, plateNumber: item.plateNumber, color: item.color, hasEtc: item.hasEtc, hasNavigation: item.hasNavigation } });
+          const vehicle = await tx.vehicle.create({ data: { vehicleNumberId: vehicleNumber.id, name: item.name, plateNumber: item.plateNumber, color: item.color, hasEtc: item.hasEtc, hasNavigation: item.hasNavigation, parkingSpotId: item.spotId } });
           if (item.nfcUid) {
             const nfcTag = await tx.nfcTag.upsert({ where: { uid: item.nfcUid }, update: {}, create: { uid: item.nfcUid } });
             await tx.nfcAssignment.create({ data: { vehicleId: vehicle.id, nfcTagId: nfcTag.id } });
           }
         }
-        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "車両JSON取込", targetType: "Vehicle", targetId: "bulk", description: `${input.items.length}台をJSONから一括登録` } });
+        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "車両JSON取込", targetType: "Vehicle", targetId: "bulk", description: `${input.items.length}台をJSONから一括登録${spotIds.size ? `（区画に配置 ${spotIds.size}台）` : ""}` } });
       });
     }
     if (input.action === "start") {
@@ -430,6 +632,7 @@ export async function POST(request: Request) {
         const [vehicle, employee] = await Promise.all([tx.vehicle.findUniqueOrThrow({ where: { id: input.vehicleId } }), tx.employee.findUniqueOrThrow({ where: { id: input.employeeId } })]);
         if (!vehicle.active || vehicle.status !== "AVAILABLE") throw new Error("この車両は現在利用できません");
         if (!employee.active) throw new Error("この社員は現在利用できません");
+        await assertNoMaintenanceOverlap(tx, vehicle.id, now, plannedEnd);
         const reservation = await tx.trip.findFirst({
           where: { vehicleId: vehicle.id, status: "RESERVED", plannedStart: { lt: plannedEnd }, plannedEnd: { gt: now } },
           include: { employee: true },
@@ -467,8 +670,11 @@ export async function POST(request: Request) {
       await prisma.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-employee:${input.employeeId}`}))::text AS employee_lock, pg_advisory_xact_lock(hashtext(${`fleet-vehicle:${input.vehicleId}`}))::text AS vehicle_lock`;
         const [vehicle, employee] = await Promise.all([tx.vehicle.findUniqueOrThrow({ where: { id: input.vehicleId } }), tx.employee.findUniqueOrThrow({ where: { id: input.employeeId } })]);
-        if (!vehicle.active || vehicle.status !== "AVAILABLE") throw new Error("この車両は現在予約できません");
+        if (!vehicle.active || (vehicle.status !== "AVAILABLE" && vehicle.status !== "MAINTENANCE")) throw new Error("この車両は現在予約できません");
         if (!employee.active) throw new Error("この社員は現在予約できません");
+        await assertNoMaintenanceOverlap(tx, vehicle.id, plannedStart, plannedEnd);
+        // 整備中の車両は、戻り予定が決まっていればその後だけ予約できる。重なりは上で確認済み。
+        if (vehicle.status === "MAINTENANCE" && !await tx.vehicleMaintenance.findFirst({ where: { vehicleId: vehicle.id, status: "ACTIVE", plannedEnd: { lte: plannedStart } }, select: { id: true } })) throw new Error("整備中のため予約できません。戻り予定が決まれば、その後の時間を予約できます");
         const conflict = await tx.trip.findFirst({
           where: {
             status: { in: ["RESERVED", "IN_USE"] },
@@ -534,6 +740,7 @@ export async function POST(request: Request) {
           ],
         } });
         if (conflict) throw new Error("車両または利用者の予定と重なっています");
+        await assertNoMaintenanceOverlap(tx, trip.vehicleId, plannedStart, plannedEnd);
         const updated = await tx.trip.updateMany({ where: { id: trip.id, version: input.version, status: "RESERVED" }, data: { plannedStart, plannedEnd, version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
         await tx.auditLog.create({ data: { operationId, ...auditActor, action: "利用時間修正", targetType: "Trip", targetId: trip.id, description: "タイムラインから時間を変更" } });
@@ -558,6 +765,7 @@ export async function POST(request: Request) {
             ],
           } });
           if (overlap) throw new Error("延長時間が車両または利用者の予定と重なります");
+          await assertNoMaintenanceOverlap(tx, trip.vehicleId, trip.plannedEnd, newEnd);
         }
         const updated = await tx.trip.updateMany({ where: { id: trip.id, version: input.version }, data: { plannedEnd: newEnd, version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
@@ -585,6 +793,7 @@ export async function POST(request: Request) {
             ],
           } });
           if (overlap) throw new Error("指定した終了日時が車両または利用者の予定と重なります");
+          await assertNoMaintenanceOverlap(tx, trip.vehicleId, trip.plannedEnd, newEnd);
         }
         const updated = await tx.trip.updateMany({ where: { id: trip.id, version: input.version, status: trip.status }, data: { plannedEnd: newEnd, version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
@@ -603,19 +812,22 @@ export async function POST(request: Request) {
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-spot:${input.spotId}`}))::text AS spot_lock, pg_advisory_xact_lock(hashtext(${`fleet-vehicle:${input.vehicleId}`}))::text AS vehicle_lock`;
         const [target, movingVehicle] = await Promise.all([
           tx.parkingSpot.findUniqueOrThrow({ where: { id: input.spotId }, include: { vehicle: true } }),
-          tx.vehicle.findUniqueOrThrow({ where: { id: input.vehicleId }, select: { status: true } }),
+          tx.vehicle.findUniqueOrThrow({ where: { id: input.vehicleId }, select: { status: true, active: true, parkingSpotId: true } }),
         ]);
+        if (!movingVehicle.active) throw new Error("利用停止中の車両には駐車位置を設定できません");
         if (movingVehicle.status !== "AVAILABLE") throw new Error("利用中の車両には駐車位置を設定できません");
         if (!target.enabled) throw new Error("選択した駐車区画は利用できません");
         if (target.vehicle && target.vehicle.id !== input.vehicleId) throw new Error(`区画${target.code}は使用中です`);
         await assertSpotAllowsVehicle(tx, target, input.vehicleId);
         const updated = await tx.vehicle.updateMany({ where: { id: input.vehicleId, version: input.version }, data: { parkingSpotId: input.spotId, version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
-        await tx.auditLog.create({ data: { operationId, ...auditActor, action: "駐車位置修正", targetType: "Vehicle", targetId: input.vehicleId, description: `区画${target.code}へ変更` } });
+        await tx.auditLog.create({ data: { operationId, ...auditActor, action: "駐車位置修正", targetType: "Vehicle", targetId: input.vehicleId, description: movingVehicle.parkingSpotId ? `区画${target.code}へ変更` : `区画${target.code}に配置` } });
       });
     }
-    if (input.action === "updateSpotRole") {
+    if (input.action === "updateSpot") {
       await prisma.$transaction(async (tx) => {
+        // 番号の取り合いは区画番号用のロックで順番にする。
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('fleet-spot-codes'))::text AS spot_code_lock`;
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-spot:${input.id}`}))::text AS spot_lock`;
         const spot = await tx.parkingSpot.findUniqueOrThrow({ where: { id: input.id }, include: { vehicle: { select: { id: true, name: true } } } });
         const dedicatedVehicleId = input.role === "DEDICATED" ? input.dedicatedVehicleId : null;
@@ -627,12 +839,20 @@ export async function POST(request: Request) {
           if (spot.vehicle && spot.vehicle.id !== dedicatedVehicleId) throw new Error(`区画${spot.code}には${spot.vehicle.name}が駐車中です。先に移動してください`);
           dedicatedVehicleName = dedicated.name;
         }
-        if (spot.role === input.role && spot.dedicatedVehicleId === dedicatedVehicleId) throw new Error("役割は変更されていません");
-        const updated = await tx.parkingSpot.updateMany({ where: { id: input.id, version: input.version }, data: { role: input.role, dedicatedVehicleId, version: { increment: 1 } } });
+        const codeChanged = spot.code !== input.code;
+        const roleChanged = spot.role !== input.role || spot.dedicatedVehicleId !== dedicatedVehicleId;
+        const labelChanged = spot.label !== input.label;
+        if (!codeChanged && !roleChanged && !labelChanged) throw new Error("区画番号・用途・表示名は変更されていません");
+        if (codeChanged) {
+          const sameCode = await tx.parkingSpot.findUnique({ where: { code: input.code }, select: { id: true } });
+          if (sameCode) throw new Error(`区画番号${input.code}はすでに使われています`);
+        }
+        const updated = await tx.parkingSpot.updateMany({ where: { id: input.id, version: input.version }, data: { code: input.code, role: input.role, dedicatedVehicleId, label: input.label, version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
         const previousName = spot.dedicatedVehicleId ? (await tx.vehicle.findUnique({ where: { id: spot.dedicatedVehicleId }, select: { name: true } }))?.name ?? null : null;
         const describe = (role: typeof input.role, name: string | null) => role === "DEDICATED" ? `${name ?? "車両未設定"}専用` : SPOT_ROLE_LABELS[role];
-        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "区画役割変更", targetType: "ParkingSpot", targetId: input.id, description: `区画${spot.code}を「${describe(spot.role, previousName)}」から「${describe(input.role, dedicatedVehicleName)}」へ変更` } });
+        const changes = [codeChanged ? `番号を${input.code}へ` : "", roleChanged ? `用途を「${describe(spot.role, previousName)}」から「${describe(input.role, dedicatedVehicleName)}」へ` : "", labelChanged ? `表示名を${input.label ? `「${input.label}」` : "自動"}へ` : ""].filter(Boolean).join("、");
+        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "区画設定変更", targetType: "ParkingSpot", targetId: input.id, description: `区画${spot.code}の${changes}変更` } });
       });
     }
     if (input.action === "setFuelLevel") {

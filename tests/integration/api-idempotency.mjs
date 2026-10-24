@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import pg from "pg";
+import { freeRecordCodes } from "./record-codes.mjs";
 
 const { Client } = pg;
 const databaseUrl = process.env.DATABASE_URL;
@@ -18,6 +19,7 @@ async function post(body) {
 async function cleanup() {
   if (operationIds.length) await client.query('DELETE FROM "AuditLog" WHERE "operationId" = ANY($1)', [operationIds]);
   await client.query('DELETE FROM "Trip" WHERE "employeeId" = $1 OR "vehicleId" = $2', [ids.employee, ids.vehicle]);
+  await client.query('DELETE FROM "VehicleMaintenance" WHERE "vehicleId" = $1', [ids.vehicle]);
   await client.query('DELETE FROM "Vehicle" WHERE id = $1', [ids.vehicle]);
   await client.query('DELETE FROM "Employee" WHERE id = $1', [ids.employee]);
   await client.query('DELETE FROM "ParkingSpot" WHERE id = $1', [ids.spot]);
@@ -28,11 +30,13 @@ async function cleanup() {
 
 await client.connect();
 try {
+  const [employeeCode] = await freeRecordCodes(client, "EmployeeNumber", "V", 1);
+  const vehicleCodes = await freeRecordCodes(client, "VehicleNumber", "V", 2);
   const now = new Date();
   await client.query('INSERT INTO "Department" (id,name,active,"createdAt","updatedAt") VALUES ($1,$2,true,$3,$3)', [ids.department, `APIテスト${suffix}`, now]);
-  await client.query('INSERT INTO "EmployeeNumber" (id,code,"createdAt","updatedAt") VALUES ($1,$2,$3,$3)', [ids.employeeNumber, `TE${suffix}`, now]);
+  await client.query('INSERT INTO "EmployeeNumber" (id,code,"createdAt","updatedAt") VALUES ($1,$2,$3,$3)', [ids.employeeNumber, employeeCode, now]);
   await client.query('INSERT INTO "Employee" (id,"employeeNumberId","departmentId",name,active,version,"createdAt","updatedAt") VALUES ($1,$2,$3,$4,true,1,$5,$5)', [ids.employee, ids.employeeNumber, ids.department, `テスト社員${suffix}`, now]);
-  await client.query('INSERT INTO "VehicleNumber" (id,code,"createdAt","updatedAt") VALUES ($1,$2,$3,$3)', [ids.vehicleNumber, `TV${suffix}`, now]);
+  await client.query('INSERT INTO "VehicleNumber" (id,code,"createdAt","updatedAt") VALUES ($1,$2,$3,$3)', [ids.vehicleNumber, vehicleCodes[0], now]);
   await client.query('INSERT INTO "Vehicle" (id,"vehicleNumberId",name,"plateNumber",color,"fuelLevel",active,status,version,"createdAt","updatedAt") VALUES ($1,$2,$3,$4,$5,3,true,\'AVAILABLE\',1,$6,$6)', [ids.vehicle, ids.vehicleNumber, `テスト車両${suffix}`, `TEST-${suffix}`, "#2563eb", now]);
   await client.query('INSERT INTO "ParkingSpot" (id,code,x,y,width,height,orientation,enabled,version) VALUES ($1,$2,0,0,5,5,\'horizontal\',true,1)', [ids.spot, `T${suffix}`]);
 
@@ -116,7 +120,7 @@ try {
   assert.equal(operations.status, 200, await operations.text());
   const beforeMaintenance = await client.query('SELECT version FROM "Vehicle" WHERE id=$1', [ids.vehicle]);
   const maintenanceOperationId = crypto.randomUUID(); operationIds.push(maintenanceOperationId);
-  const maintenance = await post({ operationId: maintenanceOperationId, action: "setVehicleMaintenance", id: ids.vehicle, version: beforeMaintenance.rows[0].version, maintenance: true });
+  const maintenance = await post({ operationId: maintenanceOperationId, action: "startMaintenance", vehicleId: ids.vehicle, version: beforeMaintenance.rows[0].version, kind: "ON_SITE" });
   assert.equal(maintenance.status, 200, JSON.stringify(maintenance.body));
   const maintainedVehicle = await client.query('SELECT status,version FROM "Vehicle" WHERE id=$1', [ids.vehicle]);
   assert.equal(maintainedVehicle.rows[0].status, "MAINTENANCE");
@@ -124,7 +128,7 @@ try {
   const blockedStart = await post({ operationId: blockedStartOperationId, action: "start", employeeId: ids.employee, vehicleId: ids.vehicle, minutes: 60, actorName: "自動テスト", actorEmployeeId: ids.employee });
   assert.equal(blockedStart.status, 400, "整備中の車両で利用開始できてしまいました");
   const releaseOperationId = crypto.randomUUID(); operationIds.push(releaseOperationId);
-  const released = await post({ operationId: releaseOperationId, action: "setVehicleMaintenance", id: ids.vehicle, version: maintainedVehicle.rows[0].version, maintenance: false });
+  const released = await post({ operationId: releaseOperationId, action: "endMaintenance", vehicleId: ids.vehicle, version: maintainedVehicle.rows[0].version, fromSettings: true });
   assert.equal(released.status, 200, JSON.stringify(released.body));
   const releasedVehicle = await client.query('SELECT status FROM "Vehicle" WHERE id=$1', [ids.vehicle]);
   assert.equal(releasedVehicle.rows[0].status, "AVAILABLE");

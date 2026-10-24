@@ -8,7 +8,7 @@ type BridgeHealth = { sequence: number; readerConnected: boolean };
 type BridgeEvent = { sequence: number; uid: string; reader: string; readAt: string };
 type BridgeEvents = { sequence: number; readerConnected: boolean; event: BridgeEvent | null };
 
-const BRIDGE_URL = process.env.NEXT_PUBLIC_NFC_BRIDGE_URL ?? "http://127.0.0.1:17831";
+export const NFC_BRIDGE_URL = process.env.NEXT_PUBLIC_NFC_BRIDGE_URL ?? "http://127.0.0.1:17831";
 
 export function useNfcBridge(enabled: boolean, onUid: (uid: string) => void) {
   const [status, setStatus] = useState<NfcBridgeStatus>("idle");
@@ -25,7 +25,7 @@ export function useNfcBridge(enabled: boolean, onUid: (uid: string) => void) {
       const controller = new AbortController();
       const timeout = window.setTimeout(() => controller.abort(), 1500);
       try {
-        const response = await fetch(`${BRIDGE_URL}${path}`, { cache: "no-store", signal: controller.signal });
+        const response = await fetch(`${NFC_BRIDGE_URL}${path}`, { cache: "no-store", signal: controller.signal });
         if (!response.ok) throw new Error("bridge unavailable");
         return await response.json() as T;
       } finally { window.clearTimeout(timeout); }
@@ -76,7 +76,7 @@ export function useNfcBridgeHealth(enabled = true) {
       const controller = new AbortController();
       const timeout = window.setTimeout(() => controller.abort(), 1500);
       try {
-        const response = await fetch(`${BRIDGE_URL}/health`, { cache: "no-store", signal: controller.signal });
+        const response = await fetch(`${NFC_BRIDGE_URL}/health`, { cache: "no-store", signal: controller.signal });
         if (!response.ok) throw new Error("bridge unavailable");
         const health = await response.json() as BridgeHealth;
         if (!cancelled) setStatus(health.readerConnected ? "ready" : "no-reader");
@@ -99,7 +99,7 @@ export function useNfcBridgeHealth(enabled = true) {
 export function nfcBridgeStatusText(status: NfcBridgeStatus) {
   if (status === "ready") return "NFCリーダー接続済み";
   if (status === "no-reader") return "連携ソフトは起動中です。リーダーを接続してください";
-  if (status === "offline") return "このPCで「FleetFlow NFC Start」を起動してください（手動選択も可能です）";
+  if (status === "offline") return "NFC連携ソフトに接続できません（手動選択も可能です）";
   if (status === "connecting") return "NFC連携ソフトへ接続中…";
   return "";
 }

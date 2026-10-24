@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import pg from "pg";
+import { freeRecordCodes } from "./record-codes.mjs";
 
 const { Client } = pg;
 const databaseUrl = process.env.DATABASE_URL;
@@ -8,7 +9,7 @@ if (!databaseUrl) throw new Error("DATABASE_URL is required");
 
 const suffix = String(Date.now()).slice(-9);
 const names = { first: `部署試験A${suffix}`, second: `部署試験B${suffix}`, renamed: `部署試験C${suffix}`, unknown: `未登録部署${suffix}` };
-const employeeCode = `DEP${suffix}`;
+let employeeCode = "";
 const employeeUid = `D0A0${suffix}00`;
 const operationIds = [];
 const client = new Client({ connectionString: databaseUrl });
@@ -55,6 +56,7 @@ async function cleanup() {
 
 await client.connect();
 try {
+  [employeeCode] = await freeRecordCodes(client, "EmployeeNumber", "W", 1);
   // 追加した部署は末尾に並び、同じ名前は空白の違いがあっても登録できない。
   await postAdmin({ action: "createDepartment", name: names.first });
   await postAdmin({ action: "createDepartment", name: `  ${names.second} ` });
@@ -77,7 +79,10 @@ try {
   rejected = await postAdmin({ action: "createEmployee", code: employeeCode, name: "部署試験社員", department: names.unknown, nfcUid: employeeUid }, 400);
   assert.match(rejected.message, /登録されていません/);
   assert.equal(findDepartment(await dashboard(), names.unknown), undefined);
-  await postAdmin({ action: "createEmployee", code: employeeCode, name: "部署試験社員", department: names.first, nfcUid: employeeUid });
+  // 社員番号は英字1文字＋数字3桁に固定する。小文字は大文字にそろえて登録する。
+  rejected = await postAdmin({ action: "createEmployee", code: `${employeeCode}0`, name: "部署試験社員", department: names.first, nfcUid: employeeUid }, 400);
+  assert.match(rejected.message, /社員番号は英字1文字と数字3桁/);
+  await postAdmin({ action: "createEmployee", code: employeeCode.toLowerCase(), name: "部署試験社員", department: names.first, nfcUid: employeeUid });
   data = await dashboard();
   assert.equal(findDepartment(data, names.first).employeeCount, 1);
 

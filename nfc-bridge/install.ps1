@@ -33,5 +33,12 @@ $launcher = Join-Path $installDir "launch.ps1"
 $command = '"' + $powerShell + '" -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $launcher + '"'
 New-ItemProperty -Path $runKey -Name "FleetFlowNfcBridge" -Value $command -PropertyType String -Force | Out-Null
 
+# Let the FleetFlow screen start the bridge through fleetflow-nfc://. The URL itself is never passed to the launcher.
+$protocolKey = "HKCU:\Software\Classes\fleetflow-nfc"
+New-Item -Path "$protocolKey\shell\open\command" -Force | Out-Null
+Set-ItemProperty -Path $protocolKey -Name "(default)" -Value "URL:FleetFlow NFC"
+New-ItemProperty -Path $protocolKey -Name "URL Protocol" -Value "" -PropertyType String -Force | Out-Null
+Set-ItemProperty -Path "$protocolKey\shell\open\command" -Name "(default)" -Value $command
+
 Start-Process -FilePath $powerShell -ArgumentList @("-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", $launcher) -WindowStyle Hidden
 Write-Host "FleetFlow NFC Bridge installed and added to Windows startup. Use the launch files in the project directory."

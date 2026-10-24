@@ -76,7 +76,7 @@ function ParkingPrint({ data }: { data: DashboardData }) {
     <div className="relative mx-auto aspect-[950/525] w-full overflow-hidden border border-slate-300 bg-white">
       <img src="/parking-layout.svg" alt="駐車場配置図" className="absolute inset-0 size-full" />
       {data.spots.map((spot) => <div key={spot.id} className={`absolute overflow-hidden text-slate-600 ${isDashedSpot(spot) ? "border-[3px] border-dashed border-slate-300 bg-slate-50/90" : "border-2 border-slate-400 bg-white/90"}`} style={{ left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.width}%`, height: `${spot.height}%` }}>
-        <b className="absolute left-1 top-0.5 text-[7px] leading-none">{spot.code}{spot.role === "HOLDING" ? " 仮置き（実在なし）" : spot.role === "REGULAR" ? "" : ` ${spotRoleTag(spot)}`}</b>
+        <b className="absolute left-1 top-0.5 text-[7px] leading-none">{spot.code}{spot.role === "HOLDING" && !spot.label ? " 仮置き（実在なし）" : spotRoleTag(spot) ? ` ${spotRoleTag(spot)}` : ""}</b>
       </div>)}
     </div>
   </>;

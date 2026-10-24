@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Check, Database, DatabaseBackup, Download, Nfc, RefreshCw, Search, Server, UserRound, X } from "lucide-react";
+import { AlertTriangle, Check, Database, DatabaseBackup, Download, Nfc, RefreshCw, Search, Server } from "lucide-react";
+import { clearSavedEmployee, forgetPersistentEmployee, readSavedEmployee } from "@/lib/employee-session";
+import { isKioskDevice, useDeviceMode } from "@/lib/device-mode";
 import { useNfcBridgeHealth } from "@/lib/use-nfc-bridge";
-import { AppHeader, HeaderSystemStatus, Navigation, type HeaderSyncState } from "./app-header";
+import { AppHeader, HeaderDeviceMode, HeaderSystemStatus, HeaderUserControl, Navigation, type HeaderSyncState } from "./app-header";
 import { Button, Card, cn } from "./ui";
 
 type AuditLog = { id: string; actorName: string; action: string; targetType: string; description: string; createdAt: string };
@@ -23,6 +25,7 @@ export function OperationsDashboard() {
   const [lastSuccessfulSync, setLastSuccessfulSync] = useState<Date | null>(null);
   const [employeeName, setEmployeeName] = useState<string | null>(null);
   const nfcHealth = useNfcBridgeHealth(true);
+  const kiosk = isKioskDevice(useDeviceMode(), nfcHealth);
   const load = useCallback(async (search = "", requestedPage = 1, actionFilter = action, fromDate = from, toDate = to) => {
     setLoading(true);
     setError("");
@@ -48,15 +51,16 @@ export function OperationsDashboard() {
   // 初回表示で操作履歴を読み込む。
   useEffect(() => { void load(); }, []);
   useEffect(() => {
-    const employeeId = window.sessionStorage.getItem("fleetflow.employeeId");
-    setEmployeeName(employeeId ? window.sessionStorage.getItem("fleetflow.employeeName") ?? "利用者選択済み" : null);
-  }, []);
+    // 共用端末では「この端末の利用者」を残さない。
+    if (kiosk) forgetPersistentEmployee();
+    const saved = readSavedEmployee();
+    setEmployeeName(saved ? saved.name ?? "利用者選択済み" : null);
+  }, [kiosk]);
   const backupHealthy = data?.backup.latestAt ? Date.now() - new Date(data.backup.latestAt).getTime() < 26 * 60 * 60_000 : false;
   const syncState: HeaderSyncState = error ? "stale" : data ? "healthy" : "loading";
   const openNfc = () => window.location.assign("/?nfc=1");
   const clearEmployee = () => {
-    window.sessionStorage.removeItem("fleetflow.employeeId");
-    window.sessionStorage.removeItem("fleetflow.employeeName");
+    clearSavedEmployee();
     setEmployeeName(null);
   };
   const downloadDiagnostics = () => {
@@ -90,7 +94,8 @@ export function OperationsDashboard() {
   return <div className="min-h-screen bg-[#f4f7fb] text-slate-900">
     <AppHeader view="operations" actions={<>
       <HeaderSystemStatus syncState={syncState} lastSuccessfulSync={lastSuccessfulSync} nfcStatus={nfcHealth} refreshing={loading} onRefresh={() => void load(query, page)} onOpenNfc={openNfc} onDownloadDiagnostics={downloadDiagnostics} />
-      {employeeName ? <div className="flex items-center overflow-hidden rounded-xl border border-emerald-200 bg-emerald-50"><button type="button" onClick={openNfc} title="利用者を変更" className="flex min-h-10 items-center gap-2 px-3 text-sm font-bold text-emerald-800"><UserRound className="size-4" /><span className="hidden max-w-28 truncate lg:inline">{employeeName}</span><span className="hidden text-[10px] text-emerald-600 xl:inline">変更</span></button><button type="button" onClick={clearEmployee} aria-label="利用者選択を解除" className="grid min-h-10 w-9 place-items-center border-l border-emerald-200 text-emerald-700 hover:bg-emerald-100"><X className="size-3.5" /></button></div> : <Button className="border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100" onClick={openNfc}><Nfc className="size-5" /><span className="hidden sm:inline">社員証をかざす</span></Button>}
+      <HeaderDeviceMode nfcStatus={nfcHealth} />
+      <HeaderUserControl nfcStatus={nfcHealth} nfcListening={false} employeeName={employeeName} onPick={() => window.location.assign("/?user=1")} onClear={clearEmployee} />
       <button aria-label="最新情報に更新" aria-busy={loading} disabled={loading} onClick={() => void load(query, page)} className="grid size-11 place-items-center rounded-xl border border-slate-200 bg-white disabled:opacity-50"><RefreshCw className={cn("size-4", loading && "animate-spin")} /></button>
     </>} />
     <main className="mx-auto max-w-[1400px] space-y-5 p-4 pb-24 md:p-8"><div className="space-y-5"><div><p className="text-xs font-bold text-blue-600">運用管理</p><h2 className="mt-1 text-2xl font-black">操作履歴</h2><p className="mt-1 text-sm text-slate-500">誰が・いつ・何を変更したかを確認できます。</p></div>

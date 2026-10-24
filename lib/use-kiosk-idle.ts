@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 const DEFAULT_IDLE_MS = 10 * 60_000;
 const DEFAULT_WARNING_MS = 30_000;
+export const KIOSK_USER_TIMEOUT_MS = 3 * 60_000;
 
 export function useKioskIdle({ enabled, onReset, idleMs = DEFAULT_IDLE_MS, warningMs = DEFAULT_WARNING_MS }: { enabled: boolean; onReset: () => void; idleMs?: number; warningMs?: number }) {
   const [warningSeconds, setWarningSeconds] = useState<number | null>(null);
@@ -46,4 +47,34 @@ export function useKioskIdle({ enabled, onReset, idleMs = DEFAULT_IDLE_MS, warni
   }, [enabled, idleMs, warningMs]);
 
   return warningSeconds;
+}
+
+// 共用端末で認証した利用者を、操作が途切れてから一定時間で自動解除する。残り秒数を返す。
+// resetKey が変わる（社員証を読み直す）と最初から数え直す。
+export function useKioskUserTimeout({ enabled, resetKey, onTimeout, timeoutMs = KIOSK_USER_TIMEOUT_MS }: { enabled: boolean; resetKey: string; onTimeout: () => void; timeoutMs?: number }) {
+  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
+  const timeoutRef = useRef(onTimeout);
+  timeoutRef.current = onTimeout;
+
+  useEffect(() => {
+    if (!enabled) { setRemainingSeconds(null); return; }
+    let deadline = Date.now() + timeoutMs;
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      setRemainingSeconds(left);
+      if (left === 0) { window.clearInterval(timer); timeoutRef.current(); }
+    };
+    const extend = () => { deadline = Date.now() + timeoutMs; tick(); };
+    const timer = window.setInterval(tick, 1000);
+    window.addEventListener("pointerdown", extend, { passive: true });
+    window.addEventListener("keydown", extend);
+    tick();
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("pointerdown", extend);
+      window.removeEventListener("keydown", extend);
+    };
+  }, [enabled, resetKey, timeoutMs]);
+
+  return remainingSeconds;
 }
