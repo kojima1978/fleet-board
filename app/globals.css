@@ -26,10 +26,10 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 @media (prefers-reduced-motion: reduce) { .fuel-wave { animation: none; mask-image: none; } }
 
-/* 返却できる空き区画の枠を点滅させる。区画ごとに少しずつ遅らせ、左から右へ波のように流す。 */
+/* 返却できる空き区画の枠を緑で点滅させる（駐車中の青と区別する）。区画ごとに少しずつ遅らせ、左から右へ波のように流す。 */
 @keyframes spot-beckon {
-  0%, 100% { border-color: #93c5fd; background-color: #eff6ff; box-shadow: 0 0 0 0 rgb(37 99 235 / 0); }
-  50% { border-color: #2563eb; background-color: #dbeafe; box-shadow: 0 0 0 3px rgb(37 99 235 / 0.3); }
+  0%, 100% { border-color: #6ee7b7; background-color: #ecfdf5; box-shadow: 0 0 0 0 rgb(5 150 105 / 0); }
+  50% { border-color: #059669; background-color: #d1fae5; box-shadow: 0 0 0 3px rgb(5 150 105 / 0.3); }
 }
 .spot-beckon { animation: spot-beckon 1.4s ease-in-out infinite; animation-delay: var(--beckon-delay, 0s); }
 @media (prefers-reduced-motion: reduce) { .spot-beckon { animation: none; } }
