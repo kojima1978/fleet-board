@@ -460,35 +460,10 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
       setToast({ message: scan.kind === "nfc" ? `登録されていないカード・タグです（UID ${scan.value}）` : "登録されていないFleetFlow用QRコードです", tone: "error", brief: true });
     } catch (error) { playNfcSound("error"); setToast({ message: error instanceof Error ? error.message : `${scan.kind === "nfc" ? "NFCタグ" : "QRコード"}を確認できませんでした`, tone: "error", brief: true }); }
   };
-  const downloadDiagnostics = () => {
-    const diagnostics = {
-      checkedAt: new Date().toISOString(),
-      page: view,
-      application: syncState,
-      online: isOnline,
-      lastSuccessfulSync: lastSuccessfulSync?.toISOString() ?? null,
-      nfcBridge: nfcHealth,
-      qrScanner: qrHealth,
-      appVersion: data.system.appVersion,
-      environment: data.system.environment,
-      deployedAt: data.system.deployedAt,
-      backupLatestAt: data.system.backupLatestAt,
-      backupVerifiedAt: data.system.backupVerifiedAt,
-      userAgent: navigator.userAgent,
-    };
-    const url = URL.createObjectURL(new Blob([JSON.stringify(diagnostics, null, 2)], { type: "application/json" }));
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `fleetflow-diagnostics-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-    setToast({ message: "診断情報を保存しました", tone: "success" });
-  };
-
   return (
     <div className="min-h-screen bg-[#f4f7fb] text-slate-900">
       <AppHeader view={view} actions={<>
-            <HeaderSystemStatus syncState={syncState} lastSuccessfulSync={lastSuccessfulSync} nfcStatus={nfcHealth} qrStatus={qrHealth} refreshing={refreshing} onRefresh={() => void load()} onOpenNfc={() => setDialog("nfc")} onDownloadDiagnostics={downloadDiagnostics} />
+            <HeaderSystemStatus syncState={syncState} lastSuccessfulSync={lastSuccessfulSync} nfcStatus={nfcHealth} qrStatus={qrHealth} refreshing={refreshing} onRefresh={() => void load()} onOpenNfc={() => setDialog("nfc")} />
             <HeaderDeviceMode nfcStatus={scannerHealth} />
             <HeaderUserControl nfcStatus={scannerHealth} nfcListening={nfcListening} employeeName={employee?.name ?? null} remainingSeconds={userRemainingSeconds} onPick={() => setDialog("user")} onClear={clearEmployee} />
             <button aria-label="最新情報に更新" aria-busy={refreshing} disabled={refreshing} onClick={() => void load()} className="grid size-11 place-items-center rounded-xl border border-slate-200 bg-white disabled:opacity-50"><RefreshCw className={cn("size-4", refreshing && "animate-spin")} /></button>

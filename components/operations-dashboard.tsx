@@ -65,25 +65,6 @@ export function OperationsDashboard() {
     clearSavedEmployee();
     setEmployeeName(null);
   };
-  const downloadDiagnostics = () => {
-    const diagnostics = {
-      checkedAt: new Date().toISOString(),
-      page: "operations",
-      application: syncState,
-      lastSuccessfulSync: lastSuccessfulSync?.toISOString() ?? null,
-      nfcBridge: nfcHealth,
-      qrScanner: qrHealth,
-      backupLatestAt: data?.backup.latestAt ?? null,
-      backupVerifiedAt: data?.backup.verifiedAt ?? null,
-      userAgent: navigator.userAgent,
-    };
-    const url = URL.createObjectURL(new Blob([JSON.stringify(diagnostics, null, 2)], { type: "application/json" }));
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `fleetflow-diagnostics-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-  };
   const downloadCsv = () => {
     const params = new URLSearchParams({ format: "csv" });
     if (query) params.set("q", query);
@@ -96,7 +77,7 @@ export function OperationsDashboard() {
   };
   return <div className="min-h-screen bg-[#f4f7fb] text-slate-900">
     <AppHeader view="operations" actions={<>
-      <HeaderSystemStatus syncState={syncState} lastSuccessfulSync={lastSuccessfulSync} nfcStatus={nfcHealth} qrStatus={qrHealth} refreshing={loading} onRefresh={() => void load(query, page)} onOpenNfc={openNfc} onDownloadDiagnostics={downloadDiagnostics} />
+      <HeaderSystemStatus syncState={syncState} lastSuccessfulSync={lastSuccessfulSync} nfcStatus={nfcHealth} qrStatus={qrHealth} refreshing={loading} onRefresh={() => void load(query, page)} onOpenNfc={openNfc} />
       <HeaderDeviceMode nfcStatus={scannerHealth} />
       <HeaderUserControl nfcStatus={scannerHealth} nfcListening={false} employeeName={employeeName} onPick={() => window.location.assign("/?user=1")} onClear={clearEmployee} />
       <button aria-label="最新情報に更新" aria-busy={loading} disabled={loading} onClick={() => void load(query, page)} className="grid size-11 place-items-center rounded-xl border border-slate-200 bg-white disabled:opacity-50"><RefreshCw className={cn("size-4", loading && "animate-spin")} /></button>

@@ -16,7 +16,8 @@ internal sealed record BridgeConfig(string[]? AllowedOrigins, string? QrComPort,
 internal static class Program
 {
     private const int Port = 17831;
-    private const string BridgeVersion = "1.2.1";
+    private const string BridgeVersion = "1.2.3";
+    private const int QrReconnectFailuresBeforeRestart = 5;
     private static readonly object StateLock = new();
     private static readonly HashSet<string> PresentReaders = new(StringComparer.Ordinal);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -30,6 +31,7 @@ internal static class Program
     private static string? LastQrValue;
     private static DateTimeOffset LastQrReadAt;
     private static long Sequence;
+    private static readonly TaskCompletionSource<int> RestartRequested = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public static async Task Main()
     {
@@ -43,7 +45,16 @@ internal static class Program
         var readerTask = Task.Run(() => PollReaders(cancellation.Token), cancellation.Token);
         var qrTask = Task.Run(() => PollQrReader(cancellation.Token), cancellation.Token);
         var serverTask = RunServer(cancellation.Token);
-        await Task.WhenAll(readerTask, qrTask, serverTask);
+        var serviceTask = Task.WhenAll(readerTask, qrTask, serverTask);
+        var completed = await Task.WhenAny(serviceTask, RestartRequested.Task);
+        if (completed == RestartRequested.Task)
+        {
+            cancellation.Cancel();
+            try { await serviceTask; } catch (OperationCanceledException) { }
+            Environment.ExitCode = await RestartRequested.Task;
+            return;
+        }
+        await serviceTask;
     }
 
     private static BridgeConfig LoadConfig()
@@ -105,6 +116,16 @@ internal static class Program
             if (method == "OPTIONS") { await WriteResponse(stream, 204, null, origin); return; }
             if (method != "GET") { await WriteResponse(stream, 405, new { message = "GETのみ利用できます" }, origin); return; }
 
+            if (uri.AbsolutePath == "/reconnect")
+            {
+                // ローカルURLを直接開いただけでBridgeが終了しないよう、許可したFleetFlow画面からの操作に限定する。
+                if (string.IsNullOrWhiteSpace(origin)) { await WriteResponse(stream, 403, new { message = "FleetFlow画面から再接続してください" }, null); return; }
+                await WriteResponse(stream, 202, new { status = "restarting" }, origin);
+                Console.WriteLine("画面からNFC・QR機器の再接続が要求されました。");
+                RestartRequested.TrySetResult(23);
+                return;
+            }
+
             if (uri.AbsolutePath == "/health")
             {
                 string[] readers;
@@ -140,7 +161,7 @@ internal static class Program
     private static async Task WriteResponse(NetworkStream stream, int status, object? body, string? origin)
     {
         var payload = body is null ? [] : JsonSerializer.SerializeToUtf8Bytes(body, JsonOptions);
-        var reason = status switch { 200 => "OK", 204 => "No Content", 403 => "Forbidden", 404 => "Not Found", 405 => "Method Not Allowed", _ => "Error" };
+        var reason = status switch { 200 => "OK", 202 => "Accepted", 204 => "No Content", 403 => "Forbidden", 404 => "Not Found", 405 => "Method Not Allowed", _ => "Error" };
         var headers = new StringBuilder($"HTTP/1.1 {status} {reason}\r\nConnection: close\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {payload.Length}\r\nCache-Control: no-store\r\n");
         if (!string.IsNullOrWhiteSpace(origin)) headers.Append($"Access-Control-Allow-Origin: {origin}\r\nVary: Origin\r\nAccess-Control-Allow-Methods: GET, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nAccess-Control-Allow-Private-Network: true\r\n");
         headers.Append("\r\n");
@@ -218,11 +239,14 @@ internal static class Program
     {
         var baudRate = Config.QrBaudRate is > 0 ? Config.QrBaudRate.Value : 9600;
         string? lastWaitingReason = null;
+        var consecutiveReconnectFailures = 0;
         while (!token.IsCancellationRequested)
         {
             var resolution = ResolveQrPort();
             if (resolution.Port is null)
             {
+                // USBが外れている間は正常な待機状態。再起動回数には含めない。
+                consecutiveReconnectFailures = 0;
                 if (resolution.Reason != lastWaitingReason) Console.WriteLine(resolution.Reason);
                 lastWaitingReason = resolution.Reason;
                 try { await Task.Delay(1500, token); } catch (OperationCanceledException) { break; }
@@ -230,10 +254,12 @@ internal static class Program
             }
             var portName = resolution.Port;
             lastWaitingReason = null;
+            DateTimeOffset? connectedAt = null;
             try
             {
                 using var port = new SerialPort(portName, baudRate, Parity.None, 8, StopBits.One) { ReadTimeout = 500, NewLine = "\r" };
                 port.Open();
+                connectedAt = DateTimeOffset.UtcNow;
                 lock (StateLock) { QrReaderConnected = true; QrPort = portName; }
                 Console.WriteLine($"QRスキャナ接続: {portName}");
                 var buffer = new StringBuilder();
@@ -250,17 +276,50 @@ internal static class Program
                         }
                         else if (next >= 0x20 && buffer.Length < 512) buffer.Append((char)next);
                     }
-                    catch (TimeoutException) { }
+                    catch (TimeoutException)
+                    {
+                        // SerialPort.IsOpenはUSBを抜いた後もtrueを返すことがあるため、
+                        // Windowsのポート一覧でも接続状態を確認する。
+                        if (!IsComPortAvailable(portName))
+                            throw new IOException("QRスキャナがUSBから切断されました。");
+
+                        // 数秒安定して接続できれば、それ以前の一時的な失敗は解消済みとみなす。
+                        if (connectedAt.HasValue && DateTimeOffset.UtcNow - connectedAt.Value >= TimeSpan.FromSeconds(5))
+                            consecutiveReconnectFailures = 0;
+                    }
                 }
             }
             catch (OperationCanceledException) { break; }
             catch (Exception error)
             {
                 Console.Error.WriteLine($"QR読取エラー（{portName}）: {error.Message}");
+                if (IsComPortAvailable(portName))
+                {
+                    consecutiveReconnectFailures++;
+                    if (consecutiveReconnectFailures >= QrReconnectFailuresBeforeRestart)
+                    {
+                        // USB再挿入後にドライバー/SerialPortが古い接続を保持した場合、
+                        // 同一プロセス内の再生成だけでは復旧しない。監視ランチャーに
+                        // プロセスを作り直してもらい、利用者の手動操作なしで回復する。
+                        Console.Error.WriteLine($"QRスキャナを{consecutiveReconnectFailures}回再接続できないため、Bridgeを自動再起動します。");
+                        RestartRequested.TrySetResult(22);
+                        return;
+                    }
+                }
+                else
+                {
+                    consecutiveReconnectFailures = 0;
+                }
             }
             finally { lock (StateLock) { QrReaderConnected = false; QrPort = null; } }
             try { await Task.Delay(1500, token); } catch (OperationCanceledException) { break; }
         }
+    }
+
+    private static bool IsComPortAvailable(string portName)
+    {
+        try { return SerialPort.GetPortNames().Contains(portName, StringComparer.OrdinalIgnoreCase); }
+        catch { return false; }
     }
 
     private static (string? Port, string Reason) ResolveQrPort()
