@@ -7,7 +7,12 @@ export type ApplicationSystemStatus = {
   schemaVersion: string;
 };
 
+const SYSTEM_STATUS_CACHE_MS = 60_000;
+let cachedSystemStatus: { value: ApplicationSystemStatus; expiresAt: number } | null = null;
+
 export async function getApplicationSystemStatus(): Promise<ApplicationSystemStatus> {
+  const now = Date.now();
+  if (cachedSystemStatus && cachedSystemStatus.expiresAt > now) return cachedSystemStatus.value;
   let schemaVersion = "development-db-push";
   if (process.env.NODE_ENV === "production") {
     schemaVersion = "未確認";
@@ -24,10 +29,12 @@ export async function getApplicationSystemStatus(): Promise<ApplicationSystemSta
       // Health remains available while a migration state is being repaired.
     }
   }
-  return {
+  const value = {
     appVersion: process.env.FLEETFLOW_APP_VERSION || "development",
     environment: process.env.NODE_ENV || "development",
     deployedAt: process.env.FLEETFLOW_DEPLOYED_AT || null,
     schemaVersion,
   };
+  cachedSystemStatus = { value, expiresAt: now + SYSTEM_STATUS_CACHE_MS };
+  return value;
 }

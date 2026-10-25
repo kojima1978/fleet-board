@@ -55,6 +55,8 @@ cd fleet-board
 
 起動後の確認は、サーバー自身から次を実行してHTTP 200が返ることで行います（本番・開発とも同じポート）。
 
+開発環境は起動時に`package-lock.json`を確認し、pullなどで依存関係が変わった場合だけDocker内の`node_modules`を自動同期します。依存更新後に`Module not found`が出た場合も、`FleetFlow Start.cmd`または`docker compose restart app`で同期できます。
+
 ```powershell
 (Invoke-WebRequest http://localhost:3035/api/health -UseBasicParsing).StatusCode
 ```
@@ -390,7 +392,7 @@ docker compose --profile tools run --rm nfc-bridge-build
 powershell -ExecutionPolicy Bypass -File .\nfc-bridge\install.ps1
 ```
 
-インストール後はWindowsログイン時に自動起動します。接続確認は[http://127.0.0.1:17831/health](http://127.0.0.1:17831/health)を開き、`readerConnected`が`true`になることを確認します。詳細は[nfc-bridge/README.md](nfc-bridge/README.md)を参照してください。
+インストール後はWindowsログイン時に監視用ランチャーが自動起動します。Bridgeが停止した場合は5秒ごとに検出して自動再起動し、`FleetFlow Start`からの起動もWindowsやUSBの準備が遅い場合に再試行します。接続確認は[http://127.0.0.1:17831/health](http://127.0.0.1:17831/health)を開き、`readerConnected`が`true`になることを確認します。起動履歴は`%LOCALAPPDATA%\FleetFlow\NfcBridge\nfc-bridge-launch.log`へ記録します。詳細は[nfc-bridge/README.md](nfc-bridge/README.md)を参照してください。
 
 LAN上のFleetFlowを使うPCでは、そのURLを許可Originに加えてインストールします。
 
@@ -557,6 +559,9 @@ docker compose exec app npm run test:integration:parking
 
 # JSON一括書き出し・検査・トランザクション復元（開発DBでのみ実行）
 docker compose exec app npm run test:integration:json-backup
+
+# 5秒更新のETag・変更なし304応答
+docker compose exec app npm run test:integration:dashboard-cache
 
 # Origin・プロキシ判定
 docker compose exec app npm run test:security

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -230,7 +231,7 @@ export async function GET(request: Request) {
     getBackupStatus(),
     getApplicationSystemStatus(),
   ]);
-  return NextResponse.json({
+  const payload = {
     employees: employees.map((employee) => withEmployeeCode(employee)),
     departments: departments.map((department) => ({ id: department.id, name: department.name, active: department.active, version: department.version, employeeCount: department._count.employees })),
     vehicles: vehicles.map((vehicle) => withVehicleCode(vehicle)),
@@ -243,7 +244,13 @@ export async function GET(request: Request) {
       backupVerifiedAt: backup.verifiedAt,
       ...system,
     },
-  });
+  };
+  const body = JSON.stringify(payload);
+  const etag = `"${createHash("sha256").update(body).digest("base64url")}"`;
+  const headers = { "Cache-Control": "private, no-cache, must-revalidate", ETag: etag };
+  // 5秒ごとの確認で内容が同じなら本文を返さず、通信量とクライアントの再描画を抑える。
+  if (request.headers.get("If-None-Match") === etag) return new Response(null, { status: 304, headers });
+  return new Response(body, { headers: { ...headers, "Content-Type": "application/json; charset=utf-8" } });
 }
 
 export async function POST(request: Request) {

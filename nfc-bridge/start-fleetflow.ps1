@@ -45,6 +45,21 @@ function Get-NfcHealth {
   catch { return $null }
 }
 
+function Start-NfcBridge([int]$Attempts = 3) {
+  foreach ($attempt in 1..$Attempts) {
+    $null = & powershell.exe -NoLogo -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File $nfcLauncher
+    $exitCode = $LASTEXITCODE
+    $health = Get-NfcHealth
+    if ($null -ne $health) {
+      Write-LauncherLog "NFC bridge ready on attempt $attempt. Reader connected: $($health.readerConnected)."
+      return $health
+    }
+    Write-LauncherLog "NFC bridge attempt $attempt failed with exit code $exitCode."
+    if ($attempt -lt $Attempts) { Start-Sleep -Seconds (2 * $attempt) }
+  }
+  return $null
+}
+
 function Invoke-Docker([string[]]$arguments) {
   $previousPreference = $ErrorActionPreference
   $ErrorActionPreference = "SilentlyContinue"
@@ -152,8 +167,8 @@ try {
   $dockerExitCode = Invoke-Docker ($composeArguments + $upArguments)
   if ($dockerExitCode -ne 0) { throw "DOCKER_SERVICES_FAILED" }
 
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $nfcLauncher
-  if ($LASTEXITCODE -ne 0) { Write-LauncherLog "NFC bridge start returned exit code $LASTEXITCODE." }
+  # Dockerと並行して一度起動し、WindowsやUSBの準備が遅い場合はアプリ起動後に再試行する。
+  $nfc = Start-NfcBridge -Attempts 1
 
   $appReady = $false
   foreach ($attempt in 1..60) {
@@ -162,7 +177,8 @@ try {
   }
   if (-not $appReady) { throw "APP_TIMEOUT" }
 
-  $nfc = Get-NfcHealth
+  if ($null -eq $nfc) { $nfc = Start-NfcBridge -Attempts 2 }
+  else { $nfc = Get-NfcHealth }
   if ($Production) {
     & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectDirectory "scripts\production\Test-ProductionHealth.ps1") -ProjectDirectory $ProjectDirectory -NoUi
     if ($LASTEXITCODE -ne 0) { throw "PRODUCTION_HEALTH_CHECK_FAILED" }

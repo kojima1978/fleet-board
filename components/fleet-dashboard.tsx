@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { CSSProperties } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { AlertTriangle, CalendarClock, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Fuel, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Move, Nfc, Pencil, Play, Plus, Printer, RefreshCw, Settings, UserRound, Utensils, Wrench, X } from "lucide-react";
 import type { DashboardData, Employee, ParkingSpot, Trip, Vehicle, VehicleMaintenance } from "@/lib/types";
@@ -11,7 +12,7 @@ import { resolveNfcUid } from "@/lib/resolve-nfc";
 import { canUseSpot, formatSpotLabel, isDashedSpot, spotRoleTag } from "@/lib/parking-spots";
 import { RESERVATION_GRACE_MINUTES } from "@/lib/reservations";
 import { FUEL_LEVEL_LABELS, FUEL_LEVEL_MAX, formatFuelLevel, isLowFuel } from "@/lib/fuel-level";
-import { nfcBridgeStatusText, useNfcBridge, useNfcBridgeHealth } from "@/lib/use-nfc-bridge";
+import { nfcBridgeStatusText, useNfcBridge, useNfcBridgeHealth, type NfcBridgeStatus } from "@/lib/use-nfc-bridge";
 import { useKioskIdle, useKioskUserTimeout } from "@/lib/use-kiosk-idle";
 import { playNfcSound } from "@/lib/nfc-sound";
 import { clearSavedEmployee, forgetPersistentEmployee, readSavedEmployee, saveEmployee } from "@/lib/employee-session";
@@ -19,10 +20,6 @@ import { isKioskDevice, useDeviceMode, useIdleTrafficEnabled, useUserTimeoutMinu
 import { formatMaintenanceTime, MAINTENANCE_KIND_SHORT_LABELS } from "@/lib/maintenance";
 import { activeMaintenanceOf, MaintenanceDialog } from "./maintenance-dialog";
 import { NfcBridgeHelp } from "./nfc-bridge-help";
-import { SettingsPanelV2 } from "./settings-panel-v2";
-import { SpotRoleSettings } from "./spot-role-settings";
-import { DepartmentSettings } from "./department-settings";
-import { DataBackupPanel } from "./data-backup-panel";
 import { Button, Card, cn } from "./ui";
 import { IdleTraffic, reportActivity } from "./idle-traffic";
 import { AppHeader, HeaderDeviceMode, HeaderSystemStatus, HeaderUserControl, Navigation, type HeaderSyncState } from "./app-header";
@@ -37,6 +34,11 @@ type StartContext = { vehicleId: string; employeeId: string };
 type UndoReturn = { tripId: string; vehicleId: string; vehicleName: string; returnedBy: string; expiresAt: number };
 // 返却の取り消し案内を出しておく秒数。共用端末で次の人の画面に残らないよう短めにする（サーバーは2分まで受け付ける）。
 const UNDO_RETURN_SECONDS = 30;
+// 日常画面では使わない管理機能を初回のJavaScriptから外し、設定画面を開いた時だけ読み込む。
+const SettingsPanelV2 = dynamic(() => import("./settings-panel-v2").then((module) => module.SettingsPanelV2), { loading: SettingsSectionLoading });
+const SpotRoleSettings = dynamic(() => import("./spot-role-settings").then((module) => module.SpotRoleSettings), { loading: SettingsSectionLoading });
+const DepartmentSettings = dynamic(() => import("./department-settings").then((module) => module.DepartmentSettings), { loading: SettingsSectionLoading });
+const DataBackupPanel = dynamic(() => import("./data-backup-panel").then((module) => module.DataBackupPanel), { loading: SettingsSectionLoading });
 const jpTime = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false });
 const jpTimeSeconds = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 const jpDate = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", month: "long", day: "numeric", weekday: "long" });
@@ -106,6 +108,8 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   const [syncState, setSyncState] = useState<SyncState>("loading");
   const [isOnline, setIsOnline] = useState(true);
   const [lastSuccessfulSync, setLastSuccessfulSync] = useState<Date | null>(null);
+  const lastSuccessfulSyncRef = useRef<Date | null>(null);
+  const dashboardEtag = useRef("");
   const loadInFlight = useRef(false);
   const dataRef = useRef<DashboardData | null>(null);
   const [pendingAction, setPendingAction] = useState(false);
@@ -119,6 +123,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   const [timelineDate, setTimelineDate] = useState(() => tokyoDayStart());
   const [timelineDays, setTimelineDays] = useState<1 | 3>(1);
   const nfcHealth = useNfcBridgeHealth(true);
+  const previousNfcHealth = useRef<NfcBridgeStatus | null>(null);
   // 入口の共用端末では、駐車場・タイムライン画面を開いている間ずっと社員証・車両タグを受け付ける。
   // ダイアログ表示中（各ダイアログが自分で読み取る）と設定画面（NFC登録と競合する）では止める。
   const nfcAvailable = nfcHealth === "ready" || nfcHealth === "no-reader";
@@ -133,6 +138,26 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
     if (kiosk && forgetPersistentEmployee() && !readSavedEmployee()) setEmployee(null);
   }, [kiosk]);
 
+  // 一時的な切断は監視機能が自動復旧する。状態が変わったときだけ通知し、初回接続では余計な通知を出さない。
+  useEffect(() => {
+    const previous = previousNfcHealth.current;
+    previousNfcHealth.current = nfcHealth;
+    if (previous === "ready" && nfcHealth === "offline") {
+      setToast({ message: "NFC連携が停止しました。自動で再接続しています。手動選択は引き続き使えます", tone: "error", brief: true });
+    } else if (previous === "ready" && nfcHealth === "no-reader") {
+      setToast({ message: "NFCリーダーを確認できません。接続を確認してください", tone: "error", brief: true });
+    } else if ((previous === "offline" || previous === "no-reader") && nfcHealth === "ready") {
+      setToast({ message: "NFC接続が復旧しました。社員証と車両タグを読み取れます", tone: "success", brief: true });
+    }
+  }, [nfcHealth]);
+
+  // 応答確認時刻は保持しつつ、表示更新は1分に1回までにして親画面の不要な再描画を避ける。
+  const recordSuccessfulSync = useCallback((force = false) => {
+    const syncedAt = new Date();
+    lastSuccessfulSyncRef.current = syncedAt;
+    setLastSuccessfulSync((current) => force || !current || syncedAt.getTime() - current.getTime() >= 60_000 ? syncedAt : current);
+  }, []);
+
   const load = useCallback(async (quiet = false) => {
     if (loadInFlight.current) return true;
     loadInFlight.current = true;
@@ -142,8 +167,18 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
     const timeout = window.setTimeout(() => controller.abort(), 4000);
     try {
       const query = view === "timeline" ? `?from=${encodeURIComponent(timelineDate.toISOString())}&days=${timelineDays}` : "";
-      const response = await fetch(`/api/dashboard${query}`, { cache: "no-store", signal: controller.signal });
+      const response = await fetch(`/api/dashboard${query}`, {
+        cache: "no-store",
+        headers: dashboardEtag.current ? { "If-None-Match": dashboardEtag.current } : undefined,
+        signal: controller.signal,
+      });
+      if (response.status === 304) {
+        recordSuccessfulSync();
+        setSyncState("healthy");
+        return true;
+      }
       if (!response.ok) throw new Error();
+      dashboardEtag.current = response.headers.get("ETag") ?? "";
       const next = await response.json() as DashboardData;
       if (quiet && vehicleVersions.current.size > 0) {
         const changed = next.vehicles.filter((vehicle) => vehicleVersions.current.get(vehicle.id) !== vehicle.version).map((vehicle) => vehicle.id);
@@ -155,10 +190,11 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
       vehicleVersions.current = new Map(next.vehicles.map((vehicle) => [vehicle.id, vehicle.version]));
       dataRef.current = next;
       setData(next);
-      setLastSuccessfulSync(new Date());
+      recordSuccessfulSync(true);
       setSyncState("healthy");
       return true;
     } catch {
+      if (lastSuccessfulSyncRef.current) setLastSuccessfulSync(lastSuccessfulSyncRef.current);
       setSyncState("stale");
       if (!quiet) setToast({ message: "更新できませんでした。前回取得した情報を表示しています", tone: "error" });
       return false;
@@ -168,7 +204,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
       setLoading(false);
       if (!quiet) setRefreshing(false);
     }
-  }, [timelineDate, timelineDays, view]);
+  }, [recordSuccessfulSync, timelineDate, timelineDays, view]);
 
   useEffect(() => {
     load();
@@ -504,6 +540,10 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
       <Navigation view={view} className="fixed inset-x-3 bottom-3 z-40 flex rounded-2xl border border-slate-200 bg-white/95 p-1.5 shadow-2xl backdrop-blur md:hidden" />
     </div>
   );
+}
+
+function SettingsSectionLoading() {
+  return <Card role="status" className="grid min-h-48 place-items-center"><div className="text-center"><LoaderCircle className="mx-auto size-7 animate-spin text-blue-600" /><p className="mt-2 text-sm font-bold text-slate-600">設定を読み込み中</p></div></Card>;
 }
 
 function Loading({ view }: { view: DashboardView }) { return <div className="min-h-screen bg-[#f4f7fb]"><header className="border-b border-slate-200 bg-white"><div className="mx-auto flex max-w-[1600px] items-center justify-between gap-3 px-4 py-3 md:px-8"><div className="flex items-center gap-3"><div className="grid size-11 place-items-center rounded-2xl bg-blue-600 text-white"><CarFront /></div><div><p className="text-lg font-black">FleetFlow</p><p className="hidden text-xs text-slate-500 sm:block">社用車 利用・駐車管理</p></div></div><Navigation view={view} className="hidden md:flex" /></div></header><main className="mx-auto max-w-[1600px] space-y-5 p-4 pb-28 md:p-8"><div className="h-7 w-52 animate-pulse rounded-lg bg-slate-200" /><div className="grid gap-3 sm:grid-cols-3">{[0, 1, 2].map((item) => <div key={item} className="h-28 animate-pulse rounded-2xl border border-slate-200 bg-white" />)}</div><div className="grid min-h-64 place-items-center rounded-2xl border border-slate-200 bg-white"><div className="text-center"><RefreshCw className="mx-auto size-8 animate-spin text-blue-600" /><p className="mt-3 text-sm font-bold text-slate-600">車両情報を読み込み中</p></div></div></main><Navigation view={view} className="fixed inset-x-3 bottom-3 z-40 flex rounded-2xl border border-slate-200 bg-white/95 p-1.5 shadow-2xl backdrop-blur md:hidden" /></div>; }
