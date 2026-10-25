@@ -34,4 +34,13 @@ powershell -ExecutionPolicy Bypass -File .\nfc-bridge\install.ps1 -AllowedOrigin
 
 ブラウザーで `http://127.0.0.1:17831/health` を開き、`readerConnected` が `true` になれば接続済みです。社員登録画面で「NFC読取」を押してカードをかざしてください。
 
-USBを抜くと `readerConnected` が `false`、挿し直すと自動的に `true` へ戻ります。戻らない場合だけ、Windowsの「スマート カード」サービスとSony NFCポートソフトウェアを確認してください。
+USBを抜くと `readerConnected` が `false`、挿し直すと通常は数秒以内に自動的に `true` へ戻ります。FleetFlow画面のNFC状態も定期的に再確認され、ページを再読み込みしなくても接続済み表示へ戻ります。
+
+自動復旧しない場合は、FleetFlow画面右上の黄色いNFC状態を押して案内を開き、次の順で確認します。
+
+1. RC-S300／RC-S380を一度抜き、挿し直して数秒待つ
+2. `http://127.0.0.1:17831/health` の `readerConnected` を確認する
+3. Bridge自体が開けない場合は、画面の「連携ソフトを起動」を押す
+4. それでも戻らない場合だけ、Windowsの「スマート カード」サービスとSony NFCポートソフトウェアを確認する
+
+復旧までの間も、FleetFlow本体は社員と車両を画面から手動選択して利用できます。
