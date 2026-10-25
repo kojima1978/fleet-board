@@ -392,7 +392,7 @@ docker compose --profile tools run --rm nfc-bridge-build
 powershell -ExecutionPolicy Bypass -File .\nfc-bridge\install.ps1
 ```
 
-インストール後はWindowsログイン時に監視用ランチャーが自動起動します。Bridgeが停止した場合は5秒ごとに検出して自動再起動し、`FleetFlow Start`からの起動もWindowsやUSBの準備が遅い場合に再試行します。接続確認は[http://127.0.0.1:17831/health](http://127.0.0.1:17831/health)を開き、`readerConnected`が`true`になることを確認します。起動履歴は`%LOCALAPPDATA%\FleetFlow\NfcBridge\nfc-bridge-launch.log`へ記録します。詳細は[nfc-bridge/README.md](nfc-bridge/README.md)を参照してください。
+インストール後はWindowsログイン時に監視用ランチャーが自動起動します。Bridgeが停止した場合は5秒ごとに検出して自動再起動し、`FleetFlow Start`からの起動もWindowsやUSBの準備が遅い場合に再試行します。RC-S300／RC-S380をUSBから抜いた場合も待機を続け、挿し直すと通常は数秒以内に自動再接続するため、FleetFlowやBridgeの再起動は不要です。接続確認は[http://127.0.0.1:17831/health](http://127.0.0.1:17831/health)を開き、`readerConnected`が`true`になることを確認します。起動履歴は`%LOCALAPPDATA%\FleetFlow\NfcBridge\nfc-bridge-launch.log`へ記録します。詳細は[nfc-bridge/README.md](nfc-bridge/README.md)を参照してください。
 
 LAN上のFleetFlowを使うPCでは、そのURLを許可Originに加えてインストールします。
 
@@ -630,9 +630,9 @@ docker compose restart app
 
 NFC連携ソフトやリーダーにつながらないときは、NFC読取の画面と画面右上のシステム状態に「NFCを連動する方法」が表示され、その場で試せる手順を確認できます。連携ソフトが止まっているときは「連携ソフトを起動」を押すと起動し、数秒で自動的に連動します（ブラウザーが開いてよいか尋ねたら「開く」を選びます）。押しても反応しないPCでは、NFC Bridgeをインストールし直してください。
 
-1. RC-S300／RC-S380を接続し直します。
+1. RC-S300／RC-S380を接続し直し、数秒待ちます（通常は自動再接続します）。
 2. [NFC Bridgeのヘルス画面](http://127.0.0.1:17831/health)を確認します。
-3. Windowsへ再ログインするか、NFC Bridgeを再インストールします。
+3. 自動再接続しない場合だけ、Windowsへ再ログインするかNFC Bridgeを再インストールします。
 4. ヘルス画面は正常なのにLAN上の画面でだけ読めない場合は、開いているURLがNFC Bridgeの許可Originに含まれているか、ブラウザーでローカルネットワークへのアクセスを拒否していないかを確認します。
 5. 復旧するまでは社員・車両を手動選択します。
 

@@ -73,18 +73,21 @@ export function useNfcBridgeHealth(enabled = true) {
     let timer = 0;
 
     const check = async () => {
+      let nextCheckMs = 5000;
       const controller = new AbortController();
       const timeout = window.setTimeout(() => controller.abort(), 1500);
       try {
         const response = await fetch(`${NFC_BRIDGE_URL}/health`, { cache: "no-store", signal: controller.signal });
         if (!response.ok) throw new Error("bridge unavailable");
         const health = await response.json() as BridgeHealth;
+        nextCheckMs = health.readerConnected ? 5000 : 1000;
         if (!cancelled) setStatus(health.readerConnected ? "ready" : "no-reader");
       } catch {
+        nextCheckMs = 2000;
         if (!cancelled) setStatus("offline");
       } finally {
         window.clearTimeout(timeout);
-        if (!cancelled) timer = window.setTimeout(check, 5000);
+        if (!cancelled) timer = window.setTimeout(check, nextCheckMs);
       }
     };
 

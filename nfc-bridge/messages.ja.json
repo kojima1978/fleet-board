@@ -12,7 +12,7 @@
   "readerNameLabel": "認識したリーダー",
   "unknownReader": "認識されていません",
   "nfcBridgeWarning": "NFC連携ソフトを起動できませんでした。\nFleetFlowは手動操作で利用できます。\n\n対処方法:\n・NFCリーダーのUSB接続を確認してください。\n・FleetFlow Startをもう一度実行してください。",
-  "nfcReaderWarning": "NFCリーダーが接続されていません。\nFleetFlowは手動操作で利用できます。\n\n対処方法:\n・RC-S300／RC-S380をUSBへ接続し直してください。\n・接続後にFleetFlow Startをもう一度実行してください。",
+  "nfcReaderWarning": "NFCリーダーが接続されていません。\nFleetFlowは手動操作で利用できます。\n\n対処方法:\n・RC-S300／RC-S380をUSBへ接続し直してください。\n・通常は数秒以内に自動で再接続します。再起動は不要です。",
   "errorIntro": "FleetFlowを起動できませんでした。",
   "logLabel": "詳細ログ",
   "PROJECT_NOT_FOUND": "開発フォルダーが見つかりません。フォルダーを移動または削除していないか確認してください。",

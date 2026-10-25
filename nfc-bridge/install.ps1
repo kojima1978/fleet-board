@@ -22,16 +22,30 @@ if (Test-Path -LiteralPath $watchdogPidPath) {
     $watchdog = Get-CimInstance Win32_Process -Filter "ProcessId = $watchdogPid" -ErrorAction SilentlyContinue
     if ($watchdog -and $watchdog.Name -match "powershell" -and $watchdog.CommandLine -like "*launch.ps1*" -and $watchdog.CommandLine -like "*-Watch*") {
       Stop-Process -Id $watchdogPid -Force -ErrorAction SilentlyContinue
+      Wait-Process -Id $watchdogPid -Timeout 5 -ErrorAction SilentlyContinue
     }
   }
   Remove-Item -LiteralPath $watchdogPidPath -Force -ErrorAction SilentlyContinue
 }
-$running = Get-Process -Name "FleetFlow.NfcBridge" -ErrorAction SilentlyContinue
-if ($running) {
-  $running | Stop-Process -Force
-  $running | Wait-Process -Timeout 5 -ErrorAction SilentlyContinue
+# The old watchdog can restart the bridge while it is shutting down, so verify repeatedly.
+foreach ($attempt in 1..10) {
+  $running = Get-Process -Name "FleetFlow.NfcBridge" -ErrorAction SilentlyContinue
+  if (-not $running) { break }
+  $running | Stop-Process -Force -ErrorAction SilentlyContinue
+  $running | Wait-Process -Timeout 2 -ErrorAction SilentlyContinue
+  Start-Sleep -Milliseconds 250
 }
-Copy-Item -LiteralPath $source -Destination (Join-Path $installDir "FleetFlow.NfcBridge.exe") -Force
+$bridgeDestination = Join-Path $installDir "FleetFlow.NfcBridge.exe"
+foreach ($attempt in 1..10) {
+  try {
+    Copy-Item -LiteralPath $source -Destination $bridgeDestination -Force
+    break
+  }
+  catch {
+    if ($attempt -eq 10) { throw }
+    Start-Sleep -Milliseconds 500
+  }
+}
 Copy-Item -LiteralPath $launcherSource -Destination (Join-Path $installDir "launch.ps1") -Force
 Copy-Item -LiteralPath $fleetFlowLauncherSource -Destination (Join-Path $installDir "start-fleetflow.ps1") -Force
 Copy-Item -LiteralPath $messagesSource -Destination (Join-Path $installDir "messages.ja.json") -Force

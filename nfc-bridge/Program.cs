@@ -12,6 +12,7 @@ internal sealed record BridgeConfig(string[]? AllowedOrigins);
 internal static class Program
 {
     private const int Port = 17831;
+    private const string BridgeVersion = "1.1.0";
     private static readonly object StateLock = new();
     private static readonly HashSet<string> PresentReaders = new(StringComparer.Ordinal);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -24,7 +25,7 @@ internal static class Program
     {
         using var cancellation = new CancellationTokenSource();
         Console.CancelKeyPress += (_, args) => { args.Cancel = true; cancellation.Cancel(); };
-        Console.WriteLine("FleetFlow NFC Bridge 1.0.0");
+        Console.WriteLine($"FleetFlow NFC Bridge {BridgeVersion}");
         Console.WriteLine("RC-S300 / RC-S380 を待機しています。");
         Console.WriteLine($"ブラウザー連携: http://127.0.0.1:{Port}");
 
@@ -94,7 +95,7 @@ internal static class Program
                 string[] readers;
                 long sequence;
                 lock (StateLock) { readers = Readers; sequence = Sequence; }
-                await WriteResponse(stream, 200, new { status = "ok", readerConnected = readers.Length > 0, readers, sequence, version = "1.0.0" }, origin);
+                await WriteResponse(stream, 200, new { status = "ok", readerConnected = readers.Length > 0, readers, sequence, version = BridgeVersion }, origin);
                 return;
             }
             if (uri.AbsolutePath == "/events")
@@ -137,8 +138,20 @@ internal static class Program
                 {
                     await Task.Delay(1500, token); continue;
                 }
-                var readers = WinSCard.ListReaders(context);
+                var listResult = WinSCard.ListReaders(context, out var readers);
+                if (listResult != WinSCard.Success && listResult != WinSCard.NoReadersAvailable)
+                    throw new InvalidOperationException($"リーダー一覧を取得できません（0x{unchecked((uint)listResult):X8}）");
                 lock (StateLock) Readers = readers;
+                // USBを抜くとWindows側のPC/SCコンテキストが古い状態を保持することがある。
+                // リーダーが0台になった時点で破棄し、次の周回で作り直すことで再挿入を確実に検出する。
+                if (readers.Length == 0)
+                {
+                    lock (StateLock) PresentReaders.Clear();
+                    WinSCard.SCardReleaseContext(context);
+                    context = 0;
+                    await Task.Delay(750, token);
+                    continue;
+                }
                 foreach (var reader in readers) ReadCard(context, reader);
                 lock (StateLock) PresentReaders.RemoveWhere(reader => !readers.Contains(reader, StringComparer.Ordinal));
                 await Task.Delay(300, token);
@@ -184,6 +197,7 @@ internal static class Program
 internal static class WinSCard
 {
     public const int Success = 0;
+    public const int NoReadersAvailable = unchecked((int)0x8010002E);
     public const uint ScopeSystem = 2;
     public const uint ShareShared = 2;
     public const uint ProtocolT0 = 1;
@@ -206,13 +220,17 @@ internal static class WinSCard
     [DllImport("winscard.dll")]
     private static extern int SCardTransmit(nint card, ref IoRequest sendPci, byte[] sendBuffer, uint sendLength, nint receivePci, byte[] receiveBuffer, ref uint receiveLength);
 
-    public static string[] ListReaders(nint context)
+    public static int ListReaders(nint context, out string[] readers)
     {
+        readers = [];
         uint length = 0;
-        if (SCardListReaders(context, null, null, ref length) != Success || length <= 1) return [];
+        var result = SCardListReaders(context, null, null, ref length);
+        if (result != Success || length <= 1) return result;
         var buffer = new StringBuilder((int)length);
-        if (SCardListReaders(context, null, buffer, ref length) != Success) return [];
-        return buffer.ToString().Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        result = SCardListReaders(context, null, buffer, ref length);
+        if (result != Success) return result;
+        readers = buffer.ToString().Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        return Success;
     }
 
     public static string? ReadUid(nint card, uint protocol)
