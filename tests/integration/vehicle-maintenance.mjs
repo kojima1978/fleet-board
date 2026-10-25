@@ -33,11 +33,11 @@ try {
   const now = new Date();
   await client.query('INSERT INTO "Department" (id,name,active,"createdAt","updatedAt") VALUES ($1,$2,true,$3,$3)', [ids.department, `整備テスト${suffix}`, now]);
   await client.query('INSERT INTO "EmployeeNumber" (id,code,"createdAt","updatedAt") VALUES ($1,$2,$3,$3)', [ids.employeeNumber, employeeCode, now]);
-  await client.query('INSERT INTO "Employee" (id,"employeeNumberId","departmentId",name,active,version,"createdAt","updatedAt") VALUES ($1,$2,$3,$4,true,1,$5,$5)', [ids.employee, ids.employeeNumber, ids.department, `整備テスト社員${suffix}`, now]);
+  await client.query('INSERT INTO "Employee" (id,"employeeNumberId","departmentId",name,"qrToken",active,version,"createdAt","updatedAt") VALUES ($1,$2,$3,$4,$5,true,1,$6,$6)', [ids.employee, ids.employeeNumber, ids.department, `整備テスト社員${suffix}`, `MAINE_${suffix}`, now]);
   for (const [i, id] of ids.spots.entries()) await client.query('INSERT INTO "ParkingSpot" (id,code,x,y,width,height,orientation,enabled,version) VALUES ($1,$2,0,0,5,5,\'horizontal\',true,1)', [id, spotCodes[i]]);
   for (const [i, id] of ids.vehicles.entries()) {
     await client.query('INSERT INTO "VehicleNumber" (id,code,"createdAt","updatedAt") VALUES ($1,$2,$3,$3)', [ids.numbers[i], vehicleCodes[i], now]);
-    await client.query('INSERT INTO "Vehicle" (id,"vehicleNumberId",name,"plateNumber",color,active,status,"parkingSpotId",version,"createdAt","updatedAt") VALUES ($1,$2,$3,$4,\'#2563eb\',true,\'AVAILABLE\',$5,1,$6,$6)', [id, ids.numbers[i], `整備テスト車${i}`, `MT-${suffix}-${i}`, ids.spots[i], now]);
+    await client.query('INSERT INTO "Vehicle" (id,"vehicleNumberId",name,"plateNumber",color,"qrToken",active,status,"parkingSpotId",version,"createdAt","updatedAt") VALUES ($1,$2,$3,$4,\'#2563eb\',$5,true,\'AVAILABLE\',$6,1,$7,$7)', [id, ids.numbers[i], `整備テスト車${i}`, `MT-${suffix}-${i}`, `MAINV_${suffix}_${i}`, ids.spots[i], now]);
   }
 
   // 車検で外出しても元の区画は確保され、他の車両は入れない。

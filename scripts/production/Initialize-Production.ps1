@@ -26,6 +26,12 @@ if (Test-Path -LiteralPath $environmentPath) {
     "FLEETFLOW_APP_VERSION=0.1.0"
     "FLEETFLOW_DEPLOYED_AT=$deployedAt"
     "FLEETFLOW_BACKUP_DESTINATION="
+    "SMTP_HOST="
+    "SMTP_PORT=587"
+    "SMTP_SECURE=false"
+    "SMTP_USER="
+    "SMTP_PASSWORD="
+    "SMTP_FROM=FleetFlow <fleetflow@example.jp>"
   )
   foreach ($setting in $defaults) {
     $name = ($setting -split '=', 2)[0]
@@ -44,6 +50,12 @@ $content = @(
   "FLEETFLOW_APP_VERSION=0.1.0"
   "FLEETFLOW_DEPLOYED_AT=$deployedAt"
   "FLEETFLOW_BACKUP_DESTINATION="
+  "SMTP_HOST="
+  "SMTP_PORT=587"
+  "SMTP_SECURE=false"
+  "SMTP_USER="
+  "SMTP_PASSWORD="
+  "SMTP_FROM=FleetFlow <fleetflow@example.jp>"
 ) -join [Environment]::NewLine
 [System.IO.File]::WriteAllText($environmentPath, $content + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding($false)))
 

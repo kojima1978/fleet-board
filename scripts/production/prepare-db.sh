@@ -16,4 +16,5 @@ npm run db:migrate:employee-normalization
 npm run db:migrate:unified-nfc
 npm run db:migrate:nfc-uids
 npm run db:migrate:operation-ids
+npm run db:migrate:employee-emails
 npm run db:seed:production

@@ -35,9 +35,9 @@ try {
   const now = new Date();
   await client.query('INSERT INTO "Department" (id,name,active,"createdAt","updatedAt") VALUES ($1,$2,true,$3,$3)', [ids.department, `APIテスト${suffix}`, now]);
   await client.query('INSERT INTO "EmployeeNumber" (id,code,"createdAt","updatedAt") VALUES ($1,$2,$3,$3)', [ids.employeeNumber, employeeCode, now]);
-  await client.query('INSERT INTO "Employee" (id,"employeeNumberId","departmentId",name,active,version,"createdAt","updatedAt") VALUES ($1,$2,$3,$4,true,1,$5,$5)', [ids.employee, ids.employeeNumber, ids.department, `テスト社員${suffix}`, now]);
+  await client.query('INSERT INTO "Employee" (id,"employeeNumberId","departmentId",name,"qrToken",active,version,"createdAt","updatedAt") VALUES ($1,$2,$3,$4,$5,true,1,$6,$6)', [ids.employee, ids.employeeNumber, ids.department, `テスト社員${suffix}`, `TESTE_${suffix}`, now]);
   await client.query('INSERT INTO "VehicleNumber" (id,code,"createdAt","updatedAt") VALUES ($1,$2,$3,$3)', [ids.vehicleNumber, vehicleCodes[0], now]);
-  await client.query('INSERT INTO "Vehicle" (id,"vehicleNumberId",name,"plateNumber",color,"fuelLevel",active,status,version,"createdAt","updatedAt") VALUES ($1,$2,$3,$4,$5,3,true,\'AVAILABLE\',1,$6,$6)', [ids.vehicle, ids.vehicleNumber, `テスト車両${suffix}`, `TEST-${suffix}`, "#2563eb", now]);
+  await client.query('INSERT INTO "Vehicle" (id,"vehicleNumberId",name,"plateNumber",color,"fuelLevel","qrToken",active,status,version,"createdAt","updatedAt") VALUES ($1,$2,$3,$4,$5,3,$6,true,\'AVAILABLE\',1,$7,$7)', [ids.vehicle, ids.vehicleNumber, `テスト車両${suffix}`, `TEST-${suffix}`, "#2563eb", `TESTV_${suffix}`, now]);
   await client.query('INSERT INTO "ParkingSpot" (id,code,x,y,width,height,orientation,enabled,version) VALUES ($1,$2,0,0,5,5,\'horizontal\',true,1)', [ids.spot, `T${suffix}`]);
 
   const startOperationId = crypto.randomUUID(); operationIds.push(startOperationId);

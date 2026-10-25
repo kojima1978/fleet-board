@@ -1,6 +1,7 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "./generated/client";
 import { defaultSpotRoles, syncParkingSpots } from "./parking-spot-seed";
+import { createQrToken } from "../lib/qr-code";
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) });
 
@@ -37,7 +38,7 @@ async function main() {
     const departmentRecord = await prisma.department.upsert({ where: { name: department }, update: { active: true }, create: { name: department } });
     if (existingEmployee) await prisma.employee.update({ where: { id: existingEmployee.id }, data: { name, departmentId: departmentRecord.id } });
     else {
-      const employee = await prisma.employee.create({ data: { employeeNumberId: employeeNumber.id, departmentId: departmentRecord.id, name } });
+      const employee = await prisma.employee.create({ data: { employeeNumberId: employeeNumber.id, departmentId: departmentRecord.id, name, qrToken: createQrToken() } });
       const nfcTag = await prisma.nfcTag.upsert({ where: { uid: `NFC-${code}` }, update: {}, create: { uid: `NFC-${code}` } });
       await prisma.nfcAssignment.create({ data: { employeeId: employee.id, nfcTagId: nfcTag.id } });
     }
@@ -56,7 +57,7 @@ async function main() {
     const freeSpot = existingVehicle ? undefined : dedicatedSpot ?? spots.find((spot) => !occupiedSpotIds.has(spot.id) && !nonRegularCodes.has(spot.code)) ?? spots.find((spot) => !occupiedSpotIds.has(spot.id));
     if (existingVehicle) await prisma.vehicle.update({ where: { id: existingVehicle.id }, data: { name, plateNumber, color } });
     else {
-      const vehicle = await prisma.vehicle.create({ data: { vehicleNumberId: vehicleNumber.id, name, plateNumber, color, parkingSpotId: freeSpot?.id } });
+      const vehicle = await prisma.vehicle.create({ data: { vehicleNumberId: vehicleNumber.id, name, qrToken: createQrToken(), plateNumber, color, parkingSpotId: freeSpot?.id } });
       const nfcTag = await prisma.nfcTag.upsert({ where: { uid: `NFC-${code}` }, update: {}, create: { uid: `NFC-${code}` } });
       await prisma.nfcAssignment.create({ data: { vehicleId: vehicle.id, nfcTagId: nfcTag.id } });
     }

@@ -4,15 +4,16 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { AlertTriangle, CalendarClock, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Fuel, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Move, Nfc, Pencil, Play, Plus, Printer, RefreshCw, Settings, UserRound, Utensils, Wrench, X } from "lucide-react";
+import { AlertTriangle, CalendarClock, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Fuel, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Move, Nfc, Pencil, Play, Plus, Printer, QrCode, RefreshCw, Settings, UserRound, Utensils, Wrench, X } from "lucide-react";
 import type { DashboardData, Employee, ParkingSpot, Trip, Vehicle, VehicleMaintenance } from "@/lib/types";
 import { normalizeNfcUid } from "@/lib/nfc";
 import { createOperationId } from "@/lib/operation-id";
 import { resolveNfcUid } from "@/lib/resolve-nfc";
+import { resolveQrCode } from "@/lib/resolve-qr";
 import { canUseSpot, formatSpotLabel, isDashedSpot, spotRoleTag } from "@/lib/parking-spots";
 import { RESERVATION_GRACE_MINUTES } from "@/lib/reservations";
 import { FUEL_LEVEL_LABELS, FUEL_LEVEL_MAX, formatFuelLevel, isLowFuel } from "@/lib/fuel-level";
-import { nfcBridgeStatusText, useNfcBridge, useNfcBridgeHealth, type NfcBridgeStatus } from "@/lib/use-nfc-bridge";
+import { scannerBridgeStatusText, useNfcBridge, useNfcBridgeHealth, useQrBridgeHealth, useScannerBridge, type NfcBridgeStatus, type ScannerEvent } from "@/lib/use-nfc-bridge";
 import { useKioskIdle, useKioskUserTimeout } from "@/lib/use-kiosk-idle";
 import { playNfcSound } from "@/lib/nfc-sound";
 import { clearSavedEmployee, forgetPersistentEmployee, readSavedEmployee, saveEmployee } from "@/lib/employee-session";
@@ -125,15 +126,17 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   const [timelineDate, setTimelineDate] = useState(() => tokyoDayStart());
   const [timelineDays, setTimelineDays] = useState<1 | 3>(1);
   const nfcHealth = useNfcBridgeHealth(true);
+  const qrHealth = useQrBridgeHealth(true);
+  const scannerHealth: NfcBridgeStatus = nfcHealth === "ready" || qrHealth === "ready" ? "ready" : nfcHealth;
   const previousNfcHealth = useRef<NfcBridgeStatus | null>(null);
   // 入口の共用端末では、駐車場・タイムライン画面を開いている間ずっと社員証・車両タグを受け付ける。
   // ダイアログ表示中（各ダイアログが自分で読み取る）と設定画面（NFC登録と競合する）では止める。
-  const nfcAvailable = nfcHealth === "ready" || nfcHealth === "no-reader";
+  const nfcAvailable = scannerHealth === "ready" || scannerHealth === "no-reader";
   // 利用者を残すか（各自のPC）、操作ごとに破棄するか（共用端末）。NFCを使えるかとは別に、端末ごとの指定で決める。
-  const kiosk = isKioskDevice(useDeviceMode(), nfcHealth);
+  const kiosk = isKioskDevice(useDeviceMode(), scannerHealth);
   const nfcListening = view === "parking" || view === "timeline";
-  const kioskNfcHandler = useRef<((uid: string) => void) | null>(null);
-  useNfcBridge(nfcAvailable && nfcListening && dialog === null && data !== null, (uid) => kioskNfcHandler.current?.(uid));
+  const kioskScanHandler = useRef<((event: ScannerEvent) => void) | null>(null);
+  useScannerBridge(nfcAvailable && nfcListening && dialog === null && data !== null, (event) => kioskScanHandler.current?.(event));
   // 社員証を読み直すたびに自動解除の残り時間を数え直す。
   const [authenticatedAt, setAuthenticatedAt] = useState(0);
   useEffect(() => {
@@ -445,17 +448,17 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
     setToast({ message: employee?.id === person.id ? `${person.name}さんで認証済みです` : employee ? `利用者を${person.name}さんに切り替えました` : `${person.name}さんを認証しました`, tone: "success" });
     selectEmployee(person);
   };
-  kioskNfcHandler.current = async (uid: string) => {
+  kioskScanHandler.current = async (scan: ScannerEvent) => {
     reportActivity();
     try {
-      const result = await resolveNfcUid(uid);
+      const result = scan.kind === "nfc" ? await resolveNfcUid(scan.value) : await resolveQrCode(scan.value);
       const person = result?.kind === "employee" ? activeEmployees.find((item) => item.id === result.id) : undefined;
       if (person) { playNfcSound("success"); authenticateEmployee(person); return; }
       const vehicle = result?.kind === "vehicle" ? activeVehicles.find((item) => item.id === result.id) : undefined;
       if (vehicle) { playNfcSound(vehicle.status === "MAINTENANCE" ? "error" : "success"); openVehicleFromNfc(vehicle); return; }
       playNfcSound("error");
-      setToast({ message: `登録されていないカード・タグです（UID ${uid}）`, tone: "error", brief: true });
-    } catch { playNfcSound("error"); setToast({ message: "NFCタグを確認できませんでした。接続状態を確認してください", tone: "error", brief: true }); }
+      setToast({ message: scan.kind === "nfc" ? `登録されていないカード・タグです（UID ${scan.value}）` : "登録されていないFleetFlow用QRコードです", tone: "error", brief: true });
+    } catch (error) { playNfcSound("error"); setToast({ message: error instanceof Error ? error.message : `${scan.kind === "nfc" ? "NFCタグ" : "QRコード"}を確認できませんでした`, tone: "error", brief: true }); }
   };
   const downloadDiagnostics = () => {
     const diagnostics = {
@@ -465,6 +468,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
       online: isOnline,
       lastSuccessfulSync: lastSuccessfulSync?.toISOString() ?? null,
       nfcBridge: nfcHealth,
+      qrScanner: qrHealth,
       appVersion: data.system.appVersion,
       environment: data.system.environment,
       deployedAt: data.system.deployedAt,
@@ -484,9 +488,9 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   return (
     <div className="min-h-screen bg-[#f4f7fb] text-slate-900">
       <AppHeader view={view} actions={<>
-            <HeaderSystemStatus syncState={syncState} lastSuccessfulSync={lastSuccessfulSync} nfcStatus={nfcHealth} refreshing={refreshing} onRefresh={() => void load()} onOpenNfc={() => setDialog("nfc")} onDownloadDiagnostics={downloadDiagnostics} />
-            <HeaderDeviceMode nfcStatus={nfcHealth} />
-            <HeaderUserControl nfcStatus={nfcHealth} nfcListening={nfcListening} employeeName={employee?.name ?? null} remainingSeconds={userRemainingSeconds} onPick={() => setDialog("user")} onClear={clearEmployee} />
+            <HeaderSystemStatus syncState={syncState} lastSuccessfulSync={lastSuccessfulSync} nfcStatus={nfcHealth} qrStatus={qrHealth} refreshing={refreshing} onRefresh={() => void load()} onOpenNfc={() => setDialog("nfc")} onDownloadDiagnostics={downloadDiagnostics} />
+            <HeaderDeviceMode nfcStatus={scannerHealth} />
+            <HeaderUserControl nfcStatus={scannerHealth} nfcListening={nfcListening} employeeName={employee?.name ?? null} remainingSeconds={userRemainingSeconds} onPick={() => setDialog("user")} onClear={clearEmployee} />
             <button aria-label="最新情報に更新" aria-busy={refreshing} disabled={refreshing} onClick={() => void load()} className="grid size-11 place-items-center rounded-xl border border-slate-200 bg-white disabled:opacity-50"><RefreshCw className={cn("size-4", refreshing && "animate-spin")} /></button>
       </>} />
 
@@ -528,7 +532,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
         </> : null}
 
         {view === "settingsEmployees" || view === "settingsDepartments" || view === "settingsVehicles" || view === "settingsSpots" || view === "settingsData" ? <div className="space-y-5">
-            <PageHeading eyebrow="管理設定" title={view === "settingsEmployees" ? "社員登録" : view === "settingsDepartments" ? "部署" : view === "settingsVehicles" ? "車両登録" : view === "settingsSpots" ? "駐車区画" : "データ保存・復元"} description={view === "settingsEmployees" ? "利用者となる社員と社員証のNFCタグを登録します。" : view === "settingsDepartments" ? "社員が所属する部署の追加・名前の変更・並び順を管理します。" : view === "settingsVehicles" ? "利用する社用車と車両のNFCタグを登録します。" : view === "settingsSpots" ? "配置図で区画を選び、区画番号と用途（一時・お客様用・専用・仮置き）を変更します。" : "FleetFlowの全データをJSONで保存し、必要なときに一括復元します。"} />
+            <PageHeading eyebrow="管理設定" title={view === "settingsEmployees" ? "社員登録" : view === "settingsDepartments" ? "部署" : view === "settingsVehicles" ? "車両登録" : view === "settingsSpots" ? "駐車区画" : "データ保存・復元"} description={view === "settingsEmployees" ? "利用者となる社員、社員証のNFCタグ、社員QRを管理します。" : view === "settingsDepartments" ? "社員が所属する部署の追加・名前の変更・並び順を管理します。" : view === "settingsVehicles" ? "利用する社用車、車両のNFCタグ、車両QRを管理します。" : view === "settingsSpots" ? "配置図で区画を選び、区画番号と用途（一時・お客様用・専用・仮置き）を変更します。" : "FleetFlowの全データをJSONで保存し、必要なときに一括復元します。"} />
             <SettingsNavigation view={view} />
             {view === "settingsData" ? <DataBackupPanel /> : view === "settingsSpots" ? <SpotRoleSettings data={data} mutate={mutate} /> : view === "settingsDepartments" ? <DepartmentSettings data={data} mutate={mutate} /> : <><div className="flex flex-wrap items-end justify-between gap-2"><div><p className="text-xs font-bold text-blue-600">日常管理</p><h3 className="mt-0.5 text-lg font-black">{view === "settingsEmployees" ? "社員情報" : "車両情報"}</h3></div><p className="text-xs text-slate-500">検索・登録・変更をこの一覧から行えます</p></div><SettingsPanelV2 kind={view === "settingsEmployees" ? "employee" : "vehicle"} data={data} mutate={mutate} /></>}
             <AdminToolsPanel />
@@ -1112,15 +1116,23 @@ function StartDialog({ employees, vehicles, trips, initialEmployee, initialVehic
       setEmployeeId(person.id); setNfcUid(normalized); setNfcError(""); setEmployeeScanEnabled(false); setEmployeeScanTimedOut(false);
     } catch { playNfcSound("error"); setEmployeeId(""); setNfcError("NFCタグを確認できませんでした。接続状態を確認してください"); }
   };
-  const bridgeStatus = useNfcBridge(!selectedEmployee && employeeScanEnabled, identifyEmployee);
+  const bridgeStatus = useScannerBridge(!selectedEmployee && employeeScanEnabled, async (scan) => {
+    if (scan.kind === "nfc") { await identifyEmployee(scan.value); return; }
+    try {
+      const result = await resolveQrCode(scan.value);
+      const person = result?.kind === "employee" ? employees.find((item) => item.id === result.id) : undefined;
+      if (!person) { playNfcSound("error"); setEmployeeId(""); setNfcError("登録されていない社員QRです"); return; }
+      playNfcSound("success"); setEmployeeId(person.id); setNfcError(""); setEmployeeScanEnabled(false); setEmployeeScanTimedOut(false);
+    } catch (error) { playNfcSound("error"); setEmployeeId(""); setNfcError(error instanceof Error ? error.message : "QRコードを確認できませんでした"); }
+  });
   useNfcScanTimeout(!selectedEmployee && employeeScanEnabled, () => {
     setEmployeeScanEnabled(false);
     setEmployeeScanTimedOut(true);
   });
-  return <DialogShell wide busy={submitting} title={activeReservation ? "予約した車両を利用開始" : "利用開始を登録"} subtitle={activeReservation ? "予約内容を確認し、実際の利用開始を登録してください" : !selectedEmployee ? "手順 2/3 ・ 社員証をかざしてください" : startMode === "scheduled" ? "手順 3/3 ・ 内容を確認して予約してください" : "手順 3/3 ・ 内容を確認して利用開始してください"} onClose={onClose}><form className="start-dialog grid gap-5 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); if (selectedEmployee && (activeReservation || scheduledValid)) onSubmit({ employeeId, employeeName: selectedEmployee.name, vehicleId, minutes: activeReservationMinutes, plannedStart: activeReservation ? null : startMode === "scheduled" ? effectiveStart.toISOString() : null }); }}>
+  return <DialogShell wide busy={submitting} title={activeReservation ? "予約した車両を利用開始" : "利用開始を登録"} subtitle={activeReservation ? "予約内容を確認し、実際の利用開始を登録してください" : !selectedEmployee ? "手順 2/3 ・ 社員証または社員QRを読み取ってください" : startMode === "scheduled" ? "手順 3/3 ・ 内容を確認して予約してください" : "手順 3/3 ・ 内容を確認して利用開始してください"} onClose={onClose}><form className="start-dialog grid gap-5 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); if (selectedEmployee && (activeReservation || scheduledValid)) onSubmit({ employeeId, employeeName: selectedEmployee.name, vehicleId, minutes: activeReservationMinutes, plannedStart: activeReservation ? null : startMode === "scheduled" ? effectiveStart.toISOString() : null }); }}>
     <div className="flex flex-col gap-4">
       <StartStep step={1} label="車両確認" state={selectedVehicle ? "done" : "active"}>{selectedVehicle ? <div className="flex items-center gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-xl bg-white"><CarFront className="size-6" style={{ color: selectedVehicle.color }} /></span><div className="min-w-0 flex-1"><p className="truncate text-base font-black text-slate-900">{selectedVehicle.name}</p><p className="truncate text-xs text-emerald-800">{selectedVehicle.plateNumber}</p><VehicleEquipmentBadges vehicle={selectedVehicle} /></div></div> : <p className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-bold text-rose-700">車両を確認できません。画面を閉じて選び直してください。</p>}<p className="text-[10px] text-slate-500">変更する場合は画面を閉じ、利用する車両を選び直してください。</p></StartStep>
-      <StartStep step={2} label="利用者確認" state={selectedEmployee ? "done" : "active"}>{selectedEmployee ? <div role="status" className="flex items-center gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-xl bg-white text-emerald-700"><UserRound className="size-6" /></span><div className="min-w-0 flex-1"><p className="truncate text-base font-black text-slate-900">{selectedEmployee.name}</p><p className="truncate text-xs text-emerald-800">社員番号 {selectedEmployee.code} ・ {selectedEmployee.department}</p></div><button type="button" onClick={() => { setEmployeeId(""); setNfcUid(""); setEmployeeScanEnabled(true); setEmployeeScanTimedOut(false); }} className="min-h-11 shrink-0 whitespace-nowrap rounded-xl px-3 text-xs font-bold text-emerald-800 hover:bg-emerald-100">選び直す</button></div> : <div className={cn("rounded-xl border p-4", employeeScanTimedOut ? "border-amber-200 bg-amber-50" : "border-blue-200 bg-blue-50")}><div className={cn("flex min-h-24 items-center gap-3", employeeScanTimedOut ? "text-amber-800" : "text-blue-700")}><span className="grid size-14 shrink-0 place-items-center rounded-full bg-white"><Nfc className={cn("size-8", employeeScanEnabled && "animate-pulse")} /></span><div><p className="text-base font-black">{employeeScanTimedOut ? "社員証を読み取れませんでした" : "社員証をかざしてください"}</p><p role="status" aria-live="polite" className={cn("mt-1 text-xs", employeeScanTimedOut ? "font-bold text-amber-700" : bridgeStatus === "ready" ? "font-bold text-emerald-700" : "text-blue-600")}>{employeeScanTimedOut ? "15秒以内に読み取れませんでした。再試行または手動選択ができます。" : nfcBridgeStatusText(bridgeStatus)}</p></div></div>{employeeScanTimedOut ? null : <NfcBridgeHelp status={bridgeStatus} className="mt-3" />}{nfcError ? <p role="alert" className="mt-3 rounded-xl bg-white p-3 text-xs font-bold text-rose-600">{nfcError}</p> : null}{employeeScanTimedOut ? <button type="button" onClick={() => { setEmployeeScanEnabled(true); setEmployeeScanTimedOut(false); setNfcError(""); }} className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-xs font-bold text-white hover:bg-blue-700"><Nfc className="size-4" />NFC読取を再試行</button> : null}<details className={cn("mt-3 border-t pt-3", employeeScanTimedOut ? "border-amber-200" : "border-blue-200")}><summary className="flex min-h-12 cursor-pointer list-none items-center justify-center rounded-xl text-xs font-bold text-slate-600 hover:bg-white/70">NFCを使わず社員を選択</summary><div className="mt-3 space-y-3"><select aria-label="社員を選択" className={field} value="" onChange={(event) => { const person = employees.find((item) => item.id === event.target.value); if (person) { setEmployeeId(person.id); setNfcUid(person.nfcUid); setNfcError(""); setEmployeeScanEnabled(false); setEmployeeScanTimedOut(false); } }}><option value="">社員番号から選択してください</option>{orderedEmployees.map((person) => <option key={person.id} value={person.id}>{person.code}　{person.name}（{person.department}）</option>)}</select><div className="flex gap-2"><input aria-label="NFC UIDを手入力" className={field} value={nfcUid} onChange={(event) => setNfcUid(event.target.value)} onBlur={() => setNfcUid(normalizeNfcUid(nfcUid))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); identifyEmployee(nfcUid); } }} placeholder="NFC UIDを手入力" /><Button type="button" className="min-h-12 shrink-0 whitespace-nowrap px-4" onClick={() => identifyEmployee(nfcUid)}>認識</Button></div></div></details></div>}</StartStep>
+      <StartStep step={2} label="利用者確認" state={selectedEmployee ? "done" : "active"}>{selectedEmployee ? <div role="status" className="flex items-center gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-xl bg-white text-emerald-700"><UserRound className="size-6" /></span><div className="min-w-0 flex-1"><p className="truncate text-base font-black text-slate-900">{selectedEmployee.name}</p><p className="truncate text-xs text-emerald-800">社員番号 {selectedEmployee.code} ・ {selectedEmployee.department}</p></div><button type="button" onClick={() => { setEmployeeId(""); setNfcUid(""); setEmployeeScanEnabled(true); setEmployeeScanTimedOut(false); }} className="min-h-11 shrink-0 whitespace-nowrap rounded-xl px-3 text-xs font-bold text-emerald-800 hover:bg-emerald-100">選び直す</button></div> : <div className={cn("rounded-xl border p-4", employeeScanTimedOut ? "border-amber-200 bg-amber-50" : "border-blue-200 bg-blue-50")}><div className={cn("flex min-h-24 items-center gap-3", employeeScanTimedOut ? "text-amber-800" : "text-blue-700")}><span className="grid size-14 shrink-0 place-items-center rounded-full bg-white"><QrCode className={cn("size-8", employeeScanEnabled && "animate-pulse")} /></span><div><p className="text-base font-black">{employeeScanTimedOut ? "社員証・QRを読み取れませんでした" : "社員証をかざすか、社員QRを読み取ってください"}</p><p role="status" aria-live="polite" className={cn("mt-1 text-xs", employeeScanTimedOut ? "font-bold text-amber-700" : bridgeStatus === "ready" ? "font-bold text-emerald-700" : "text-blue-600")}>{employeeScanTimedOut ? "15秒以内に読み取れませんでした。再試行または手動選択ができます。" : scannerBridgeStatusText(bridgeStatus)}</p></div></div>{employeeScanTimedOut ? null : <NfcBridgeHelp status={bridgeStatus} className="mt-3" />}{nfcError ? <p role="alert" className="mt-3 rounded-xl bg-white p-3 text-xs font-bold text-rose-600">{nfcError}</p> : null}{employeeScanTimedOut ? <button type="button" onClick={() => { setEmployeeScanEnabled(true); setEmployeeScanTimedOut(false); setNfcError(""); }} className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-xs font-bold text-white hover:bg-blue-700"><QrCode className="size-4" />読取を再試行</button> : null}<details className={cn("mt-3 border-t pt-3", employeeScanTimedOut ? "border-amber-200" : "border-blue-200")}><summary className="flex min-h-12 cursor-pointer list-none items-center justify-center rounded-xl text-xs font-bold text-slate-600 hover:bg-white/70">読み取りを使わず社員を選択</summary><div className="mt-3 space-y-3"><select aria-label="社員を選択" className={field} value="" onChange={(event) => { const person = employees.find((item) => item.id === event.target.value); if (person) { setEmployeeId(person.id); setNfcUid(person.nfcUid); setNfcError(""); setEmployeeScanEnabled(false); setEmployeeScanTimedOut(false); } }}><option value="">社員番号から選択してください</option>{orderedEmployees.map((person) => <option key={person.id} value={person.id}>{person.code}　{person.name}（{person.department}）</option>)}</select><div className="flex gap-2"><input aria-label="NFC UIDを手入力" className={field} value={nfcUid} onChange={(event) => setNfcUid(event.target.value)} onBlur={() => setNfcUid(normalizeNfcUid(nfcUid))} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); identifyEmployee(nfcUid); } }} placeholder="NFC UIDを手入力" /><Button type="button" className="min-h-12 shrink-0 whitespace-nowrap px-4" onClick={() => identifyEmployee(nfcUid)}>認識</Button></div></div></details></div>}</StartStep>
     </div>
     {activeReservation ? <StartStep step={3} label="予約内容の確認" state="active"><p className="text-xs text-slate-600">時間の再入力は不要です。現在時刻を実際の開始として記録します。</p><div className="rounded-xl border border-violet-200 bg-white p-4"><p className="text-xs font-bold text-violet-600">利用予定</p><p className="mt-1 text-xl font-black text-slate-900">{formatDateTime(activeReservation.plannedStart)} ～ {formatDateTime(activeReservation.plannedEnd)}</p><div className="mt-3 grid grid-cols-2 gap-3 border-t border-violet-100 pt-3 text-xs"><div><p className="text-slate-400">利用者</p><p className="mt-1 font-black">{activeReservation.employee.name}</p></div><div><p className="text-slate-400">車両</p><p className="mt-1 font-black">{activeReservation.vehicle.name}</p></div></div></div><p className="text-xs text-slate-500">利用開始後は車両が「利用中」になります。</p><Button type="submit" className="mt-auto min-h-14 w-full text-base" disabled={submitting || !selectedEmployee || !selectedVehicle}>{submitting ? <LoaderCircle className="size-5 animate-spin" /> : <CarFront className="size-5" />}{submitting ? "利用開始中…" : "予約した車両を利用開始"}</Button></StartStep> : <StartStep step={3} label="内容確認" state={selectedEmployee ? "active" : "upcoming"}>
       <div><p className="mb-2 text-xs font-bold text-slate-600">利用開始</p><div className="grid grid-cols-2 rounded-xl bg-slate-200/70 p-1"><button type="button" aria-pressed={startMode === "now"} onClick={() => setStartMode("now")} className={cn("min-h-11 rounded-lg text-sm font-black transition", startMode === "now" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500")}>今すぐ</button><button type="button" aria-pressed={startMode === "scheduled"} onClick={() => { setStartMode("scheduled"); setScheduledStart((current) => current < nextQuarterHour() ? nextQuarterHour() : current); }} className={cn("min-h-11 rounded-lg text-sm font-black transition", startMode === "scheduled" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500")}>時刻指定</button></div>{lunchAvailable ? <button type="button" aria-pressed={lunchActive} onClick={() => { setStartMode("now"); setUntilLunchEnd(true); }} className={cn("mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border text-sm font-black transition", lunchActive ? "border-blue-600 bg-blue-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50")}><Utensils className="size-4" />昼休み 今から〜13:00</button> : null}</div>
@@ -1134,7 +1146,7 @@ function StartDialog({ employees, vehicles, trips, initialEmployee, initialVehic
       {startMode === "now" || scheduleKind === "timed" ? <div><p className="mb-2 text-xs font-bold text-slate-600">利用予定時間</p><div className="grid grid-cols-4 gap-2">{[{ label: "1時間", value: 60 }, { label: "2時間", value: 120 }, { label: "3時間", value: 180 }, { label: "5時間", value: 300 }].map((preset) => <button type="button" key={preset.value} aria-pressed={!lunchActive && totalMinutes === preset.value} onClick={() => { setUntilLunchEnd(false); setTotalMinutes(preset.value); }} className={cn("min-h-11 rounded-xl border px-1 text-sm font-black transition", !lunchActive && totalMinutes === preset.value ? "border-blue-600 bg-blue-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50")}>{preset.label}</button>)}</div><div className="mt-2 grid grid-cols-[1fr_1.4fr_1fr] items-center gap-2"><button type="button" aria-label="15分短くする" onClick={() => changeDuration(-15)} disabled={durationMinutes <= 15} className="min-h-11 rounded-xl border border-slate-200 bg-white text-xs font-black text-slate-700 hover:bg-slate-100 disabled:opacity-35">−15分</button><div className="text-center"><p className="text-[10px] font-bold text-slate-400">選択中</p><p aria-live="polite" className="text-base font-black text-slate-900">{durationLabel}</p></div><button type="button" aria-label="15分長くする" onClick={() => changeDuration(15)} className="min-h-11 rounded-xl border border-slate-200 bg-white text-xs font-black text-slate-700 hover:bg-slate-100">＋15分</button></div></div> : null}
       <OperationSummary tone={startMode === "scheduled" ? "violet" : "slate"} items={[{ label: "車両", value: selectedVehicle?.name ?? "未選択" }, { label: "利用者", value: selectedEmployee?.name ?? "未確認" }, { label: startMode === "scheduled" ? "開始予定" : "利用開始", value: formatDateTime(effectiveStart) }, { label: "返却予定", value: formatDateTime(plannedEnd) }]} />
       {startMode === "scheduled" ? <p className="text-center text-[10px] font-bold text-violet-700">開始から{RESERVATION_GRACE_MINUTES}分以内に利用開始されない場合は自動取消</p> : null}
-      <Button type="submit" className="min-h-14 w-full text-base" disabled={submitting || !selectedEmployee || !selectedVehicle || !scheduledValid}>{submitting ? <LoaderCircle className="size-5 animate-spin" /> : startMode === "scheduled" ? <Clock3 className="size-5" /> : <CarFront className="size-5" />}{submitting ? "登録しています…" : !selectedEmployee ? "先に社員証をかざしてください" : startMode === "scheduled" ? "この内容で予約" : "この内容で利用開始"}</Button>
+      <Button type="submit" className="min-h-14 w-full text-base" disabled={submitting || !selectedEmployee || !selectedVehicle || !scheduledValid}>{submitting ? <LoaderCircle className="size-5 animate-spin" /> : startMode === "scheduled" ? <Clock3 className="size-5" /> : <CarFront className="size-5" />}{submitting ? "登録しています…" : !selectedEmployee ? "先に社員証・QRを読み取ってください" : startMode === "scheduled" ? "この内容で予約" : "この内容で利用開始"}</Button>
     </StartStep>}
   </form></DialogShell>;
 }
@@ -1168,18 +1180,18 @@ function ParkingReturnDialog({ spot, trips: allTrips, vehicles, submitting, onCl
   const trips = allTrips.filter((trip) => canUseSpot(trip.vehicle, spot));
   const selected = trips.find((trip) => trip.id === tripId);
   const fuelLevel = selected ? fuelChoice?.tripId === selected.id ? fuelChoice.level : selected.vehicle.fuelLevel : null;
-  const bridgeStatus = useNfcBridge(method === "nfc", async (uid) => {
+  const bridgeStatus = useScannerBridge(method === "nfc", async (scan) => {
     try {
-      const result = await resolveNfcUid(uid);
+      const result = scan.kind === "nfc" ? await resolveNfcUid(scan.value) : await resolveQrCode(scan.value);
       const vehicle = result?.kind === "vehicle" ? vehicles.find((item) => item.id === result.id) : undefined;
       const activeTrip = vehicle ? allTrips.find((item) => item.vehicleId === vehicle.id) : undefined;
       const trip = activeTrip ? trips.find((item) => item.id === activeTrip.id) : undefined;
       playNfcSound(trip ? "success" : "error");
-      if (!vehicle) { setTripId(""); setNfcError("登録されていない車両タグです"); return; }
+      if (!vehicle) { setTripId(""); setNfcError(scan.kind === "nfc" ? "登録されていない車両タグです" : "登録されていない車両QRです"); return; }
       if (!activeTrip) { setTripId(""); setNfcError(`${vehicle.name}は現在利用中ではありません`); return; }
       if (!trip) { setTripId(""); setNfcError(`${vehicle.name}は${formatSpotLabel(spot)}へ返却できません`); return; }
       setTripId(trip.id); setNfcError("");
-    } catch { playNfcSound("error"); setTripId(""); setNfcError("NFCタグを確認できませんでした。接続状態を確認してください"); }
+    } catch (error) { playNfcSound("error"); setTripId(""); setNfcError(error instanceof Error ? error.message : "タグ・QRコードを確認できませんでした"); }
   });
   useEffect(() => {
     if (method !== "nfc" || (bridgeStatus !== "offline" && bridgeStatus !== "no-reader")) return;
@@ -1191,9 +1203,9 @@ function ParkingReturnDialog({ spot, trips: allTrips, vehicles, submitting, onCl
     setMethod("manual");
   });
   const switchMethod = (next: "manual" | "nfc") => { setMethod(next); setFallbackNotice(""); setNfcError(""); setTripId(""); };
-  return <DialogShell busy={submitting} title={`${formatSpotLabel(spot)} へ返却`} subtitle={spot.role === "CUSTOMER" ? "お客様用区画ですが、社用車も返却できます" : spot.role === "HOLDING" ? "実在する駐車区画ではありません。駐車場所を確定できない場合だけ使用してください" : spot.role === "TEMPORARY" ? "通常区画ではありませんが、一時的な返却先として利用できます" : spot.role === "DEDICATED" ? `${spot.dedicatedVehicleName ?? "指定した車両"}だけを返却できます` : "車両タグを読み取り、返却内容を確認してください"} onClose={onClose}><div className="space-y-4">
+  return <DialogShell busy={submitting} title={`${formatSpotLabel(spot)} へ返却`} subtitle={spot.role === "CUSTOMER" ? "お客様用区画ですが、社用車も返却できます" : spot.role === "HOLDING" ? "実在する駐車区画ではありません。駐車場所を確定できない場合だけ使用してください" : spot.role === "TEMPORARY" ? "通常区画ではありませんが、一時的な返却先として利用できます" : spot.role === "DEDICATED" ? `${spot.dedicatedVehicleName ?? "指定した車両"}だけを返却できます` : "車両タグまたは車両QRを読み取り、返却内容を確認してください"} onClose={onClose}><div className="space-y-4">
     <OperationProgress labels={["返却先", "車両読取", "内容確定"]} current={selected ? 3 : 2} />
-    {trips.length === 0 ? <Empty label="現在利用中の車両はありません" /> : method === "manual" ? <div className="space-y-3">{fallbackNotice ? <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-800">{fallbackNotice}</p> : null}<Label text="返却する車両"><select className={field} value={tripId} onChange={(event) => setTripId(event.target.value)}><option value="">車両を選択してください</option>{trips.map((trip) => <option key={trip.id} value={trip.id}>{trip.vehicle.name}　{trip.vehicle.plateNumber}（{trip.employee.name}）</option>)}</select></Label><button type="button" onClick={() => switchMethod("nfc")} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-blue-700 hover:bg-blue-100"><Nfc className="size-4" />NFC読取を再試行</button></div> : <div className={cn("rounded-2xl border p-4 transition", selected ? "border-emerald-300 bg-emerald-50" : "border-blue-200 bg-blue-50")}><div className="text-center"><span className={cn("mx-auto grid size-14 place-items-center rounded-full", selected ? "bg-emerald-600 text-white" : "bg-white text-blue-600")} >{selected ? <Check className="size-7" /> : <Nfc className="size-8 animate-pulse" />}</span><p className={cn("mt-3 text-sm font-black", selected ? "text-emerald-800" : "text-blue-800")}>{selected ? "車両を読み取りました" : "車両のNFCタグをかざしてください"}</p><p className={cn("text-[11px]", bridgeStatus === "ready" ? "font-bold text-emerald-700" : "text-blue-500")}>{nfcBridgeStatusText(bridgeStatus)}</p>{nfcError ? <p role="alert" className="mt-3 rounded-xl bg-white p-3 text-xs font-bold text-rose-600">{nfcError}</p> : null}{selected ? null : <NfcBridgeHelp status={bridgeStatus} className="mt-3" />}</div>{process.env.NODE_ENV === "development" && !selected ? <div className="mt-4 grid gap-2 sm:grid-cols-2">{trips.map((trip) => <button type="button" key={trip.id} onClick={() => { setTripId(trip.id); setNfcError(""); }} className="min-h-11 rounded-xl border border-blue-100 bg-white p-3 text-left text-xs transition hover:border-blue-300"><b className="block">{trip.vehicle.name}</b><span className="text-slate-500">{trip.employee.name}</span></button>)}</div> : null}{!selected ? <button type="button" onClick={() => switchMethod("manual")} className="mt-4 min-h-11 w-full text-xs font-bold text-slate-500 underline decoration-slate-300 underline-offset-4">NFCを使わず手動で選択</button> : null}</div>}
+    {trips.length === 0 ? <Empty label="現在利用中の車両はありません" /> : method === "manual" ? <div className="space-y-3">{fallbackNotice ? <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-800">{fallbackNotice}</p> : null}<Label text="返却する車両"><select className={field} value={tripId} onChange={(event) => setTripId(event.target.value)}><option value="">車両を選択してください</option>{trips.map((trip) => <option key={trip.id} value={trip.id}>{trip.vehicle.name}　{trip.vehicle.plateNumber}（{trip.employee.name}）</option>)}</select></Label><button type="button" onClick={() => switchMethod("nfc")} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-blue-700 hover:bg-blue-100"><QrCode className="size-4" />NFC・QR読取を再試行</button></div> : <div className={cn("rounded-2xl border p-4 transition", selected ? "border-emerald-300 bg-emerald-50" : "border-blue-200 bg-blue-50")}><div className="text-center"><span className={cn("mx-auto grid size-14 place-items-center rounded-full", selected ? "bg-emerald-600 text-white" : "bg-white text-blue-600")} >{selected ? <Check className="size-7" /> : <QrCode className="size-8 animate-pulse" />}</span><p className={cn("mt-3 text-sm font-black", selected ? "text-emerald-800" : "text-blue-800")}>{selected ? "車両を読み取りました" : "車両タグまたは車両QRを読み取ってください"}</p><p className={cn("text-[11px]", bridgeStatus === "ready" ? "font-bold text-emerald-700" : "text-blue-500")}>{scannerBridgeStatusText(bridgeStatus)}</p>{nfcError ? <p role="alert" className="mt-3 rounded-xl bg-white p-3 text-xs font-bold text-rose-600">{nfcError}</p> : null}{selected ? null : <NfcBridgeHelp status={bridgeStatus} className="mt-3" />}</div>{process.env.NODE_ENV === "development" && !selected ? <div className="mt-4 grid gap-2 sm:grid-cols-2">{trips.map((trip) => <button type="button" key={trip.id} onClick={() => { setTripId(trip.id); setNfcError(""); }} className="min-h-11 rounded-xl border border-blue-100 bg-white p-3 text-left text-xs transition hover:border-blue-300"><b className="block">{trip.vehicle.name}</b><span className="text-slate-500">{trip.employee.name}</span></button>)}</div> : null}{!selected ? <button type="button" onClick={() => switchMethod("manual")} className="mt-4 min-h-11 w-full text-xs font-bold text-slate-500 underline decoration-slate-300 underline-offset-4">読取を使わず手動で選択</button> : null}</div>}
     {selected ? <div className="rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm"><div className="flex items-start gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-xl bg-emerald-100 text-emerald-700"><CarFront className="size-6" /></span><div className="min-w-0 flex-1"><p className="text-[11px] font-bold text-emerald-700">返却内容を確認</p><p className="truncate text-base font-black">{selected.vehicle.name} <span className="text-slate-400">・ {formatPlateShort(selected.vehicle.plateNumber)}</span></p><p className="mt-1 text-xs text-slate-600">返却先：<b>{formatSpotLabel(spot)}</b>　利用者：{selected.employee.name}</p></div><button type="button" onClick={() => setTripId("")} className="min-h-11 shrink-0 rounded-xl px-3 text-xs font-bold text-slate-500 hover:bg-slate-100">選び直す</button></div></div> : null}
     {selected ? <FuelLevelPicker value={fuelLevel} onChange={(level) => setFuelChoice({ tripId: selected.id, level })} /> : null}
     <Button className="w-full bg-emerald-600 hover:bg-emerald-700" disabled={!selected || submitting} onClick={() => selected && onSubmit(selected, fuelLevel)}>{submitting ? <LoaderCircle className="size-4 animate-spin" /> : <Check className="size-4" />}{submitting ? "返却登録中…" : "返却を完了して利用可能にする"}</Button>
@@ -1270,34 +1282,34 @@ function NfcDialog({ employees, vehicles, onEmployee, onVehicle, onClose }: { em
   const [unknownUid, setUnknownUid] = useState("");
   const [scanEnabled, setScanEnabled] = useState(true);
   const [scanTimedOut, setScanTimedOut] = useState(false);
-  const bridgeStatus = useNfcBridge(scanEnabled, async (uid) => {
+  const bridgeStatus = useScannerBridge(scanEnabled, async (scan) => {
     setError(""); setUnknownUid("");
     try {
-      const result = await resolveNfcUid(uid);
+      const result = scan.kind === "nfc" ? await resolveNfcUid(scan.value) : await resolveQrCode(scan.value);
       const person = result?.kind === "employee" ? employees.find((item) => item.id === result.id) : undefined;
       if (person) { playNfcSound("success"); setScanEnabled(false); setScanTimedOut(false); onEmployee(person); return; }
       const vehicle = result?.kind === "vehicle" ? vehicles.find((item) => item.id === result.id) : undefined;
       if (vehicle) { playNfcSound(vehicle.status === "MAINTENANCE" ? "error" : "success"); setScanEnabled(false); setScanTimedOut(false); onVehicle(vehicle); return; }
       playNfcSound("error");
-      setUnknownUid(uid);
-    } catch { playNfcSound("error"); setError("NFCタグを確認できませんでした。接続状態を確認してください"); }
+      if (scan.kind === "nfc") setUnknownUid(scan.value); else setError("登録されていないFleetFlow用QRコードです");
+    } catch (error) { playNfcSound("error"); setError(error instanceof Error ? error.message : "NFC・QRコードを確認できませんでした"); }
   });
   useNfcScanTimeout(scanEnabled, () => {
     setScanEnabled(false);
     setScanTimedOut(true);
   });
   const retry = () => { setScanEnabled(true); setScanTimedOut(false); setError(""); setUnknownUid(""); };
-  return <DialogShell title="NFC読み取り" subtitle="社員証または車両タグをリーダーにかざしてください" onClose={onClose}><div className="text-center">
+  return <DialogShell title="NFC・QR読み取り" subtitle="社員証・車両タグをかざすか、QRコードを読み取ってください" onClose={onClose}><div className="text-center">
     <div className={cn("mx-auto mb-4 grid size-20 place-items-center rounded-full", scanTimedOut ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-600")}><Nfc className={cn("size-10", scanEnabled && "animate-pulse")} /></div>
-    <p className="text-sm font-bold">{scanTimedOut ? "読み取れませんでした" : "社員証・車両タグをかざしてください"}</p>
-    <p role="status" aria-live="polite" className={cn("mb-4 mt-1 text-[11px]", scanTimedOut ? "font-bold text-amber-700" : bridgeStatus === "ready" ? "font-bold text-emerald-700" : "text-slate-500")}>{scanTimedOut ? "15秒以内に読み取れませんでした。再試行するか、画面を閉じて手動で操作してください。" : nfcBridgeStatusText(bridgeStatus)}</p>
+    <p className="text-sm font-bold">{scanTimedOut ? "読み取れませんでした" : "社員証・車両タグ、またはQRコードを読み取ってください"}</p>
+    <p role="status" aria-live="polite" className={cn("mb-4 mt-1 text-[11px]", scanTimedOut ? "font-bold text-amber-700" : bridgeStatus === "ready" ? "font-bold text-emerald-700" : "text-slate-500")}>{scanTimedOut ? "15秒以内に読み取れませんでした。再試行するか、画面を閉じて手動で操作してください。" : scannerBridgeStatusText(bridgeStatus)}</p>
     <div className="mb-4 grid grid-cols-2 gap-2 text-left">
-      <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3"><UserRound className="size-5 shrink-0 text-emerald-600" /><span className="min-w-0"><b className="block text-xs">社員証</b><span className="block text-[11px] text-slate-500">利用者として認証</span></span></div>
-      <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3"><CarFront className="size-5 shrink-0 text-blue-600" /><span className="min-w-0"><b className="block text-xs">車両タグ</b><span className="block text-[11px] text-slate-500">利用開始・返却を開く</span></span></div>
+      <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3"><UserRound className="size-5 shrink-0 text-emerald-600" /><span className="min-w-0"><b className="block text-xs">社員証・社員QR</b><span className="block text-[11px] text-slate-500">利用者として認証</span></span></div>
+      <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3"><CarFront className="size-5 shrink-0 text-blue-600" /><span className="min-w-0"><b className="block text-xs">車両タグ・車両QR</b><span className="block text-[11px] text-slate-500">利用開始・返却を開く</span></span></div>
     </div>
     {unknownUid ? <div role="alert" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-left"><p className="text-xs font-black text-amber-800">登録されていないカード・タグです</p><p className="mt-1 text-[11px] font-bold text-amber-800">UID <span className="select-all font-mono">{unknownUid}</span></p><p className="mt-1 text-[11px] text-amber-700">別のカード・タグはそのままかざせます。登録は設定の社員登録・車両登録で行います。</p></div> : null}
     {error ? <p role="alert" className="mb-4 rounded-xl bg-rose-50 p-3 text-xs font-bold text-rose-700">{error}</p> : null}
-    {scanTimedOut ? <button type="button" onClick={retry} className="mb-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-amber-600 px-4 text-sm font-bold text-white hover:bg-amber-700"><Nfc className="size-4" />NFC読取を再試行</button> : <NfcBridgeHelp status={bridgeStatus} defaultOpen className="mb-4" />}
+    {scanTimedOut ? <button type="button" onClick={retry} className="mb-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-amber-600 px-4 text-sm font-bold text-white hover:bg-amber-700"><QrCode className="size-4" />読取を再試行</button> : <NfcBridgeHelp status={bridgeStatus} defaultOpen className="mb-4" />}
     {development ? <div className="grid grid-cols-2 gap-3 text-left"><div><p className="mb-2 text-xs font-bold text-slate-400">社員（開発用）</p>{employees.slice(0, 3).map((p) => <button key={p.id} onClick={() => onEmployee(p)} className="mb-2 w-full rounded-xl border border-slate-200 p-3 text-xs font-bold hover:bg-slate-50">{p.name}<small className="block font-normal text-slate-400">{p.code}</small></button>)}</div><div><p className="mb-2 text-xs font-bold text-slate-400">車両（開発用）</p>{vehicles.slice(0, 3).map((v) => <button key={v.id} onClick={() => onVehicle(v)} className="mb-2 w-full rounded-xl border border-slate-200 p-3 text-xs font-bold hover:bg-slate-50">{v.name}<small className="block font-normal text-slate-400">{v.code}</small></button>)}</div></div> : null}
   </div></DialogShell>;
 }
@@ -1305,20 +1317,20 @@ function NfcDialog({ employees, vehicles, onEmployee, onVehicle, onClose }: { em
 function UserPickerDialog({ employees, currentId, nfcEnabled, onSelect, onClose }: { employees: Employee[]; currentId: string | null; nfcEnabled: boolean; onSelect: (e: Employee) => void; onClose: () => void }) {
   const [query, setQuery] = useState("");
   const [nfcMessage, setNfcMessage] = useState("");
-  const bridgeStatus = useNfcBridge(nfcEnabled, async (uid) => {
+  const bridgeStatus = useScannerBridge(nfcEnabled, async (scan) => {
     setNfcMessage("");
     try {
-      const result = await resolveNfcUid(uid);
+      const result = scan.kind === "nfc" ? await resolveNfcUid(scan.value) : await resolveQrCode(scan.value);
       const person = result?.kind === "employee" ? employees.find((item) => item.id === result.id) : undefined;
       if (person) { playNfcSound("success"); onSelect(person); return; }
       playNfcSound("error");
-      setNfcMessage(result?.kind === "vehicle" ? "車両タグです。利用者を選ぶときは社員証をかざしてください" : `登録されていない社員証です（UID ${uid}）`);
-    } catch { playNfcSound("error"); setNfcMessage("NFCタグを確認できませんでした。一覧から選んでください"); }
+      setNfcMessage(result?.kind === "vehicle" ? "車両用のタグ・QRです。利用者を選ぶときは社員証または社員QRを読み取ってください" : scan.kind === "nfc" ? `登録されていない社員証です（UID ${scan.value}）` : "登録されていない社員QRです");
+    } catch { playNfcSound("error"); setNfcMessage("NFC・QRコードを確認できませんでした。一覧から選んでください"); }
   });
   const keyword = query.trim().toLowerCase();
   const filtered = [...employees].sort((left, right) => left.code.localeCompare(right.code, "ja", { numeric: true })).filter((person) => !keyword || `${person.code} ${person.name} ${person.department}`.toLowerCase().includes(keyword));
-  return <DialogShell title="利用者を選ぶ" subtitle={nfcEnabled ? "社員証をかざすか、一覧から選んでください" : "一覧から自分の名前を選んでください"} onClose={onClose}>
-    {nfcEnabled ? <div className="mb-3 flex items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-blue-800"><Nfc className={cn("size-6 shrink-0", bridgeStatus === "ready" && "animate-pulse")} /><div className="min-w-0"><p className="text-sm font-black">社員証をかざすと、そのまま選べます</p><p role="status" aria-live="polite" className="text-[11px]">{nfcBridgeStatusText(bridgeStatus)}</p></div></div> : null}
+  return <DialogShell title="利用者を選ぶ" subtitle={nfcEnabled ? "社員証・社員QRを読み取るか、一覧から選んでください" : "一覧から自分の名前を選んでください"} onClose={onClose}>
+    {nfcEnabled ? <div className="mb-3 flex items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-blue-800"><QrCode className={cn("size-6 shrink-0", bridgeStatus === "ready" && "animate-pulse")} /><div className="min-w-0"><p className="text-sm font-black">社員証・社員QRを読むと、そのまま選べます</p><p role="status" aria-live="polite" className="text-[11px]">{scannerBridgeStatusText(bridgeStatus)}</p></div></div> : null}
     {nfcMessage ? <p role="alert" className="mb-3 rounded-xl bg-amber-50 p-3 text-xs font-bold text-amber-800">{nfcMessage}</p> : null}
     <input aria-label="社員番号・名前・部署で検索" autoFocus={!nfcEnabled} className={field} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="社員番号・名前・部署で検索" />
     <ul className="mt-3 max-h-[min(24rem,50vh)] space-y-1.5 overflow-y-auto pr-1">{filtered.map((person) => <li key={person.id}><button type="button" onClick={() => onSelect(person)} aria-current={person.id === currentId ? "true" : undefined} className={cn("flex min-h-12 w-full items-center gap-3 rounded-xl border px-3 py-2 text-left transition", person.id === currentId ? "border-emerald-300 bg-emerald-50" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50")}><span className="w-14 shrink-0 font-mono text-xs text-slate-500">{person.code}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-black">{person.name}</span><span className="block truncate text-[11px] text-slate-500">{person.department}</span></span>{person.id === currentId ? <span className="flex shrink-0 items-center gap-1 text-[11px] font-bold text-emerald-700"><Check className="size-3.5" />選択中</span> : null}</button></li>)}</ul>

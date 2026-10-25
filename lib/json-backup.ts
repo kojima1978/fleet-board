@@ -5,6 +5,7 @@ import { getApplicationSystemStatus } from "@/lib/system-status";
 import { FUEL_LEVEL_MAX } from "@/lib/fuel-level";
 import { upgradeLegacyCodes } from "@/lib/record-codes";
 import { defaultSpotRoles } from "@/prisma/parking-spot-seed";
+import { createQrToken } from "@/lib/qr-code";
 
 export const JSON_BACKUP_FORMAT_VERSION = 1;
 export const JSON_BACKUP_MAX_BYTES = 50 * 1024 * 1024;
@@ -18,9 +19,9 @@ const employeeNumberSchema = z.object({ id, code: z.string().min(1).max(100), cr
 const vehicleNumberSchema = z.object({ id, code: z.string().min(1).max(100), createdAt: dateTime, updatedAt: dateTime }).strict();
 const parkingSpotSchema = z.object({ id, code: z.string().min(1).max(100), x: z.number().finite(), y: z.number().finite(), width: z.number().finite().positive(), height: z.number().finite().positive(), orientation: z.string().min(1).max(50), enabled: z.boolean(), role: z.enum(["REGULAR", "TEMPORARY", "CUSTOMER", "DEDICATED", "HOLDING"]).optional(), dedicatedVehicleId: id.nullable().optional(), label: z.string().max(100).nullable().optional(), version: z.number().int().nonnegative() }).strict();
 const nfcTagSchema = z.object({ id, uid: z.string().min(1).max(100), createdAt: dateTime, updatedAt: dateTime }).strict();
-const employeeSchema = z.object({ id, employeeNumberId: id, departmentId: id, name: z.string().min(1).max(100), active: z.boolean(), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
+const employeeSchema = z.object({ id, employeeNumberId: id, departmentId: id, name: z.string().min(1).max(100), email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()).nullable().optional(), qrToken: z.string().min(16).max(100).optional(), active: z.boolean(), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
 const fuelLevelSchema = z.number().int().min(0).max(FUEL_LEVEL_MAX).nullable().optional();
-const vehicleSchema = z.object({ id, vehicleNumberId: id, name: z.string().min(1).max(100), plateNumber: z.string().min(1).max(100), color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean(), hasNavigation: z.boolean(), fuelLevel: fuelLevelSchema, active: z.boolean(), status: z.enum(["AVAILABLE", "RESERVED", "IN_USE", "MAINTENANCE"]), parkingSpotId: id.nullable(), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
+const vehicleSchema = z.object({ id, vehicleNumberId: id, name: z.string().min(1).max(100), qrToken: z.string().min(16).max(100).optional(), plateNumber: z.string().min(1).max(100), color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean(), hasNavigation: z.boolean(), fuelLevel: fuelLevelSchema, active: z.boolean(), status: z.enum(["AVAILABLE", "RESERVED", "IN_USE", "MAINTENANCE"]), parkingSpotId: id.nullable(), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
 // clearedを追加する前のバックアップにはないため、UIDを消して外していない割り当てとして読む。
 const nfcAssignmentSchema = z.object({ id, employeeId: id.nullable(), vehicleId: id.nullable(), nfcTagId: id, validFrom: dateTime, validTo: nullableDateTime, cleared: z.boolean().default(false), createdAt: dateTime }).strict();
 const tripSchema = z.object({ id, employeeId: id, vehicleId: id, plannedStart: dateTime, plannedEnd: dateTime, actualStart: nullableDateTime, actualEnd: nullableDateTime, returnSpotCode: z.string().max(100).nullable(), returnFuelLevel: fuelLevelSchema, previousFuelLevel: fuelLevelSchema, purpose: z.string().max(500).nullable(), status: z.enum(["RESERVED", "IN_USE", "COMPLETED", "CANCELLED"]), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
@@ -99,6 +100,9 @@ export function parseFleetBackup(value: unknown): FleetBackup {
   }
   const backup = parsed.data;
   const data = backup.data;
+  // QR導入前のバックアップにはトークンがないため、復元時にだけ新しい不変トークンを割り当てる。
+  data.employees = data.employees.map((item) => ({ ...item, qrToken: item.qrToken ?? createQrToken() }));
+  data.vehicles = data.vehicles.map((item) => ({ ...item, qrToken: item.qrToken ?? createQrToken() }));
   // 形式を固定する前のバックアップ（C01など）も、今のDBと同じ英字1文字＋3桁の番号へ置き換えて復元する。
   // どの社員・車両にも使われていない番号は戻さず、仮のNFC UID（NFC-C02など）は割り当て先の番号に合わせる。
   // DBの移行（20261027100000_fix_record_code_format）と同じ規則にする。
@@ -118,6 +122,8 @@ export function parseFleetBackup(value: unknown): FleetBackup {
   assertUnique(data.vehicleNumbers, (item) => item.code, "車両番号");
   assertUnique(data.parkingSpots, (item) => item.code, "駐車区画番号");
   assertUnique(data.nfcTags, (item) => item.uid, "NFC UID");
+  assertUnique(data.employees, (item) => item.qrToken ?? null, "社員QRトークン");
+  assertUnique(data.vehicles, (item) => item.qrToken ?? null, "車両QRトークン");
   assertUnique(data.vehicles, (item) => item.plateNumber, "ナンバー");
   assertUnique(data.vehicles, (item) => item.parkingSpotId, "車両の駐車区画");
   assertUnique(data.auditLogs, (item) => item.operationId, "操作ID");
@@ -214,8 +220,8 @@ export async function restoreFleetBackup(backup: FleetBackup) {
     if (data.vehicleNumbers.length) await tx.vehicleNumber.createMany({ data: data.vehicleNumbers.map((item) => ({ ...item, createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
     if (data.parkingSpots.length) await tx.parkingSpot.createMany({ data: data.parkingSpots.map((item) => ({ ...item, ...(item.role === undefined ? legacySpotRole(item.code, data) : {}) })) });
     if (data.nfcTags.length) await tx.nfcTag.createMany({ data: data.nfcTags.map((item) => ({ ...item, createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
-    if (data.employees.length) await tx.employee.createMany({ data: data.employees.map((item) => ({ ...item, createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
-    if (data.vehicles.length) await tx.vehicle.createMany({ data: data.vehicles.map((item) => ({ ...item, createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
+    if (data.employees.length) await tx.employee.createMany({ data: data.employees.map((item) => ({ ...item, qrToken: item.qrToken!, createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
+    if (data.vehicles.length) await tx.vehicle.createMany({ data: data.vehicles.map((item) => ({ ...item, qrToken: item.qrToken!, createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
     if (data.nfcAssignments.length) await tx.nfcAssignment.createMany({ data: data.nfcAssignments.map((item) => ({ ...item, validFrom: asDate(item.validFrom), validTo: asNullableDate(item.validTo), createdAt: asDate(item.createdAt) })) });
     if (data.trips.length) await tx.trip.createMany({ data: data.trips.map((item) => ({ ...item, plannedStart: asDate(item.plannedStart), plannedEnd: asDate(item.plannedEnd), actualStart: asNullableDate(item.actualStart), actualEnd: asNullableDate(item.actualEnd), createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
     if (data.vehicleMaintenances.length) await tx.vehicleMaintenance.createMany({ data: data.vehicleMaintenances.map((item) => ({ ...item, plannedStart: asDate(item.plannedStart), plannedEnd: asNullableDate(item.plannedEnd), actualStart: asNullableDate(item.actualStart), actualEnd: asNullableDate(item.actualEnd), createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });

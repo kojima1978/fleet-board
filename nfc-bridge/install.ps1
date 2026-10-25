@@ -1,9 +1,27 @@
 param(
   [string]$AllowedOrigins = "http://localhost:3035;http://127.0.0.1:3035",
+  [string]$QrComPort = "",
+  [ValidateRange(1200, 115200)]
+  [int]$QrBaudRate = 9600,
   [string]$ProjectDirectory = (Split-Path $PSScriptRoot -Parent)
 )
 
 $ErrorActionPreference = "Stop"
+$detectedQrPort = $null
+if (-not $QrComPort) {
+  try {
+    $densoPorts = @(Get-CimInstance Win32_SerialPort -ErrorAction Stop | Where-Object {
+      "$($_.Name) $($_.Manufacturer) $($_.PNPDeviceID)" -match "DENSO|QK30|VID_076D&PID_0006"
+    })
+    if ($densoPorts.Count -eq 1) {
+      $detectedQrPort = $densoPorts[0].DeviceID
+      $QrComPort = $detectedQrPort
+    }
+  }
+  catch {
+    # COM can be supplied explicitly, so NFC-only installation may continue when detection is unavailable.
+  }
+}
 $source = Join-Path $PSScriptRoot "dist\FleetFlow.NfcBridge.exe"
 if (-not (Test-Path -LiteralPath $source)) { throw "Build the NFC bridge before installation." }
 $launcherSource = Join-Path $PSScriptRoot "launch.ps1"
@@ -49,7 +67,7 @@ foreach ($attempt in 1..10) {
 Copy-Item -LiteralPath $launcherSource -Destination (Join-Path $installDir "launch.ps1") -Force
 Copy-Item -LiteralPath $fleetFlowLauncherSource -Destination (Join-Path $installDir "start-fleetflow.ps1") -Force
 Copy-Item -LiteralPath $messagesSource -Destination (Join-Path $installDir "messages.ja.json") -Force
-$config = @{ allowedOrigins = $AllowedOrigins.Split(';', [System.StringSplitOptions]::RemoveEmptyEntries) } | ConvertTo-Json
+$config = @{ allowedOrigins = $AllowedOrigins.Split(';', [System.StringSplitOptions]::RemoveEmptyEntries); qrComPort = $(if ($QrComPort) { $QrComPort.Trim().ToUpperInvariant() } else { $null }); qrBaudRate = $QrBaudRate } | ConvertTo-Json
 Set-Content -LiteralPath (Join-Path $installDir "bridge.json") -Value $config -Encoding UTF8
 
 $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
@@ -67,4 +85,7 @@ New-ItemProperty -Path $protocolKey -Name "URL Protocol" -Value "" -PropertyType
 Set-ItemProperty -Path "$protocolKey\shell\open\command" -Name "(default)" -Value $protocolCommand
 
 Start-Process -FilePath $powerShell -ArgumentList @("-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", $launcher, "-Watch") -WindowStyle Hidden
-Write-Host "FleetFlow NFC Bridge installed and added to Windows startup. Use the launch files in the project directory."
+Write-Host "FleetFlow NFC/QR Bridge installed and added to Windows startup."
+if ($detectedQrPort) { Write-Host "DENSO QR scanner was detected automatically on $detectedQrPort." }
+elseif (-not $QrComPort) { Write-Host "QR scanner is not configured. Re-run with -QrComPort COM3 after checking Device Manager." }
+Write-Host "Use the launch files in the project directory."

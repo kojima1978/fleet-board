@@ -8,6 +8,8 @@ assert.match(exported.headers.get("content-disposition") ?? "", /fleetflow-data-
 const backup = await exported.json();
 assert.equal(backup.format, "fleetflow-json-backup");
 assert.equal(backup.formatVersion, 1);
+assert.ok(backup.data.employees.every((item) => item.qrToken), "社員QR識別子を保存する");
+assert.ok(backup.data.vehicles.every((item) => item.qrToken), "車両QR識別子を保存する");
 const originalCounts = Object.fromEntries(Object.entries(backup.data).map(([key, rows]) => [key, rows.length]));
 
 const post = async (body) => {
@@ -18,6 +20,12 @@ const post = async (body) => {
 const validated = await post({ mode: "validate", backup });
 assert.equal(validated.response.status, 200, JSON.stringify(validated.result));
 assert.deepEqual(validated.result.counts, originalCounts);
+
+const legacyBackup = structuredClone(backup);
+for (const item of legacyBackup.data.employees) delete item.qrToken;
+for (const item of legacyBackup.data.vehicles) delete item.qrToken;
+const legacyValidated = await post({ mode: "validate", backup: legacyBackup });
+assert.equal(legacyValidated.response.status, 200, "QR識別子がない旧バックアップも検査できる");
 
 const crossOrigin = await fetch(`${appUrl}/api/admin/data`, { method: "POST", headers: { "Content-Type": "application/json", Origin: "http://evil.example" }, body: JSON.stringify({ mode: "validate", backup }) });
 assert.equal(crossOrigin.status, 403, "別Originからの復元を拒否する");

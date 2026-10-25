@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, Check, Database, DatabaseBackup, Download, Nfc, RefreshCw, Search, Server } from "lucide-react";
 import { clearSavedEmployee, forgetPersistentEmployee, readSavedEmployee } from "@/lib/employee-session";
 import { isKioskDevice, useDeviceMode } from "@/lib/device-mode";
-import { useNfcBridgeHealth } from "@/lib/use-nfc-bridge";
+import { useNfcBridgeHealth, useQrBridgeHealth } from "@/lib/use-nfc-bridge";
 import { AppHeader, HeaderDeviceMode, HeaderSystemStatus, HeaderUserControl, Navigation, type HeaderSyncState } from "./app-header";
 import { Button, Card, cn } from "./ui";
 
@@ -25,7 +25,9 @@ export function OperationsDashboard() {
   const [lastSuccessfulSync, setLastSuccessfulSync] = useState<Date | null>(null);
   const [employeeName, setEmployeeName] = useState<string | null>(null);
   const nfcHealth = useNfcBridgeHealth(true);
-  const kiosk = isKioskDevice(useDeviceMode(), nfcHealth);
+  const qrHealth = useQrBridgeHealth(true);
+  const scannerHealth = nfcHealth === "ready" || qrHealth === "ready" ? "ready" : nfcHealth;
+  const kiosk = isKioskDevice(useDeviceMode(), scannerHealth);
   const load = useCallback(async (search = "", requestedPage = 1, actionFilter = action, fromDate = from, toDate = to) => {
     setLoading(true);
     setError("");
@@ -70,6 +72,7 @@ export function OperationsDashboard() {
       application: syncState,
       lastSuccessfulSync: lastSuccessfulSync?.toISOString() ?? null,
       nfcBridge: nfcHealth,
+      qrScanner: qrHealth,
       backupLatestAt: data?.backup.latestAt ?? null,
       backupVerifiedAt: data?.backup.verifiedAt ?? null,
       userAgent: navigator.userAgent,
@@ -93,9 +96,9 @@ export function OperationsDashboard() {
   };
   return <div className="min-h-screen bg-[#f4f7fb] text-slate-900">
     <AppHeader view="operations" actions={<>
-      <HeaderSystemStatus syncState={syncState} lastSuccessfulSync={lastSuccessfulSync} nfcStatus={nfcHealth} refreshing={loading} onRefresh={() => void load(query, page)} onOpenNfc={openNfc} onDownloadDiagnostics={downloadDiagnostics} />
-      <HeaderDeviceMode nfcStatus={nfcHealth} />
-      <HeaderUserControl nfcStatus={nfcHealth} nfcListening={false} employeeName={employeeName} onPick={() => window.location.assign("/?user=1")} onClear={clearEmployee} />
+      <HeaderSystemStatus syncState={syncState} lastSuccessfulSync={lastSuccessfulSync} nfcStatus={nfcHealth} qrStatus={qrHealth} refreshing={loading} onRefresh={() => void load(query, page)} onOpenNfc={openNfc} onDownloadDiagnostics={downloadDiagnostics} />
+      <HeaderDeviceMode nfcStatus={scannerHealth} />
+      <HeaderUserControl nfcStatus={scannerHealth} nfcListening={false} employeeName={employeeName} onPick={() => window.location.assign("/?user=1")} onClear={clearEmployee} />
       <button aria-label="最新情報に更新" aria-busy={loading} disabled={loading} onClick={() => void load(query, page)} className="grid size-11 place-items-center rounded-xl border border-slate-200 bg-white disabled:opacity-50"><RefreshCw className={cn("size-4", loading && "animate-spin")} /></button>
     </>} />
     <main className="mx-auto max-w-[1400px] space-y-5 p-4 pb-24 md:p-8"><div className="space-y-5"><div><p className="text-xs font-bold text-blue-600">運用管理</p><h2 className="mt-1 text-2xl font-black">操作履歴</h2><p className="mt-1 text-sm text-slate-500">誰が・いつ・何を変更したかを確認できます。</p></div>

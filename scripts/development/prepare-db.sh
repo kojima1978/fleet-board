@@ -24,6 +24,8 @@ if [ "$schema_state" = "existing" ]; then
   npm run db:migrate:employee-normalization
   npm run db:migrate:unified-nfc
   npm run db:migrate:operation-ids
+  npm run db:migrate:qr-tokens
+  npm run db:migrate:employee-emails
 elif [ "$schema_state" != "empty" ]; then
   echo "Unknown database state: $schema_state" >&2
   exit 1
@@ -40,4 +42,6 @@ npm run db:migrate:unified-nfc
 npm run db:migrate:nfc-uids
 npm run db:migrate:operation-ids
 npm run db:migrate:record-codes
+npm run db:migrate:qr-tokens
+npm run db:migrate:employee-emails
 npm run db:seed

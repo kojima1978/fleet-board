@@ -49,7 +49,10 @@ model Employee {
   employeeNumber   EmployeeNumber @relation(fields: [employeeNumberId], references: [id])
   departmentId     String
   department       Department     @relation(fields: [departmentId], references: [id])
-  name             String
+    name             String
+    email            String?        @unique
+  // 社員番号とは独立したQRコード用の不変トークン。番号を再利用してもQRの割当先は変わらない。
+  qrToken          String         @unique
   active           Boolean        @default(true)
   version          Int            @default(1)
   nfcAssignments   NfcAssignment[]
@@ -114,6 +117,8 @@ model Vehicle {
   vehicleNumberId String
   vehicleNumber VehicleNumber @relation(fields: [vehicleNumberId], references: [id])
   name          String
+  // 車両番号とは独立したQRコード用の不変トークン。
+  qrToken       String        @unique
   plateNumber   String        @unique
   color         String        @default("#2563eb")
   hasEtc        Boolean       @default(false)
