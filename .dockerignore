@@ -1,13 +1,16 @@
 node_modules
 .next
+.playwright-cli
 .git
 .backups
 backups
 diagnostics
 *.log
+*.tsbuildinfo
 .env*
 !.env.example
 README.md
+prisma/generated
 nfc-bridge/bin
 nfc-bridge/obj
 nfc-bridge/dist
