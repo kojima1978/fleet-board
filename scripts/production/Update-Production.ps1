@@ -51,7 +51,7 @@ try {
   }
 
   Invoke-Docker ($composeArguments + @("build", "app", "migrate"))
-  Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "migrate", "npm", "audit", "--audit-level=high"))
+  Invoke-Docker @("run", "--rm", "--network", "bridge", "--entrypoint", "npm", "fleetflow-production-migrate:current", "audit", "--audit-level=high")
   Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "migrate", "npm", "run", "lint"))
   Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "migrate", "npm", "run", "test:operation-id"))
   Invoke-Docker ($composeArguments + @("run", "--rm", "--no-deps", "migrate", "sh", "scripts/production/prepare-db.sh"))
