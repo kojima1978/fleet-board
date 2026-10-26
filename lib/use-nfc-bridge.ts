@@ -11,10 +11,9 @@ type BridgeHealth = { sequence: number; readerConnected: boolean; qrReaderConnec
 type BridgeEvents = { sequence: number; readerConnected: boolean; qrReaderConnected?: boolean; qrConfigured?: boolean; event: ScannerEvent | null };
 
 export const NFC_BRIDGE_URL = process.env.NEXT_PUBLIC_NFC_BRIDGE_URL ?? "http://127.0.0.1:17831";
-const NFC_BRIDGE_LAUNCH_URL = "fleetflow-nfc://start";
 
-// 接続中のBridgeには機器接続の作り直しを依頼する。Bridge自体が停止している場合は、
-// インストーラーがWindowsへ登録したURLから起動する。
+// 接続中のBridgeには機器接続の作り直しを依頼する。Bridge自体が停止している場合は
+// 画面の接続ガイドから管理CMDを案内するため、ブラウザーからローカルアプリは起動しない。
 export async function reconnectScannerBridge() {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 1500);
@@ -23,8 +22,7 @@ export async function reconnectScannerBridge() {
     if (!response.ok) throw new Error("bridge unavailable");
     return "restarting" as const;
   } catch {
-    window.location.assign(NFC_BRIDGE_LAUNCH_URL);
-    return "starting" as const;
+    return "unavailable" as const;
   } finally {
     window.clearTimeout(timeout);
   }

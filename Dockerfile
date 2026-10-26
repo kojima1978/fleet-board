@@ -3,7 +3,7 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0 AS scanner-setup
 WORKDIR /src/bridge
 COPY nfc-bridge/FleetFlow.NfcBridge.csproj nfc-bridge/Program.cs ./
 RUN dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:PublishTrimmed=false -o /payload
-COPY nfc-bridge/install.ps1 nfc-bridge/launch.ps1 nfc-bridge/start-fleetflow.ps1 nfc-bridge/messages.ja.json /payload/
+COPY nfc-bridge/install.ps1 nfc-bridge/uninstall.ps1 nfc-bridge/launch.ps1 nfc-bridge/start-fleetflow.ps1 nfc-bridge/messages.ja.json nfc-bridge/FleetFlow?NFC-QR?Restart.cmd nfc-bridge/FleetFlow?NFC-QR?Uninstall.cmd /payload/
 WORKDIR /src/setup
 COPY nfc-setup/ ./
 RUN dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false -p:PayloadDirectory=/payload -o /out

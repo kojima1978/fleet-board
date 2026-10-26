@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getBackupStatus } from "@/lib/backup-status";
 import type { Prisma } from "@/prisma/generated/client";
-import { getApplicationSystemStatus } from "@/lib/system-status";
 
 export const dynamic = "force-dynamic";
 
@@ -42,12 +40,10 @@ export async function GET(request: Request) {
     ];
     return new NextResponse(`\uFEFF${rows.join("\r\n")}`, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="fleetflow-operations-${new Date().toISOString().slice(0, 10)}.csv"`, "Cache-Control": "no-store" } });
   }
-  const [logs, total, backup, actions, system] = await Promise.all([
+  const [logs, total, actions] = await Promise.all([
     prisma.auditLog.findMany({ where, orderBy: { createdAt: "desc" }, skip: (page - 1) * pageSize, take: pageSize, select: { id: true, actorName: true, action: true, targetType: true, description: true, createdAt: true } }),
     prisma.auditLog.count({ where }),
-    getBackupStatus(),
     prisma.auditLog.findMany({ distinct: ["action"], orderBy: { action: "asc" }, select: { action: true } }),
-    getApplicationSystemStatus(),
   ]);
-  return NextResponse.json({ logs, backup, actions: actions.map((item) => item.action), system, pagination: { page, pageSize, total, pageCount: Math.max(1, Math.ceil(total / pageSize)) } });
+  return NextResponse.json({ logs, actions: actions.map((item) => item.action), pagination: { page, pageSize, total, pageCount: Math.max(1, Math.ceil(total / pageSize)) } });
 }

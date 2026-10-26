@@ -17,7 +17,7 @@ internal static class Program
             {
                 _ = SetupForm.ReadApplicationUrl();
                 var names = Assembly.GetExecutingAssembly().GetManifestResourceNames();
-                foreach (var file in new[] { "FleetFlow.NfcBridge.exe", "install.ps1", "launch.ps1", "start-fleetflow.ps1", "messages.ja.json" })
+                foreach (var file in new[] { "FleetFlow.NfcBridge.exe", "install.ps1", "uninstall.ps1", "launch.ps1", "start-fleetflow.ps1", "messages.ja.json", "FleetFlow NFC-QR Restart.cmd", "FleetFlow NFC-QR Uninstall.cmd" })
                     if (!names.Contains("Payload." + file)) return 2;
                 return 0;
             }
@@ -86,7 +86,7 @@ internal sealed class SetupForm : Form
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
             };
-            foreach (var argument in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", Path.Combine(temporary, "install.ps1"), "-AllowedOrigins", appUrl.GetLeftPart(UriPartial.Authority) + ";http://localhost:3035;http://127.0.0.1:3035", "-SkipAutostart", "-KeepExistingConfiguration" }) start.ArgumentList.Add(argument);
+            foreach (var argument in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", Path.Combine(temporary, "install.ps1"), "-AllowedOrigins", appUrl.GetLeftPart(UriPartial.Authority) + ";http://localhost:3035;http://127.0.0.1:3035", "-KeepExistingConfiguration" }) start.ArgumentList.Add(argument);
             using var process = Process.Start(start) ?? throw new InvalidOperationException("セットアップを開始できませんでした。");
             var outputTask = process.StandardOutput.ReadToEndAsync();
             var errorTask = process.StandardError.ReadToEndAsync();
@@ -108,8 +108,8 @@ internal sealed class SetupForm : Form
                 await Task.Delay(500);
             }
             status.Text = connected
-                ? "導入・起動が完了しました。\nFleetFlowの画面へ戻ってください。数秒で接続状態が更新されます。\nリーダーが未認識の場合はSonyのドライバーとUSB接続を確認してください。"
-                : "導入は完了しましたが、連携ソフトの起動を確認できませんでした。\nFleetFlow画面の「連携ソフトを起動」を押してください。";
+                ? "導入・起動が完了しました。\nFleetFlowの画面へ戻ってください。数秒で接続状態が更新されます。\n障害時の操作方法はFleetFlow画面の接続案内で確認できます。"
+                : "導入は完了しましたが、連携ソフトの起動を確認できませんでした。\nFleetFlowの「設定 → NFC・QR」で接続状態を確認し、必要に応じて管理フォルダーの再起動・再接続CMDを実行してください。";
         }
         catch (Exception error)
         {

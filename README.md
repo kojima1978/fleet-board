@@ -213,13 +213,16 @@ docker compose up --build -d
 | --- | --- |
 | `/` | 駐車場配置図（右側に車両番号付きの利用中車両を常時表示）、利用開始、返却、ガソリン残量、駐車位置の修正 |
 | `/timeline` | 車両タイムライン、予約、予定時間の変更 |
-| `/operations` | 操作履歴、バックアップ・復元確認の状態 |
-| `/settings` | 社員設定（`/settings/employees`）へ移動。設定画面下部の「管理・緊急時ツール」から空の配置図・タイムラインを印刷 |
+| `/operations` | 操作履歴の検索・CSV書き出し |
+| `/settings` | 社員設定（`/settings/employees`）へ移動 |
 | `/settings/employees` | 社員登録、JSON取込、NFC UID登録、社員QRの表示・保存 |
 | `/settings/departments` | 部署の追加・名前変更・利用停止・並び順の変更 |
 | `/settings/vehicles` | 車両登録、JSON取込、NFC UID登録、車両QRの表示・保存 |
 | `/settings/spots` | 駐車区画の番号・用途（通常・一時・お客様用・専用・仮置き）・表示名の変更 |
 | `/settings/data` | 全データのJSON書き出し・一括復元 |
+| `/settings/system` | アプリ、データベース、バックアップ、NFCリーダー、QRスキャナの状態確認 |
+| `/settings/scanner` | NFC・QRの初回セットアップ、接続復旧、アンインストール、Sony公式ドライバー案内 |
+| `/settings/emergency` | 障害時に使う空の配置図・タイムラインの印刷 |
 | `/print/parking` | A4横の空の駐車場配置図 |
 | `/print/timeline` | A4横の空のタイムライン |
 
@@ -420,17 +423,26 @@ SMTP_FROM=FleetFlow <fleetflow@example.jp>
 
 ブラウザーはPaSoRiやUSB-COMへ直接通信しないため、各利用PCでWindows用の「FleetFlow連携ソフト」を動かします。NFC Tools KBCは不要です。1つの連携ソフトでNFCとQRを同時に待ち受けます。
 
-初回ビルドとインストール：
+### 利用端末の初回セットアップ
 
-ドライバーは[Sony公式のNFCポートソフトウェア](https://www.sony.co.jp/Products/felica/consumer/support/download/nfcportsoftware.html)から入手してください。アプリのNFC接続ヘルプにも同じリンクがあります。Windowsの起動ファイルは、接続済みRC-S300／RC-S380のドライバー未導入（コード28）を検出した場合、この公式ページを自動で開きます。`-NoUi`ではURLを案内するだけで開きません。ドライバーのダウンロード・インストール自体は自動実行しません。
+「設定 → NFC・QR 接続ガイド」に、利用者向けの手順と接続状態を表示します。NFC・QRを使用する管理者PCまたは共通端末ごとに、次の順で1回だけ実施します。
+
+1. NFCを使う場合は、[Sony公式のNFCポートソフトウェア](https://www.sony.co.jp/Products/felica/consumer/support/download/nfcportsoftware.html)をインストールします。対象はRC-S300／RC-S380で、Windowsの管理者権限が必要です。QRスキャナだけを使う端末では不要です。
+2. NFCリーダーまたはQRスキャナをUSBへ接続します。NFCリーダーが認識されない場合はUSBハブを避け、PCへ直接接続します。
+3. 接続ガイドの「初回セットアップをダウンロード」からexeを入手して実行します。FleetFlow Bridge、自動起動、再接続・アンインストール用CMDが現在のWindowsユーザーへ登録されます。
+4. 接続ガイドへ戻り、「この端末の接続状態・復旧」でNFCリーダーとQRスキャナの状態を確認します。
+
+SonyドライバーとFleetFlowセットアップの順番が逆でも問題ありません。両方を導入した後にUSBを挿し直し、必要に応じて画面の「NFC・QRを再接続」を実行します。Sonyドライバーのダウンロード・インストールはFleetFlowから自動実行せず、公式サイトで利用者またはPC管理者が行います。
 
 SonyのNFCポートソフトウェアを導入してリーダーを接続した後は、Windowsの`FleetFlow Start.cmd`または`FleetFlow Production Start.cmd`からも初回準備ができます。RC-S300／RC-S380・PaSoRi・QK30を検出し、連携ソフトが未導入なら不足している実行ファイルをDockerでビルドして導入・起動します（初回は数分かかる場合があります）。起動時のFleetFlow URLを許可Originへ追加し、既存のQR設定は保持します。導入済みの場合は再ビルドせず、インストール先から起動します。ドライバーおよびWindowsログイン時の自動起動設定は変更しません。機器のない未導入PCでは初回準備を行いません。
 
-別の利用PCでは、NFC接続ヘルプの「接続方法を見る」を開いて「初回セットアップをダウンロード（Windows）」を押し、ダウンロードしたexeを実行してください。展開操作、Docker、.NETの別途導入、URL・コマンドの入力は不要です。導入後は元の画面に戻ると自動で接続確認します。セットアップは現在のユーザー専用で、管理者権限やWindowsログイン時の自動起動登録を必要としません。既存のQR設定・許可Originを保持し、開いていたFleetFlowのOriginを追加します。複数のFleetFlowを使う場合は、それぞれの画面からセットアップを実行します。
+別の利用PCでは、「設定 → NFC・QR 接続ガイド」を開いて「初回セットアップをダウンロード」を押し、ダウンロードしたexeを実行してください。展開操作、Docker、.NETの別途導入やURL・コマンドの入力は不要です。導入後は元の画面に戻ると自動で接続確認します。セットアップは現在のユーザー専用で管理者権限は不要です。Windowsログイン時のBridge監視を同じユーザーへ自動登録し、既存のQR設定・許可Originを保持したまま、開いていたFleetFlowのOriginを追加します。複数のFleetFlowを使う場合は、それぞれの画面からセットアップを実行します。
+
+初回セットアップは一般利用者の日常操作ではなく、FleetFlowの導入担当者またはPC管理者が、USB読取機器を使うPCごとに1回実施します。Sony／DENSOドライバーの導入に管理者権限が必要な場合は、先にPC管理者が対応してください。セットアップ後の日常利用者はBridgeやDockerを操作せず、社員証・車両タグ・QRを読み取るだけです。PC交換時やUSB機器を別PCへ移すときは、新しいPCで初回セットアップを実行します。
 
 接続先をファイル名に含めるため、ダウンロードしたexeの名前は変更しないでください。Windowsによる同名ファイルの「(1)」などの付加は許容します。バイナリはサーバーのDockerイメージをビルドするときに自動生成・同梱され、`/api/scanner/setup`から配布します。既存イメージには入っていないため、管理者による再ビルドが必要です。署名されていないexeのため、Windowsや社内ポリシーで警告・実行制限が出る場合があります。保護機能を無効化せず管理者へ相談してください。Windows x64専用です。Sonyドライバーは同梱・自動インストールしません。
 
-プロジェクト一式を使う上記のWindows起動ファイル経由の準備にはDockerが必要です。ブラウザーからの「連携ソフトを起動」「再接続」は、セットアップを一度実行した後に使えます。ログイン時にも自動起動させる場合は、従来どおり下記の`install.ps1`を実行してください。
+プロジェクト一式を使う上記のWindows起動ファイル経由の準備にはDockerが必要です。DockerでBridgeをビルドした後、管理者は`nfc-bridge\FleetFlow NFC-QR Install.cmd`をダブルクリックして導入できます。詳細なオプションが必要な場合だけ、下記の`install.ps1`を直接実行します。通常の利用PCでは、FleetFlow画面から初回セットアップexeをダウンロードする方法を使います。
 
 ```powershell
 docker compose --profile tools run --rm nfc-bridge-build
@@ -446,7 +458,11 @@ powershell -ExecutionPolicy Bypass -File .\nfc-bridge\install.ps1 -QrComPort COM
 
 QK30-UがWindowsでDENSOのCOMポートとして1台だけ認識されていれば、`-QrComPort`を省略してもインストーラーが自動検出します。検出できない場合は明示してください。NFCだけを使うPCでは省略したままで構いません。QRだけを使うPCでも同じ連携ソフトを使用でき、PaSoRiは不要です。
 
-インストール後はWindowsログイン時に監視用ランチャーが自動起動します。連携ソフトが停止した場合は5秒ごとに検出して自動再起動し、`FleetFlow Start`からの起動もWindowsやUSBの準備が遅い場合に再試行します。RC-S300／RC-S380やQK30-UをUSBから抜いた場合も待機を続け、挿し直すと通常は数秒以内に自動再接続するため、FleetFlowや連携ソフトの再起動は不要です。QK30-UがWindowsへ戻ってもシリアル接続だけが復旧しない場合は、機器が存在する状態での連続失敗を検出してBridgeだけを自動再起動します。NFCはPC/SCのリーダー一覧を再取得し、QRはQK30-UのUSB識別子を再検索するため、USBハブや差込口を変えてQRのCOM番号が変わっても自動追従します。QK30-Uが複数台ある場合だけ、使用するCOMポートを明示します。画面右上も数秒ごとに再確認し、未接続時に表示される「再接続」からBridgeと読取機器の接続を作り直せます。接続確認は[http://127.0.0.1:17831/health](http://127.0.0.1:17831/health)を開き、NFCは`readerConnected`、QRは`qrReaderConnected`が`true`になることを確認します。起動履歴は`%LOCALAPPDATA%\FleetFlow\NfcBridge\nfc-bridge-launch.log`へ記録します。詳細は[nfc-bridge/README.md](nfc-bridge/README.md)を参照してください。
+`install.ps1`または画面からダウンロードした初回セットアップで導入すると、Windowsログイン時に監視用ランチャーが自動起動します。一般利用者がBridgeを毎回起動する必要はありません。連携ソフトが停止した場合は5秒ごとに検出して自動再起動し、WindowsやUSBの準備が遅い場合も再試行します。RC-S300／RC-S380やQK30-UをUSBから抜いた場合も待機を続け、挿し直すと通常は数秒以内に自動再接続するため、FleetFlowや連携ソフトの再起動は不要です。QK30-UがWindowsへ戻ってもシリアル接続だけが復旧しない場合は、機器が存在する状態での連続失敗を検出してBridgeだけを自動再起動します。NFCはPC/SCのリーダー一覧を再取得し、QRはQK30-UのUSB識別子を再検索するため、USBハブや差込口を変えてQRのCOM番号が変わっても自動追従します。QK30-Uが複数台ある場合だけ、使用するCOMポートを明示します。接続状態は画面右上へ簡潔に表示し、詳細確認と手動再接続は「設定 → NFC・QR 接続ガイド」で行います。
+
+NFC・QRを使用する管理者PCおよび共通端末だけで初回セットアップを実行します。デスクトップとスタートメニューへショートカットは作成しません。通常は自動起動に任せ、USBの挿し直しで復旧しない場合は「設定 → NFC・QR 接続ガイド」を開きます。画面に表示された `%LOCALAPPDATA%\FleetFlow\NfcBridge` をWindowsの「ファイル名を指定して実行」で開き、`FleetFlow NFC-QR Restart.cmd`をダブルクリックしてください。Bridgeが起動中なら機器接続を作り直し、停止・フリーズ中ならBridgeと監視機能を起動します。一般利用者のPCにはBridgeも管理CMDも不要です。
+
+ブラウザーからWindowsアプリを起動するカスタムURL機能は使用しません。FleetFlow画面の再接続で復旧しない場合は、接続ガイドに表示された管理CMDを実行します。BridgeはUSB機器を接続するPCごとに必要です。別PCではFleetFlow画面から「初回セットアップ」を一度実行すると、そのPC専用のBridgeと管理CMDがまとめて登録されます。アンインストールは管理フォルダーの`FleetFlow NFC-QR Uninstall.cmd`から行います。接続確認は[http://127.0.0.1:17831/health](http://127.0.0.1:17831/health)を開き、NFCは`readerConnected`、QRは`qrReaderConnected`が`true`になることを確認します。起動履歴は`%LOCALAPPDATA%\FleetFlow\NfcBridge\nfc-bridge-launch.log`へ記録します。詳細は[nfc-bridge/README.md](nfc-bridge/README.md)を参照してください。
 
 LAN上のFleetFlowを使うPCでは、そのURLを許可Originに加えてインストールします。
 
@@ -683,12 +699,12 @@ docker compose restart app
 
 ### NFC・QR連携ソフトに接続できないと表示される
 
-連携ソフトや読取機器につながらないときは、画面右上のシステム状態を開いて「再接続」を押します。Bridgeが動いていれば接続を終了して新しいプロセスでNFC・QR機器を認識し直し、Bridge自体が停止していればWindowsへ登録した起動処理へ自動的に切り替わります。通常は5～15秒ほどで接続表示へ戻ります。ブラウザーが連携ソフトを開いてよいか尋ねた場合は「開く」を選びます。
+連携ソフトや読取機器につながらないときは、画面右上のシステム状態から「詳細確認・管理を開く」を押し、「設定 → NFC・QR」へ進みます。Bridgeが動いている場合は画面の「NFC・QRを再接続」で機器を認識し直せます。Bridge自体へ接続できない場合は、画面に表示された管理フォルダーの再起動・再接続CMDを実行します。
 
 1. RC-S300／RC-S380またはQK30-Uを接続し直し、数秒待ちます（通常は自動再接続します）。
-2. 戻らない場合は、画面右上のシステム状態から「再接続」を押します。
+2. 戻らない場合は「設定 → NFC・QR」で「NFC・QRを再接続」を押します。
 3. [NFC Bridgeのヘルス画面](http://127.0.0.1:17831/health)を確認します。NFCは`readerConnected`、QRは`qrReaderConnected`が`true`なら接続済みです。
-4. 再接続してもBridgeのヘルス画面を開けない場合だけ、Windowsへ再ログインするかFleetFlow連携ソフトを再インストールします。
+4. Bridgeのヘルス画面を開けない場合は、接続ガイドに表示された管理フォルダーを開き、`FleetFlow NFC-QR Restart.cmd`を実行します。それでも戻らない場合だけ初回セットアップを再実行します。
 5. ヘルス画面は正常なのにLAN上の画面でだけ読めない場合は、開いているURLがBridgeの許可Originに含まれているか、ブラウザーでローカルネットワークへのアクセスを拒否していないかを確認します。
 6. 復旧するまでは社員・車両を手動選択します。
 

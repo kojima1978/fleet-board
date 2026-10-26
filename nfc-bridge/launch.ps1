@@ -1,6 +1,7 @@
 param(
   [switch]$ShowStatus,
   [switch]$Watch,
+  [switch]$Reconnect,
   [ValidateRange(5, 60)]
   [int]$StartupTimeoutSeconds = 15
 )
@@ -14,6 +15,21 @@ if (-not (Test-Path -LiteralPath $bridgeExe)) {
 $healthUrl = "http://127.0.0.1:17831/health"
 $logPath = Join-Path $PSScriptRoot "nfc-bridge-launch.log"
 $watchdogPidPath = Join-Path $PSScriptRoot "watchdog.pid"
+$messagesPath = Join-Path $PSScriptRoot "messages.ja.json"
+$bridgeMessages = $null
+try {
+  if (Test-Path -LiteralPath $messagesPath) {
+    $bridgeMessages = Get-Content -LiteralPath $messagesPath -Raw | ConvertFrom-Json
+  }
+}
+catch { }
+
+function Get-BridgeMessage([string]$name, [string]$fallback) {
+  if ($bridgeMessages -and $bridgeMessages.PSObject.Properties.Name -contains $name) {
+    return $bridgeMessages.$name
+  }
+  return $fallback
+}
 
 function Write-BridgeLog([string]$message) {
   try {
@@ -33,6 +49,40 @@ function Test-BridgeHealth {
     return $health.status -eq "ok"
   }
   catch {
+    return $false
+  }
+}
+
+function Test-WatchdogRunning {
+  if (-not (Test-Path -LiteralPath $watchdogPidPath)) { return $false }
+  $watchdogPid = 0
+  if (-not [int]::TryParse((Get-Content -LiteralPath $watchdogPidPath -Raw).Trim(), [ref]$watchdogPid)) { return $false }
+  $watchdog = Get-CimInstance Win32_Process -Filter "ProcessId = $watchdogPid" -ErrorAction SilentlyContinue
+  return $watchdog -and $watchdog.Name -match "powershell" -and $watchdog.CommandLine -like "*launch.ps1*" -and $watchdog.CommandLine -like "*-Watch*"
+}
+
+function Ensure-Watchdog {
+  if (Test-WatchdogRunning) { return }
+  $powerShell = Join-Path $PSHOME "powershell.exe"
+  Start-Process -FilePath $powerShell -ArgumentList @("-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", ('"' + $PSCommandPath + '"'), "-Watch") -WindowStyle Hidden
+  Write-BridgeLog "Watchdog start requested by the recovery launcher."
+}
+
+function Request-BridgeReconnect {
+  $configPath = Join-Path $PSScriptRoot "bridge.json"
+  $origin = "http://localhost:3035"
+  try {
+    if (Test-Path -LiteralPath $configPath) {
+      $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+      $configuredOrigin = @($config.allowedOrigins | Where-Object { $_ }) | Select-Object -First 1
+      if ($configuredOrigin) { $origin = $configuredOrigin.TrimEnd('/') }
+    }
+    Invoke-RestMethod -Uri "http://127.0.0.1:17831/reconnect" -Headers @{ Origin = $origin } -TimeoutSec 2 | Out-Null
+    Write-BridgeLog "NFC/QR device reconnect was requested."
+    return $true
+  }
+  catch {
+    Write-BridgeLog "NFC/QR device reconnect request failed: $($_.Exception.Message)"
     return $false
   }
 }
@@ -111,10 +161,30 @@ if ($Watch) {
   }
 }
 
+Ensure-Watchdog
+
+if ($Reconnect -and (Test-BridgeHealth)) {
+  $requested = Request-BridgeReconnect
+  if ($requested) {
+    # Give the watchdog enough time to observe the intentional Bridge exit and
+    # restart it. Fall back to a direct start if the watchdog is not running.
+    $sawOffline = $false
+    foreach ($attempt in 1..32) {
+      Start-Sleep -Milliseconds 250
+      $healthy = Test-BridgeHealth
+      if (-not $healthy) { $sawOffline = $true }
+      if ($sawOffline -and $healthy) {
+        Show-BridgeMessage (Get-BridgeMessage "scannerReconnectSucceeded" "NFC/QR devices were reconnected.") (Get-BridgeMessage "scannerShortcutTitle" "FleetFlow NFC/QR")
+        exit 0
+      }
+    }
+  }
+}
+
 if (Start-Bridge) {
-  Show-BridgeMessage "NFC bridge started. Cards can now be scanned."
+  Show-BridgeMessage (Get-BridgeMessage "scannerConnectionReady" "NFC/QR connection is ready.") (Get-BridgeMessage "scannerShortcutTitle" "FleetFlow NFC/QR")
   exit 0
 }
 
-Show-BridgeMessage "NFC bridge could not be started. Reconnect the reader and try again."
+Show-BridgeMessage (Get-BridgeMessage "scannerConnectionFailed" "NFC/QR connection could not be prepared. Reconnect the reader and try again.") (Get-BridgeMessage "scannerShortcutTitle" "FleetFlow NFC/QR")
 exit 1
