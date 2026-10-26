@@ -66,7 +66,7 @@ internal sealed class SetupForm : Form
         try
         {
             var appUrl = ReadApplicationUrl();
-            status.Text = $"接続先：{appUrl.GetLeftPart(UriPartial.Authority)}\n\n連携ソフトを導入しています…\n管理者権限・Docker・URL入力は不要です。";
+            status.Text = $"接続先：{appUrl.GetLeftPart(UriPartial.Authority)}\n\n連携ソフトをセットアップ・修復しています…\n既存設定は保持されます。管理者権限・Docker・URL入力は不要です。";
             temporary = Path.Combine(Path.GetTempPath(), "fleetflow-setup-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(Path.Combine(temporary, "dist"));
             var assembly = Assembly.GetExecutingAssembly();
@@ -108,8 +108,8 @@ internal sealed class SetupForm : Form
                 await Task.Delay(500);
             }
             status.Text = connected
-                ? "導入・起動が完了しました。\nFleetFlowの画面へ戻ってください。数秒で接続状態が更新されます。\n障害時の操作方法はFleetFlow画面の接続案内で確認できます。"
-                : "導入は完了しましたが、連携ソフトの起動を確認できませんでした。\nFleetFlowの「設定 → NFC・QR」で接続状態を確認し、必要に応じて管理フォルダーの再起動・再接続CMDを実行してください。";
+                ? "セットアップ・起動が完了しました。\nFleetFlowの画面へ戻ってください。数秒で接続状態が更新されます。"
+                : "セットアップは完了しましたが、連携ソフトの起動を確認できませんでした。\nUSB接続とSony NFCドライバーを確認し、もう一度このツールを実行してください。";
         }
         catch (Exception error)
         {

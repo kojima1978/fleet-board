@@ -5,9 +5,7 @@ import { Check, Clipboard, Download, ExternalLink, LoaderCircle, Nfc, Power, QrC
 import { reconnectScannerBridge, useNfcBridgeHealth, useQrBridgeHealth } from "@/lib/use-nfc-bridge";
 import { Card, cn } from "./ui";
 
-const OPEN_BRIDGE_DIRECTORY_COMMAND = "powershell.exe -NoProfile -Command \"Invoke-Item (Join-Path $env:LOCALAPPDATA 'FleetFlow\\NfcBridge')\"";
-const RESTART_COMMAND = "FleetFlow NFC-QR Restart.cmd";
-const UNINSTALL_COMMAND = "FleetFlow NFC-QR Uninstall.cmd";
+const UNINSTALL_COMMAND = "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path $env:LOCALAPPDATA 'FleetFlow\\NfcBridge\\uninstall.ps1')\"";
 
 export function ScannerGuide() {
   const nfc = useNfcBridgeHealth();
@@ -19,7 +17,7 @@ export function ScannerGuide() {
     setReconnecting(true);
     setReconnectMessage("");
     const result = await reconnectScannerBridge();
-    setReconnectMessage(result === "restarting" ? "再接続を開始しました。接続状態は数秒以内に更新されます。" : "Bridgeに接続できません。左側の手順で管理フォルダーを開き、再起動・再接続CMDを実行してください。");
+    setReconnectMessage(result === "restarting" ? "再接続を開始しました。接続状態は数秒以内に更新されます。" : "Bridgeに接続できません。左側のセットアップ・修復ツールをダウンロードして実行してください。");
     window.setTimeout(() => setReconnecting(false), result === "restarting" ? 7000 : 1000);
   };
   return <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -37,8 +35,8 @@ export function ScannerGuide() {
             <p>NFCリーダーまたはQRスキャナを接続します。NFCリーダーが認識されない場合はUSBハブを避け、PCへ直接接続してください。</p>
           </GuideStep>
           <GuideStep number="3" title="FleetFlow初回セットアップを実行">
-            <p>セットアップをダウンロードして実行します。管理用Bridgeと自動起動、再接続用CMDがこの端末へ登録されます。</p>
-            <a href="/api/scanner/setup" className="mt-2 inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-700"><Download className="size-4" />初回セットアップをダウンロード</a>
+            <p>セットアップをダウンロードして実行します。管理用Bridgeと自動起動、復旧機能がこの端末へ登録されます。</p>
+            <a href="/api/scanner/setup" className="mt-2 inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-700"><Download className="size-4" />セットアップツールをダウンロード</a>
           </GuideStep>
           <GuideStep number="4" title="接続状態を確認">
             <p>セットアップ完了後、この画面の「この端末の接続状態・復旧」でNFCとQRの表示を確認します。</p>
@@ -51,10 +49,16 @@ export function ScannerGuide() {
         <h3 className="flex items-center gap-2 text-base font-black"><Power className="size-5 text-blue-600" />接続できない場合</h3>
         <ol className="mt-4 space-y-4 text-sm text-slate-700">
           <GuideStep number="1" title="USBを確認">NFCリーダーまたはQRスキャナを一度抜き、再度接続して数秒待ちます。</GuideStep>
-          <GuideStep number="2" title="管理フォルダーを開く"><span className="block">下の共通コマンドが、各PCのWindowsユーザーに対応した管理フォルダーを開きます。コピーして<b>Windowsキー＋R</b>へ貼り付け、Enterを押します。</span><CopyValue value={OPEN_BRIDGE_DIRECTORY_COMMAND} /><p className="mt-2 text-xs text-slate-500">ブラウザーのアドレス欄には入力しません。エラーになる場合はBridgeが未導入のため、上の初回セットアップを実行してください。</p></GuideStep>
-          <GuideStep number="3" title="再起動・再接続を実行"><code className="rounded bg-slate-100 px-1.5 py-1 font-bold text-slate-900">{RESTART_COMMAND}</code>をダブルクリックします。Bridgeが停止・フリーズしている場合も復旧を試みます。</GuideStep>
-          <GuideStep number="4" title="接続状態を確認">完了メッセージを閉じ、FleetFlowへ戻ります。接続状態は数秒以内に更新されます。</GuideStep>
+          <GuideStep number="2" title="画面から再接続">右側の「NFC・QRを再接続」を押します。Bridgeが動作中なら機器との接続を作り直します。</GuideStep>
+          <GuideStep number="3" title="セットアップ・修復ツールを実行"><p>再接続できない場合は、下のツールをダウンロードして実行します。既存設定を保持したままBridgeを再登録し、起動します。</p><a href="/api/scanner/setup" className="mt-2 inline-flex min-h-11 items-center gap-2 rounded-xl bg-amber-600 px-4 text-sm font-bold text-white transition hover:bg-amber-700"><Download className="size-4" />セットアップ・修復ツールをダウンロード</a></GuideStep>
+          <GuideStep number="4" title="接続状態を確認">ツールの完了画面を閉じてFleetFlowへ戻ります。接続状態は数秒以内に更新されます。</GuideStep>
         </ol>
+        <div className="mt-5 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3 text-xs text-slate-600">
+          <p className="font-black text-slate-900">Git cloneした管理PCの場合</p>
+          <p className="mt-1">エクスプローラーでクローンした場所から、次の順に開きます。</p>
+          <code className="mt-2 block overflow-x-auto whitespace-nowrap rounded-lg bg-white px-3 py-2 font-bold text-slate-900">（クローン先）\fleet-board\nfc-bridge</code>
+          <p className="mt-2">このフォルダー内に、インストール・再接続・アンインストール用のCMDがあります。</p>
+        </div>
       </Card>
 
     </div>
@@ -71,7 +75,8 @@ export function ScannerGuide() {
       </Card>
       <Card className="p-5">
         <h3 className="flex items-center gap-2 text-base font-black"><Trash2 className="size-5 text-slate-500" />アンインストール</h3>
-        <p className="mt-2 text-sm leading-6 text-slate-600">管理フォルダー内の <code className="rounded bg-slate-100 px-1.5 py-1 font-bold text-slate-900">{UNINSTALL_COMMAND}</code> をダブルクリックします。確認画面で同意した場合だけ削除されます。FleetFlow本体と業務データは削除されません。</p>
+        <p className="mt-2 text-sm leading-6 text-slate-600">下のコマンドをコピーし、Windowsキー＋Rへ貼り付けて実行します。確認画面で同意した場合だけ削除され、FleetFlow本体と業務データは残ります。</p>
+        <CopyValue value={UNINSTALL_COMMAND} />
       </Card>
     </div>
   </div>;
