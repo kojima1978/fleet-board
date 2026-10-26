@@ -51,6 +51,7 @@ const deviceMode = createDeviceSetting<DeviceMode>(
 );
 export const useDeviceMode = deviceMode.useValue;
 export const setDeviceMode = deviceMode.set;
+export const readDeviceMode = deviceMode.read;
 
 export function isKioskDevice(mode: DeviceMode, nfcStatus: NfcBridgeStatus) {
   if (mode !== "auto") return mode === "kiosk";

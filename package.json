@@ -19,6 +19,7 @@
     "test:security": "tsx tests/request-security.test.ts",
     "test:operation-id": "tsx tests/operation-id.test.ts",
     "test:development-origins": "tsx tests/development-origins.test.ts",
+    "test:scanner-monitoring": "tsx tests/scanner-monitoring.test.ts",
     "db:migrate:employee-numbers": "node scripts/migrations/migrate-employee-numbers.mjs",
     "db:migrate:employee-normalization": "node scripts/migrations/migrate-employee-normalization.mjs",
     "db:migrate:unified-nfc": "node scripts/migrations/migrate-unified-nfc-assignments.mjs",

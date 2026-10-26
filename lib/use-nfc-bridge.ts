@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { normalizeNfcUid } from "./nfc";
+import { readDeviceMode, useDeviceMode } from "./device-mode";
 
 export type NfcBridgeStatus = "idle" | "connecting" | "ready" | "no-reader" | "offline";
 export type QrBridgeStatus = "not-configured" | "ready" | "offline";
@@ -88,9 +89,11 @@ export function useNfcBridge(enabled: boolean, onUid: (uid: string) => void) {
 }
 
 export function useQrBridgeHealth(enabled = true) {
+  const mode = useDeviceMode();
   const [status, setStatus] = useState<QrBridgeStatus>("not-configured");
   useEffect(() => {
-    if (!enabled) { setStatus("not-configured"); return; }
+    // hydration直後はmodeがSSRの初期値(auto)の場合がある。保存値も確認し、最初の1回も接続しない。
+    if (!enabled || readDeviceMode() === "personal") { setStatus("not-configured"); return; }
     let cancelled = false;
     let timer = 0;
     const check = async () => {
@@ -106,15 +109,16 @@ export function useQrBridgeHealth(enabled = true) {
     };
     check();
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [enabled]);
-  return status;
+  }, [enabled, mode]);
+  return !enabled || mode === "personal" ? "not-configured" : status;
 }
 
 export function useNfcBridgeHealth(enabled = true) {
+  const mode = useDeviceMode();
   const [status, setStatus] = useState<NfcBridgeStatus>(enabled ? "connecting" : "idle");
 
   useEffect(() => {
-    if (!enabled) { setStatus("idle"); return; }
+    if (!enabled || readDeviceMode() === "personal") { setStatus("idle"); return; }
     let cancelled = false;
     let timer = 0;
 
@@ -140,9 +144,9 @@ export function useNfcBridgeHealth(enabled = true) {
     setStatus("connecting");
     check();
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [enabled]);
+  }, [enabled, mode]);
 
-  return status;
+  return !enabled || mode === "personal" ? "idle" : status;
 }
 
 export function nfcBridgeStatusText(status: NfcBridgeStatus) {
