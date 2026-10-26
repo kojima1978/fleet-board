@@ -4,6 +4,10 @@ RC-S300／RC-S380をWindows PC/SCで、DENSO QK30-UをUSB-COMで読み取り、�
 
 ## ビルド（Docker）
 
+利用PCでは、アプリのNFC接続ヘルプから「初回セットアップ」をダウンロードして実行するだけで導入できます。Docker・.NETの別途導入やURL入力は不要です。接続先はダウンロード名から引き継ぐためファイル名を変更しないでください。exeはサーバーのDockerイメージビルド時に生成・同梱します。管理者権限やログイン時の自動起動登録は不要で、既存設定も保持します。Windowsの実行確認・社内ポリシーによる制限は省略できません。
+
+プロジェクト一式があるPCでは、ドライバー導入後にUSB接続し、Windowsの`FleetFlow Start.cmd`または`FleetFlow Production Start.cmd`を実行する方法もあります。機器を検出して未導入のBridgeを初回ビルド・導入・起動します。この経路はDockerが必要です。導入済みならインストール先のBridgeを再利用し、Windowsログイン時の自動起動登録は変更しません。
+
 ```powershell
 docker compose --profile tools run --rm nfc-bridge-build
 ```
@@ -13,6 +17,8 @@ docker compose --profile tools run --rm nfc-bridge-build
 ## Windowsへインストール
 
 NFCだけ使う場合は、Sony NFCポートソフトウェアとRC-S300／RC-S380を準備し、PowerShellで実行します。
+
+ドライバーの入手先：[Sony公式 NFCポートソフトウェア](https://www.sony.co.jp/Products/felica/consumer/support/download/nfcportsoftware.html)。Windowsの起動ファイルは、対応リーダーのドライバー未導入（コード28）を検出すると公式ページを開きます（`-NoUi`では開きません）。ドライバーのインストールは利用者自身で行ってください。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\nfc-bridge\install.ps1

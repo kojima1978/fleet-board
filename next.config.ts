@@ -1,14 +1,9 @@
 import type { NextConfig } from "next";
+import { getDevelopmentOrigins } from "./lib/development-origins";
 
 const development = process.env.NODE_ENV === "development";
 const scriptSources = development ? "'self' 'unsafe-inline' 'unsafe-eval'" : "'self' 'unsafe-inline'";
-const developmentHost = process.env.FLEETFLOW_DEV_BIND_ADDRESS?.trim();
-const developmentHostName = process.env.FLEETFLOW_DEV_HOST_NAME?.trim().toLowerCase();
-// LANからは公開IPのほか、サーバーのPC名（http://pc-name:3035）でも開けるようにする。
-const allowedDevOrigins = [
-  ...(developmentHost && developmentHost !== "0.0.0.0" ? [developmentHost] : []),
-  ...(developmentHostName ? [developmentHostName] : []),
-];
+const allowedDevOrigins = getDevelopmentOrigins();
 
 const nextConfig: NextConfig = {
   output: "standalone",

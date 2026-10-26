@@ -3,7 +3,9 @@ param(
   [string]$QrComPort = "",
   [ValidateRange(1200, 115200)]
   [int]$QrBaudRate = 9600,
-  [string]$ProjectDirectory = (Split-Path $PSScriptRoot -Parent)
+  [string]$ProjectDirectory = (Split-Path $PSScriptRoot -Parent),
+  [switch]$SkipAutostart,
+  [switch]$KeepExistingConfiguration
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,6 +35,13 @@ if (-not (Test-Path -LiteralPath $messagesSource)) { throw "FleetFlow Japanese m
 
 $installDir = Join-Path $env:LOCALAPPDATA "FleetFlow\NfcBridge"
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+$configPath = Join-Path $installDir "bridge.json"
+if ($KeepExistingConfiguration -and (Test-Path -LiteralPath $configPath)) {
+  $existing = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+  $AllowedOrigins = (@($existing.allowedOrigins) + $AllowedOrigins.Split(';') | Where-Object { $_ } | Select-Object -Unique) -join ';'
+  if ($existing.qrComPort) { $QrComPort = $existing.qrComPort }
+  if ($existing.qrBaudRate) { $QrBaudRate = $existing.qrBaudRate }
+}
 $watchdogPidPath = Join-Path $installDir "watchdog.pid"
 if (Test-Path -LiteralPath $watchdogPidPath) {
   $watchdogPid = 0
@@ -75,7 +84,9 @@ $powerShell = Join-Path $PSHOME "powershell.exe"
 $launcher = Join-Path $installDir "launch.ps1"
 $startupCommand = '"' + $powerShell + '" -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $launcher + '" -Watch'
 $protocolCommand = '"' + $powerShell + '" -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $launcher + '"'
-New-ItemProperty -Path $runKey -Name "FleetFlowNfcBridge" -Value $startupCommand -PropertyType String -Force | Out-Null
+if (-not $SkipAutostart) {
+  New-ItemProperty -Path $runKey -Name "FleetFlowNfcBridge" -Value $startupCommand -PropertyType String -Force | Out-Null
+}
 
 # Let the FleetFlow screen start the bridge through fleetflow-nfc://. The URL itself is never passed to the launcher.
 $protocolKey = "HKCU:\Software\Classes\fleetflow-nfc"
@@ -84,8 +95,9 @@ Set-ItemProperty -Path $protocolKey -Name "(default)" -Value "URL:FleetFlow NFC"
 New-ItemProperty -Path $protocolKey -Name "URL Protocol" -Value "" -PropertyType String -Force | Out-Null
 Set-ItemProperty -Path "$protocolKey\shell\open\command" -Name "(default)" -Value $protocolCommand
 
-Start-Process -FilePath $powerShell -ArgumentList @("-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", $launcher, "-Watch") -WindowStyle Hidden
-Write-Host "FleetFlow NFC/QR Bridge installed and added to Windows startup."
+Start-Process -FilePath $powerShell -ArgumentList @("-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", ('"' + $launcher + '"'), "-Watch") -WindowStyle Hidden
+if ($SkipAutostart) { Write-Host "FleetFlow NFC/QR Bridge installed. Windows startup settings were not changed." }
+else { Write-Host "FleetFlow NFC/QR Bridge installed and added to Windows startup." }
 if ($detectedQrPort) { Write-Host "DENSO QR scanner was detected automatically on $detectedQrPort." }
 elseif (-not $QrComPort) { Write-Host "QR scanner is not configured. Re-run with -QrComPort COM3 after checking Device Manager." }
 Write-Host "Use the launch files in the project directory."

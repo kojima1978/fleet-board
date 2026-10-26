@@ -57,8 +57,8 @@ export function HeaderSystemStatus({ syncState, lastSuccessfulSync, nfcStatus, q
   const appHealthy = syncState === "healthy";
   // 共用端末はNFCで使う前提なので、NFC Bridgeが止まったら「停止中」と出す。各自のPCは手動選択で使えるので「手動」とする。
   const kioskDevice = isKioskDevice(useDeviceMode(), nfcStatus === "ready" || qrStatus === "ready" ? "ready" : nfcStatus);
-  const nfcLabel = nfcStatus === "ready" ? "NFC接続" : nfcStatus === "no-reader" ? "NFC未接続" : nfcStatus === "offline" ? kioskDevice ? "NFC停止中" : "NFC手動" : "NFC確認中";
-  const nfcHealthy = nfcStatus === "ready";
+  const nfcLabel = nfcStatus === "idle" ? "NFC未使用" : nfcStatus === "ready" ? "NFC接続" : nfcStatus === "no-reader" ? "NFC未接続" : nfcStatus === "offline" ? kioskDevice ? "NFC停止中" : "NFC手動" : "NFC確認中";
+  const nfcHealthy = nfcStatus === "ready" || nfcStatus === "idle";
   // リーダーが外れたとき、または共用端末でNFC Bridgeが止まったときは、ボタン自体を黄色にして気づけるようにする。
   const nfcWarning = nfcStatus === "no-reader" || (nfcStatus === "offline" && kioskDevice);
   const qrLabel = qrStatus === "ready" ? "QR接続" : qrStatus === "offline" ? "QR未接続" : "QR未設定";

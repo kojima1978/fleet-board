@@ -24,6 +24,16 @@ try {
   Assert-Equal $false (Test-FleetFlowPublicNetwork "192.0.2.1") "このPCにないアドレスはパブリック判定しない"
   Assert-Equal $true (Wait-FleetFlowLocalAddress -Address "127.0.0.1" -TimeoutSeconds 1 -IntervalSeconds 1) "割り当て済みのアドレスはすぐ使える"
   Assert-Equal $false (Wait-FleetFlowLocalAddress -Address "192.0.2.1" -TimeoutSeconds 1 -IntervalSeconds 1) "割り当てられないアドレスは時間切れにする"
+  $addresses = @(
+    [pscustomobject]@{ IPAddress = "192.168.0.246"; InterfaceAlias = "Wi-Fi" }
+    [pscustomobject]@{ IPAddress = "10.0.0.20"; InterfaceAlias = "Ethernet" }
+    [pscustomobject]@{ IPAddress = "192.168.0.246"; InterfaceAlias = "Wi-Fi" }
+    [pscustomobject]@{ IPAddress = "172.20.48.1"; InterfaceAlias = "vEthernet (WSL)" }
+    [pscustomobject]@{ IPAddress = "127.0.0.1"; InterfaceAlias = "Loopback" }
+    [pscustomobject]@{ IPAddress = "8.8.8.8"; InterfaceAlias = "Ethernet" }
+  )
+  Assert-Equal "10.0.0.20,192.168.0.246" ((Get-FleetFlowDevelopmentOriginHosts -Addresses $addresses) -join ",") "現在のプライベートLAN IPだけを検出する"
+  Assert-Equal "" ((Get-FleetFlowDevelopmentOriginHosts -Addresses @()) -join ",") "LAN未接続時に許可先を追加しない"
   Write-Output "Production network tests passed"
 }
 finally {

@@ -3,6 +3,7 @@ param(
   [string]$ProjectDirectory,
   [switch]$StatusOnly,
   [switch]$Production,
+  [switch]$Build,
   [switch]$NoUi
 )
 
@@ -132,6 +133,7 @@ try {
   }
 
   $modeName = if ($Production) { "production" } else { "development" }
+  if ($Build -and $Production) { throw "Use FleetFlow Production Update.cmd to build production." }
   Write-LauncherLog "Start requested. Mode: $modeName. Project directory: $ProjectDirectory"
 
   $docker = Get-Command docker -ErrorAction SilentlyContinue
@@ -150,6 +152,11 @@ try {
     if ($dockerExitCode -ne 0) { throw "DOCKER_TIMEOUT" }
   }
 
+  if (-not $Production) {
+    $env:FLEETFLOW_DEV_ALLOWED_ORIGINS = (Get-FleetFlowDevelopmentOriginHosts) -join ","
+    Write-LauncherLog "Detected development Origin hosts: $env:FLEETFLOW_DEV_ALLOWED_ORIGINS"
+  }
+
   if ($Production) {
     & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectDirectory "scripts\production\Test-ProductionPreflight.ps1") -ProjectDirectory $ProjectDirectory -NoUi
     if ($LASTEXITCODE -ne 0) { throw "PRODUCTION_PREFLIGHT_FAILED" }
@@ -164,10 +171,36 @@ try {
   }
 
   $upArguments = @("up", "-d")
+  if ($Build) { $upArguments += "--build" }
   $dockerExitCode = Invoke-Docker ($composeArguments + $upArguments)
   if ($dockerExitCode -ne 0) { throw "DOCKER_SERVICES_FAILED" }
 
   # Dockerと並行して一度起動し、WindowsやUSBの準備が遅い場合はアプリ起動後に再試行する。
+  try {
+    . (Join-Path $ProjectDirectory "nfc-bridge\prepare-bridge.ps1")
+    if (Test-FleetFlowNfcDriverMissing) {
+      $driverUrl = Get-Message "sonyNfcDriverUrl"
+      Write-Warning "Sony NFC driver is not installed. Download: $driverUrl"
+      Write-LauncherLog "Sony NFC driver is missing. Download: $driverUrl"
+      # NoUiでの自動起動・診断ではブラウザーを開かない。インストーラーは実行しない。
+      if (-not $NoUi) { Start-Process $driverUrl }
+    }
+    $nfcLauncher = Initialize-FleetFlowBridge -ProjectDirectory $ProjectDirectory -AppUrl $appUrl -BuildBridge {
+      # ビルダーだけを起動する。本番・開発アプリやDBの再ビルドは行わない。
+      $buildResult = Invoke-Docker @("compose", "--project-directory", $ProjectDirectory, "-f", (Join-Path $ProjectDirectory "compose.yaml"), "--profile", "tools", "run", "--rm", "--no-deps", "nfc-bridge-build")
+      if ($buildResult -ne 0) { throw "NFC Bridge build failed. See fleetflow-start.log." }
+    } -InstallBridge {
+      param($origins)
+      $installer = Join-Path $ProjectDirectory "nfc-bridge\install.ps1"
+      & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $installer -AllowedOrigins $origins -SkipAutostart -KeepExistingConfiguration
+      if ($LASTEXITCODE -ne 0) { throw "NFC Bridge installation failed." }
+    }
+  }
+  catch {
+    # 連携ソフトの準備失敗で、手動操作できるアプリ本体を止めない。
+    Write-LauncherLog "NFC Bridge preparation failed: $($_.Exception.Message)"
+    Write-Warning "NFC/QR setup failed. See $logPath. Manual operation remains available."
+  }
   $nfc = Start-NfcBridge -Attempts 1
 
   $appReady = $false
