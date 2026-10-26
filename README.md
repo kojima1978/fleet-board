@@ -170,7 +170,14 @@ git pull origin main
 
 # 状態確認
 & '.\FleetFlow Status.cmd'
+
+# 起動するPCのLAN IPを自動検出して許可設定へ反映し、再ビルドして起動
+& '.\FleetFlow Start.cmd' -Build
 ```
+
+Windows用の`FleetFlow Start.cmd`は、通常起動・`-Build`での再ビルドともに、現在のLAN IPを自動取得してNext.jsの開発用Origin許可へ渡します。過去のIPを含むイメージを別PCへ持ち込んでも、起動したPCのIPでJavaScriptやHMRを読み込めます。許可先は実際に検出したプライベートIPv4と設定済みのIP・PC名だけで、ワイルドカードは使いません。
+
+この処理はファイアウォール・公開先IP・`.env.production`を変更しません。LAN公開そのものは初回に`FleetFlow LAN Setup.cmd -Development`で設定してください。公開先IPが変わった場合もLAN設定の再実行が必要です。`docker compose up --build`を直接実行する場合、Windows側の自動検出処理は通らないため、`.env`の`FLEETFLOW_DEV_BIND_ADDRESS`へ現在の公開IPを設定してください。
 
 Dockerコマンドを直接使う場合：
 

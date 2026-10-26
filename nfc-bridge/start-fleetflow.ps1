@@ -3,6 +3,7 @@ param(
   [string]$ProjectDirectory,
   [switch]$StatusOnly,
   [switch]$Production,
+  [switch]$Build,
   [switch]$NoUi
 )
 
@@ -132,6 +133,7 @@ try {
   }
 
   $modeName = if ($Production) { "production" } else { "development" }
+  if ($Build -and $Production) { throw "Use FleetFlow Production Update.cmd to build production." }
   Write-LauncherLog "Start requested. Mode: $modeName. Project directory: $ProjectDirectory"
 
   $docker = Get-Command docker -ErrorAction SilentlyContinue
@@ -150,6 +152,11 @@ try {
     if ($dockerExitCode -ne 0) { throw "DOCKER_TIMEOUT" }
   }
 
+  if (-not $Production) {
+    $env:FLEETFLOW_DEV_ALLOWED_ORIGINS = (Get-FleetFlowDevelopmentOriginHosts) -join ","
+    Write-LauncherLog "Detected development Origin hosts: $env:FLEETFLOW_DEV_ALLOWED_ORIGINS"
+  }
+
   if ($Production) {
     & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectDirectory "scripts\production\Test-ProductionPreflight.ps1") -ProjectDirectory $ProjectDirectory -NoUi
     if ($LASTEXITCODE -ne 0) { throw "PRODUCTION_PREFLIGHT_FAILED" }
@@ -164,6 +171,7 @@ try {
   }
 
   $upArguments = @("up", "-d")
+  if ($Build) { $upArguments += "--build" }
   $dockerExitCode = Invoke-Docker ($composeArguments + $upArguments)
   if ($dockerExitCode -ne 0) { throw "DOCKER_SERVICES_FAILED" }
 

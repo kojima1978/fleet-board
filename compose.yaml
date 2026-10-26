@@ -9,6 +9,8 @@ services:
       DATABASE_URL: postgresql://fleet:fleet@db:5432/fleet?schema=public
       WATCHPACK_POLLING: "true"
       FLEETFLOW_DEV_BIND_ADDRESS: ${FLEETFLOW_DEV_BIND_ADDRESS:-127.0.0.1}
+      # Windows用起動コマンドが、このPCの現在のLAN IPを毎回取得して渡す。
+      FLEETFLOW_DEV_ALLOWED_ORIGINS: ${FLEETFLOW_DEV_ALLOWED_ORIGINS:-}
       # コンテナー内のホスト名はコンテナーIDになるため、WindowsのPC名を渡す。
       FLEETFLOW_DEV_HOST_NAME: ${COMPUTERNAME:-}
       SMTP_HOST: ${SMTP_HOST:-}

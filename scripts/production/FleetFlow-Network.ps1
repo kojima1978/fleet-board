@@ -63,6 +63,18 @@ function Test-FleetFlowPrivateIPv4 {
     ($bytes[0] -eq 192 -and $bytes[1] -eq 168)
 }
 
+function Get-FleetFlowDevelopmentOriginHosts {
+  param([object[]]$Addresses)
+
+  if ($null -eq $Addresses) {
+    $Addresses = @(Get-NetIPAddress -AddressFamily IPv4 -AddressState Preferred -ErrorAction Stop)
+  }
+  return @($Addresses | Where-Object {
+    $_.InterfaceAlias -notmatch 'vEthernet|Loopback|WSL|Docker' -and
+    (Test-FleetFlowPrivateIPv4 -Address $_.IPAddress)
+  } | ForEach-Object { $_.IPAddress } | Sort-Object -Unique)
+}
+
 function Wait-FleetFlowLocalAddress {
   param(
     [Parameter(Mandatory = $true)][string]$Address,
