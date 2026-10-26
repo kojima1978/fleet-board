@@ -60,7 +60,6 @@ export function OperationsDashboard() {
   }, [kiosk]);
   const backupHealthy = data?.backup.latestAt ? Date.now() - new Date(data.backup.latestAt).getTime() < 26 * 60 * 60_000 : false;
   const syncState: HeaderSyncState = error ? "stale" : data ? "healthy" : "loading";
-  const openNfc = () => window.location.assign("/?nfc=1");
   const clearEmployee = () => {
     clearSavedEmployee();
     setEmployeeName(null);
@@ -77,7 +76,7 @@ export function OperationsDashboard() {
   };
   return <div className="min-h-screen bg-[#f4f7fb] text-slate-900">
     <AppHeader view="operations" actions={<>
-      <HeaderSystemStatus syncState={syncState} lastSuccessfulSync={lastSuccessfulSync} nfcStatus={nfcHealth} qrStatus={qrHealth} refreshing={loading} onRefresh={() => void load(query, page)} onOpenNfc={openNfc} />
+      <HeaderSystemStatus syncState={syncState} lastSuccessfulSync={lastSuccessfulSync} nfcStatus={nfcHealth} qrStatus={qrHealth} refreshing={loading} onRefresh={() => void load(query, page)} />
       <HeaderDeviceMode nfcStatus={scannerHealth} />
       <HeaderUserControl nfcStatus={scannerHealth} nfcListening={false} employeeName={employeeName} onPick={() => window.location.assign("/?user=1")} onClear={clearEmployee} />
       <button aria-label="最新情報に更新" aria-busy={loading} disabled={loading} onClick={() => void load(query, page)} className="grid size-11 place-items-center rounded-xl border border-slate-200 bg-white disabled:opacity-50"><RefreshCw className={cn("size-4", loading && "animate-spin")} /></button>

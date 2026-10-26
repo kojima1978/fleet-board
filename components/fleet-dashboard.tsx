@@ -463,7 +463,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   return (
     <div className="min-h-screen bg-[#f4f7fb] text-slate-900">
       <AppHeader view={view} actions={<>
-            <HeaderSystemStatus syncState={syncState} lastSuccessfulSync={lastSuccessfulSync} nfcStatus={nfcHealth} qrStatus={qrHealth} refreshing={refreshing} onRefresh={() => void load()} onOpenNfc={() => setDialog("nfc")} />
+            <HeaderSystemStatus syncState={syncState} lastSuccessfulSync={lastSuccessfulSync} nfcStatus={nfcHealth} qrStatus={qrHealth} refreshing={refreshing} onRefresh={() => void load()} />
             <HeaderDeviceMode nfcStatus={scannerHealth} />
             <HeaderUserControl nfcStatus={scannerHealth} nfcListening={nfcListening} employeeName={employee?.name ?? null} remainingSeconds={userRemainingSeconds} onPick={() => setDialog("user")} onClear={clearEmployee} />
             <button aria-label="最新情報に更新" aria-busy={refreshing} disabled={refreshing} onClick={() => void load()} className="grid size-11 place-items-center rounded-xl border border-slate-200 bg-white disabled:opacity-50"><RefreshCw className={cn("size-4", refreshing && "animate-spin")} /></button>
@@ -1275,9 +1275,10 @@ function NfcDialog({ employees, vehicles, onEmployee, onVehicle, onClose }: { em
     setScanTimedOut(true);
   });
   const retry = () => { setScanEnabled(true); setScanTimedOut(false); setError(""); setUnknownUid(""); };
+  const bridgeDown = bridgeStatus === "offline" || bridgeStatus === "no-reader";
   return <DialogShell title="NFC・QR読み取り" subtitle="社員証・車両タグをかざすか、QRコードを読み取ってください" onClose={onClose}><div className="text-center">
-    <div className={cn("mx-auto mb-4 grid size-20 place-items-center rounded-full", scanTimedOut ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-600")}><Nfc className={cn("size-10", scanEnabled && "animate-pulse")} /></div>
-    <p className="text-sm font-bold">{scanTimedOut ? "読み取れませんでした" : "社員証・車両タグ、またはQRコードを読み取ってください"}</p>
+    <div className={cn("mx-auto mb-4 grid size-20 place-items-center rounded-full", scanTimedOut || bridgeDown ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-600")}><Nfc className={cn("size-10", scanEnabled && !bridgeDown && "animate-pulse")} /></div>
+    <p className={cn("text-sm font-bold", !scanTimedOut && bridgeDown && "text-amber-800")}>{scanTimedOut ? "読み取れませんでした" : bridgeDown ? "NFCリーダーにつながっていません" : "社員証・車両タグ、またはQRコードを読み取ってください"}</p>
     <p role="status" aria-live="polite" className={cn("mb-4 mt-1 text-[11px]", scanTimedOut ? "font-bold text-amber-700" : bridgeStatus === "ready" ? "font-bold text-emerald-700" : "text-slate-500")}>{scanTimedOut ? "15秒以内に読み取れませんでした。再試行するか、画面を閉じて手動で操作してください。" : scannerBridgeStatusText(bridgeStatus)}</p>
     <div className="mb-4 grid grid-cols-2 gap-2 text-left">
       <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3"><UserRound className="size-5 shrink-0 text-emerald-600" /><span className="min-w-0"><b className="block text-xs">社員証・社員QR</b><span className="block text-[11px] text-slate-500">利用者として認証</span></span></div>
@@ -1285,7 +1286,7 @@ function NfcDialog({ employees, vehicles, onEmployee, onVehicle, onClose }: { em
     </div>
     {unknownUid ? <div role="alert" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-left"><p className="text-xs font-black text-amber-800">登録されていないカード・タグです</p><p className="mt-1 text-[11px] font-bold text-amber-800">UID <span className="select-all font-mono">{unknownUid}</span></p><p className="mt-1 text-[11px] text-amber-700">別のカード・タグはそのままかざせます。登録は設定の社員登録・車両登録で行います。</p></div> : null}
     {error ? <p role="alert" className="mb-4 rounded-xl bg-rose-50 p-3 text-xs font-bold text-rose-700">{error}</p> : null}
-    {scanTimedOut ? <button type="button" onClick={retry} className="mb-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-amber-600 px-4 text-sm font-bold text-white hover:bg-amber-700"><QrCode className="size-4" />読取を再試行</button> : <NfcBridgeHelp status={bridgeStatus} defaultOpen className="mb-4" />}
+    {scanTimedOut ? <button type="button" onClick={retry} className="mb-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-amber-600 px-4 text-sm font-bold text-white hover:bg-amber-700"><QrCode className="size-4" />読取を再試行</button> : <NfcBridgeHelp status={bridgeStatus} className="mb-4" />}
     {development ? <div className="grid grid-cols-2 gap-3 text-left"><div><p className="mb-2 text-xs font-bold text-slate-400">社員（開発用）</p>{employees.slice(0, 3).map((p) => <button key={p.id} onClick={() => onEmployee(p)} className="mb-2 w-full rounded-xl border border-slate-200 p-3 text-xs font-bold hover:bg-slate-50">{p.name}<small className="block font-normal text-slate-400">{p.code}</small></button>)}</div><div><p className="mb-2 text-xs font-bold text-slate-400">車両（開発用）</p>{vehicles.slice(0, 3).map((v) => <button key={v.id} onClick={() => onVehicle(v)} className="mb-2 w-full rounded-xl border border-slate-200 p-3 text-xs font-bold hover:bg-slate-50">{v.name}<small className="block font-normal text-slate-400">{v.code}</small></button>)}</div></div> : null}
   </div></DialogShell>;
 }
