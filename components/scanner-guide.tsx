@@ -5,8 +5,8 @@ import { Check, Clipboard, Download, ExternalLink, LoaderCircle, Nfc, Power, QrC
 import { reconnectScannerBridge, useNfcBridgeHealth, useQrBridgeHealth } from "@/lib/use-nfc-bridge";
 import { Card, cn } from "./ui";
 
-const BRIDGE_DIRECTORY = "%LOCALAPPDATA%\\FleetFlow\\NfcBridge";
-const OPEN_BRIDGE_DIRECTORY_COMMAND = `explorer.exe "${BRIDGE_DIRECTORY}"`;
+const BRIDGE_MANAGEMENT_DIRECTORY = "C:\\Users\\sashi\\Desktop\\apps\\fleet-board\\nfc-bridge";
+const OPEN_BRIDGE_DIRECTORY_COMMAND = `explorer.exe "${BRIDGE_MANAGEMENT_DIRECTORY}"`;
 const RESTART_COMMAND = "FleetFlow NFC-QR Restart.cmd";
 const UNINSTALL_COMMAND = "FleetFlow NFC-QR Uninstall.cmd";
 
@@ -52,7 +52,7 @@ export function ScannerGuide() {
         <h3 className="flex items-center gap-2 text-base font-black"><Power className="size-5 text-blue-600" />接続できない場合</h3>
         <ol className="mt-4 space-y-4 text-sm text-slate-700">
           <GuideStep number="1" title="USBを確認">NFCリーダーまたはQRスキャナを一度抜き、再度接続して数秒待ちます。</GuideStep>
-          <GuideStep number="2" title="管理フォルダーを開く"><span className="block">ブラウザーのアドレス欄では開けません。下のコマンドをコピーし、<b>Windowsキー＋R</b>を押して貼り付け、Enterを押します。</span><CopyValue value={OPEN_BRIDGE_DIRECTORY_COMMAND} /><p className="mt-2 text-xs text-slate-500">フォルダーが見つからない場合は、上の「初回セットアップをダウンロード」からセットアップを再実行してください。</p></GuideStep>
+          <GuideStep number="2" title="管理フォルダーを開く"><span className="block">この開発PCでは、下のコマンドでプロジェクト内の管理フォルダーを開きます。コピーして<b>Windowsキー＋R</b>へ貼り付け、Enterを押します。</span><CopyValue value={OPEN_BRIDGE_DIRECTORY_COMMAND} /><p className="mt-2 text-xs text-slate-500">ブラウザーのアドレス欄には入力しません。フォルダーが見つからない場合は、FleetFlowの保存場所を確認してください。</p></GuideStep>
           <GuideStep number="3" title="再起動・再接続を実行"><code className="rounded bg-slate-100 px-1.5 py-1 font-bold text-slate-900">{RESTART_COMMAND}</code>をダブルクリックします。Bridgeが停止・フリーズしている場合も復旧を試みます。</GuideStep>
           <GuideStep number="4" title="接続状態を確認">完了メッセージを閉じ、FleetFlowへ戻ります。接続状態は数秒以内に更新されます。</GuideStep>
         </ol>
