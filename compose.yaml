@@ -88,7 +88,7 @@ services:
     image: mcr.microsoft.com/dotnet/sdk:8.0
     profiles: ["tools"]
     working_dir: /src
-    command: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -o /out
+    command: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:PublishTrimmed=false -o /out
     volumes:
       - ./nfc-bridge:/src
       - ./nfc-bridge/dist:/out

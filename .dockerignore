@@ -11,3 +11,5 @@ README.md
 nfc-bridge/bin
 nfc-bridge/obj
 nfc-bridge/dist
+nfc-setup/bin
+nfc-setup/obj
