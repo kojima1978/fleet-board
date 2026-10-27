@@ -21,6 +21,7 @@
     "test:development-origins": "tsx tests/development-origins.test.ts",
     "test:scanner-monitoring": "tsx tests/scanner-monitoring.test.ts",
     "test:scanner-setup": "tsx tests/scanner-setup.test.ts",
+    "test:parking-reservations": "tsx tests/parking-reservations.test.tsx",
     "db:migrate:employee-numbers": "node scripts/migrations/migrate-employee-numbers.mjs",
     "db:migrate:employee-normalization": "node scripts/migrations/migrate-employee-normalization.mjs",
     "db:migrate:unified-nfc": "node scripts/migrations/migrate-unified-nfc-assignments.mjs",

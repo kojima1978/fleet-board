@@ -8,6 +8,8 @@ import { AlertTriangle, CalendarClock, CarFront, Check, ChevronDown, ChevronLeft
 import type { DashboardData, Employee, ParkingSpot, Trip, Vehicle, VehicleMaintenance } from "@/lib/types";
 import { normalizeNfcUid } from "@/lib/nfc";
 import { createOperationId } from "@/lib/operation-id";
+import { getParkingReservations, PARKING_RESERVATION_NOTICE_MINUTES } from "@/lib/parking-reservations";
+import { ParkingReservationBadge, ParkingReservations } from "./parking-reservations";
 import { resolveNfcUid } from "@/lib/resolve-nfc";
 import { resolveQrCode } from "@/lib/resolve-qr";
 import { canUseSpot, formatSpotLabel, isDashedSpot, spotRoleTag } from "@/lib/parking-spots";
@@ -659,7 +661,7 @@ type OffSiteEntry = { maintenance: VehicleMaintenance; vehicle: Vehicle; spotCod
 // 車検・修理で外出中の車両も下に並べ、タップで「戻った」の画面を開く。
 // 「後で設定」で登録した車など位置未設定の車両も並べ、タップで置く区画を選ぶ（空き区画へドラッグも可）。
 // 位置未設定でも利用開始はできるため、その場で利用開始もできる。
-function ActiveVehicleSidebar({ trips, mineEmployeeId, offSite, unplaced, selectedTripId, returningTripId, placingVehicleId, onSelect, onSelectOffSite, onPlace, onStart, onDragStart, onDragEnd }: { trips: Trip[]; mineEmployeeId: string | null; offSite: OffSiteEntry[]; unplaced: Vehicle[]; selectedTripId: string | null; returningTripId: string | null; placingVehicleId: string | null; onSelect: (trip: Trip) => void; onSelectOffSite: (vehicle: Vehicle) => void; onPlace: (vehicle: Vehicle) => void; onStart: (vehicle: Vehicle) => void; onDragStart: (trip: Trip) => void; onDragEnd: () => void }) {
+function ActiveVehicleSidebar({ trips, reservationPanel, mineEmployeeId, offSite, unplaced, selectedTripId, returningTripId, placingVehicleId, onSelect, onSelectOffSite, onPlace, onStart, onDragStart, onDragEnd }: { trips: Trip[]; reservationPanel: React.ReactNode; mineEmployeeId: string | null; offSite: OffSiteEntry[]; unplaced: Vehicle[]; selectedTripId: string | null; returningTripId: string | null; placingVehicleId: string | null; onSelect: (trip: Trip) => void; onSelectOffSite: (vehicle: Vehicle) => void; onPlace: (vehicle: Vehicle) => void; onStart: (vehicle: Vehicle) => void; onDragStart: (trip: Trip) => void; onDragEnd: () => void }) {
   const now = Date.now();
   // 選んでいる利用者の車両を一番上に出し、あとはタイムラインの「利用中」と同じく返却予定が近い順（超過は上）に並べる。
   const isMine = (trip: Trip) => mineEmployeeId !== null && trip.employeeId === mineEmployeeId;
@@ -677,6 +679,7 @@ function ActiveVehicleSidebar({ trips, mineEmployeeId, offSite, unplaced, select
           <GripVertical aria-hidden className="size-4 shrink-0 text-slate-300" />
         </button></li>;
       })}</ul>}
+      {reservationPanel}
       {offSite.length ? <section aria-label="外出中（車検）"><div className="flex items-center justify-between border-y border-amber-100 bg-amber-50/70 px-3 py-1.5"><h3 className="text-xs font-black text-amber-900">外出中（車検）</h3><span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-800">{offSite.length}台</span></div><ul className="divide-y divide-slate-100">{offSite.map(({ maintenance, vehicle, spotCode }) => {
         const overdue = !!maintenance.plannedEnd && new Date(maintenance.plannedEnd).getTime() < now;
         return <li key={maintenance.id}><button type="button" title={`${vehicle.name}が戻ったら登録`} onClick={() => onSelectOffSite(vehicle)} className="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-amber-50/60">
@@ -886,6 +889,30 @@ function ParkingMap({ data, trips, changedVehicleIds, mutate, openStart, openRet
   // 位置未設定の車両も置けるよう、区画ではなく車両一覧から探す。
   const movingVehicle = movingVehicleId ? data.vehicles.find((vehicle) => vehicle.id === movingVehicleId && vehicle.active && vehicle.status === "AVAILABLE") ?? null : null;
   const unplacedVehicles = data.vehicles.filter((vehicle) => vehicle.active && vehicle.status === "AVAILABLE" && !vehicle.parkingSpotId);
+  const [reservationNow, setReservationNow] = useState(() => Date.now());
+  useEffect(() => {
+    let timer = 0;
+    const refresh = () => {
+      window.clearTimeout(timer);
+      const now = Date.now();
+      setReservationNow(now);
+      // APIが304でも30分前・開始時刻・失効境界で必ず表示を更新する。
+      const boundaries = data.trips.filter((trip) => trip.status === "RESERVED").flatMap((trip) => {
+        const start = Date.parse(trip.plannedStart);
+        return [start - PARKING_RESERVATION_NOTICE_MINUTES * 60_000, start, start + RESERVATION_GRACE_MINUTES * 60_000, Date.parse(trip.plannedEnd)];
+      }).filter((value) => Number.isFinite(value) && value > now);
+      const next = Math.min(Math.floor(now / 60_000) * 60_000 + 60_000, ...boundaries);
+      timer = window.setTimeout(refresh, Math.max(25, next - now));
+    };
+    refresh();
+    document.addEventListener("visibilitychange", refresh);
+    return () => { window.clearTimeout(timer); document.removeEventListener("visibilitychange", refresh); };
+  }, [data.trips]);
+  const parkingReservations = getParkingReservations(data.trips, data.vehicles, data.spots, reservationNow);
+  const reservationByVehicle = new Map<string, (typeof parkingReservations)[number]>();
+  for (const reservation of parkingReservations) {
+    if (!reservationByVehicle.has(reservation.vehicle.id)) reservationByVehicle.set(reservation.vehicle.id, reservation);
+  }
   // 詳細欄の「位置変更」で車を選んでいる間だけ、車のドラッグと空き区画のタップで移動できる。
   const moveMode = movingVehicle !== null;
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
@@ -959,7 +986,8 @@ function ParkingMap({ data, trips, changedVehicleIds, mutate, openStart, openRet
       <div className="@container relative mx-auto aspect-[950/525] max-w-[1180px] overflow-hidden rounded-xl border border-slate-200 bg-white" style={{ width: "min(100%, calc((100vh - 270px) * 1.81))" }}>
         <img src="/parking-layout.svg" alt="" className="pointer-events-none absolute inset-0 size-full select-none" draggable={false} />
         <IdleTraffic enabled={idleTrafficEnabled} colors={data.vehicles.filter((vehicle) => vehicle.active).map((vehicle) => vehicle.color)} />
-        {data.spots.map((spot) => <div key={spot.id} data-parking-spot-id={spot.id} onDragOver={(e) => { if (isTarget(spot)) e.preventDefault(); }} onDrop={(e) => { e.preventDefault(); if (returningTrip) returnTo(spot); else moveTo(spot); }} className={cn("absolute grid place-items-center rounded-[4px] border-2 transition", parkingSpotClass(spot, !!spot.vehicle && offSiteVehicleIds.has(spot.vehicle.id)), isTarget(spot) && "border-dashed border-emerald-400 bg-emerald-50", canReturnTo(spot) && "spot-beckon", pickingVehicle && !spot.vehicle && !canUseSpot(pickingVehicle, spot) && "cursor-not-allowed opacity-60", (spot.vehicle?.id === selectedVehicleId || spot.vehicle?.id === movingVehicleId) && "z-20 ring-4 ring-blue-700", spot.vehicle && changedVehicleIds.includes(spot.vehicle.id) && "z-10 ring-4 ring-amber-300 animate-pulse")} style={{ left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.width}%`, height: `${spot.height}%`, ...(canReturnTo(spot) ? { "--beckon-delay": `${(spot.x / 100) * 0.9}s` } as CSSProperties : {}) }}>
+        {data.spots.map((spot) => <div key={spot.id} data-parking-spot-id={spot.id} onDragOver={(e) => { if (isTarget(spot)) e.preventDefault(); }} onDrop={(e) => { e.preventDefault(); if (returningTrip) returnTo(spot); else moveTo(spot); }} className={cn("absolute grid place-items-center rounded-[4px] border-2 transition", parkingSpotClass(spot, !!spot.vehicle && offSiteVehicleIds.has(spot.vehicle.id)), spot.vehicle && reservationByVehicle.has(spot.vehicle.id) && "border-violet-500", isTarget(spot) && "border-dashed border-emerald-400 bg-emerald-50", canReturnTo(spot) && "spot-beckon", pickingVehicle && !spot.vehicle && !canUseSpot(pickingVehicle, spot) && "cursor-not-allowed opacity-60", (spot.vehicle?.id === selectedVehicleId || spot.vehicle?.id === movingVehicleId) && "z-20 ring-4 ring-blue-700", spot.vehicle && changedVehicleIds.includes(spot.vehicle.id) && "z-10 ring-4 ring-amber-300 animate-pulse")} style={{ left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.width}%`, height: `${spot.height}%`, ...(canReturnTo(spot) ? { "--beckon-delay": `${(spot.x / 100) * 0.9}s` } as CSSProperties : {}) }}>
+          {spot.vehicle && reservationByVehicle.has(spot.vehicle.id) ? <ParkingReservationBadge reservation={reservationByVehicle.get(spot.vehicle.id)!} /> : null}
           {spot.vehicle && spot.vehicle.fuelLevel !== null && !offSiteVehicleIds.has(spot.vehicle.id) ? <FuelFill level={spot.vehicle.fuelLevel} waving={wavingVehicleIds.includes(spot.vehicle.id)} /> : null}
           <span className="absolute left-1 top-0.5 z-[1] text-[9px] font-black text-slate-500">{spot.code}{spotRoleTag(spot) ? <small className={cn("ml-0.5 text-[7px]", spot.role !== "HOLDING" && "hidden @2xl:inline", spot.role === "TEMPORARY" && "text-slate-400")}>{spotRoleTag(spot)}</small> : null}</span>
           {spot.vehicle ? <div className="relative size-full">{moveMode ? <button type="button" draggable aria-pressed={spot.vehicle.id === movingVehicleId} title={`${spot.vehicle.name}を移動`} onClick={() => setMovingVehicleId((current) => current === spot.vehicle?.id ? null : spot.vehicle?.id ?? null)} onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setMovingVehicleId(spot.vehicle?.id ?? null); }} className="grid size-full cursor-grab place-content-center overflow-hidden text-center active:cursor-grabbing">{vehicleTileContent(spot.vehicle, spot.orientation === "horizontal", offSiteVehicleIds.has(spot.vehicle.id))}<GripVertical aria-hidden className="pointer-events-none absolute right-0.5 top-0.5 size-3.5 text-slate-400" /></button> : <button type="button" aria-pressed={spot.vehicle.id === selectedVehicleId} title={`${spot.vehicle.name}の詳細を表示`} onClick={() => selectVehicle(spot.vehicle?.id === selectedVehicleId ? null : spot.vehicle ?? null)} className={cn("grid size-full place-content-center overflow-hidden text-center", offSiteVehicleIds.has(spot.vehicle.id) && "opacity-60")}>{vehicleTileContent(spot.vehicle, spot.orientation === "horizontal", offSiteVehicleIds.has(spot.vehicle.id))}</button>}{spot.vehicle.fuelLevel !== null && !offSiteVehicleIds.has(spot.vehicle.id) ? <span className={cn("pointer-events-none absolute bottom-0.5 right-1 text-[7px] font-black leading-none @2xl:text-[8px]", isLowFuel(spot.vehicle.fuelLevel) ? "text-amber-800" : "text-emerald-800")}>残量 {formatFuelLevel(spot.vehicle.fuelLevel)}</span> : null}</div> : <button type="button" title={`${formatSpotLabel(spot)}へ返却`} onClick={() => { if (returningTrip) returnTo(spot); else if (moveMode) moveTo(spot); else openReturn(spot); }} className={cn("grid size-full place-content-center text-center transition", pickingVehicle ? !isTarget(spot) && "cursor-default" : "hover:bg-slate-100/70")}><span className="block text-[9px] font-bold leading-tight text-slate-500 @2xl:text-[11px] @5xl:text-[13px]"><MapPin className="mx-auto mb-0.5 size-3" />{spot.role === "HOLDING" ? "仮置き" : spot.role === "TEMPORARY" ? "一時" : spot.role === "DEDICATED" ? spot.dedicatedVehicleName ?? "専用" : "空き"}<span className="hidden @2xl:block">{spot.role === "HOLDING" ? "実在なし" : spot.role === "TEMPORARY" ? "駐車可" : spot.role === "DEDICATED" ? "専用" : "返却"}</span></span></button>}
@@ -971,7 +999,7 @@ function ParkingMap({ data, trips, changedVehicleIds, mutate, openStart, openRet
       {movingVehicle ? <div role="status" className="mx-auto mt-2 flex max-w-md items-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 p-2"><Move className="size-4 shrink-0 text-blue-600" /><p className="mr-auto text-xs font-bold"><b>{movingVehicle.name}</b>{movingVehicle.parkingSpotId ? "の移動先" : "を置く区画"}をタップ（ドラッグも可）</p><Button variant="ghost" className="min-h-8 shrink-0 whitespace-nowrap px-3 text-xs" onClick={() => setMovingVehicleId(null)}>やめる</Button></div> : null}
     </div>
   </Card>
-  <ActiveVehicleSidebar trips={trips} mineEmployeeId={currentEmployeeId} offSite={offSiteEntries} unplaced={unplacedVehicles} selectedTripId={selectedTripId} returningTripId={returningTripId} placingVehicleId={movingVehicle && !movingVehicle.parkingSpotId ? movingVehicle.id : null} onSelect={selectTrip} onSelectOffSite={(vehicle) => { setSelectedTripId(null); setMaintenanceVehicleId(vehicle.id); }} onPlace={(vehicle) => { if (movingVehicleId === vehicle.id) setMovingVehicleId(null); else startMove(vehicle); }} onStart={(vehicle) => { setMovingVehicleId(null); openStart(vehicle); }} onDragStart={startReturn} onDragEnd={() => setReturningTripId(null)} />
+  <ActiveVehicleSidebar trips={trips} reservationPanel={<ParkingReservations reservations={parkingReservations} onStart={openStart} onEdit={openEdit} />} mineEmployeeId={currentEmployeeId} offSite={offSiteEntries} unplaced={unplacedVehicles} selectedTripId={selectedTripId} returningTripId={returningTripId} placingVehicleId={movingVehicle && !movingVehicle.parkingSpotId ? movingVehicle.id : null} onSelect={selectTrip} onSelectOffSite={(vehicle) => { setSelectedTripId(null); setMaintenanceVehicleId(vehicle.id); }} onPlace={(vehicle) => { if (movingVehicleId === vehicle.id) setMovingVehicleId(null); else startMove(vehicle); }} onStart={(vehicle) => { setMovingVehicleId(null); openStart(vehicle); }} onDragStart={startReturn} onDragEnd={() => setReturningTripId(null)} />
   {maintenanceVehicle ? <MaintenanceDialog vehicle={maintenanceVehicle} data={data} mutate={mutate} onClose={() => setMaintenanceVehicleId(null)} /> : null}
   </>;
 }
