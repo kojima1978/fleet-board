@@ -22,6 +22,8 @@
     "test:scanner-monitoring": "tsx tests/scanner-monitoring.test.ts",
     "test:scanner-setup": "tsx tests/scanner-setup.test.ts",
     "test:parking-reservations": "tsx tests/parking-reservations.test.tsx",
+    "test:parking-appearance": "tsx tests/parking-appearance.test.ts",
+    "test:fuel-labels": "tsx tests/fuel-labels.test.tsx",
     "test:departure-guidance": "tsx tests/departure-guidance.test.tsx",
     "test:trip-times": "tsx tests/trip-times.test.tsx",
     "test:integration:trip-times": "tsx tests/integration/trip-start-times.ts",
