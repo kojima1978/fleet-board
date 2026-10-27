@@ -42,7 +42,7 @@ export function SpotRoleSettings({ data, mutate }: { data: DashboardData; mutate
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = data.spots.find((spot) => spot.id === selectedId) ?? null;
   const sortedSpots = [...data.spots].sort((a, b) => a.code.localeCompare(b.code, "ja", { numeric: true }));
-  return <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
+  return <div className="grid w-full max-w-[1092px] gap-3 xl:grid-cols-[minmax(0,760px)_320px]">
     <Card className="p-3 md:p-4">
       <p className="mb-2 text-xs font-bold text-slate-500">変更する区画を配置図からタップしてください</p>
       <div className="@container relative mx-auto aspect-[950/525] overflow-hidden rounded-xl border border-slate-200 bg-white" style={{ width: "min(100%, calc((100vh - 290px) * 1.81))" }}>
@@ -54,7 +54,7 @@ export function SpotRoleSettings({ data, mutate }: { data: DashboardData; mutate
         </button>)}
       </div>
     </Card>
-    <div className="space-y-3 lg:sticky lg:top-4 lg:self-start">
+    <div className="space-y-3 xl:sticky xl:top-4 xl:self-start">
       <Card className="p-4">
         <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-600">区画</span>
           <select aria-label="変更する区画" value={selectedId ?? ""} onChange={(event) => setSelectedId(event.target.value || null)} className={field}>
@@ -66,7 +66,7 @@ export function SpotRoleSettings({ data, mutate }: { data: DashboardData; mutate
       </Card>
       <Card className="p-4">
         <h3 className="text-sm font-black">用途の種類</h3>
-        <dl className="mt-2 grid gap-x-6 gap-y-1.5 text-xs sm:grid-cols-2 lg:grid-cols-1">
+        <dl className="mt-2 grid gap-x-6 gap-y-1.5 text-xs sm:grid-cols-2 xl:grid-cols-1">
           {PARKING_SPOT_ROLES.map((role) => <div key={role} className="flex items-start gap-2"><dt className={cn("shrink-0 rounded-full px-2 py-0.5 text-[11px] font-black", roleBadge[role])}>{SPOT_ROLE_LABELS[role]}</dt><dd className="pt-0.5 text-slate-500">{SPOT_ROLE_DESCRIPTIONS[role]}</dd></div>)}
         </dl>
         <p className="mt-3 flex items-center gap-1.5 border-t border-slate-100 pt-3 text-xs text-slate-500"><PenLine className="size-3.5 text-blue-500" />表示名を変更した区画</p>

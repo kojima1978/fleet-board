@@ -20,7 +20,7 @@ export function ScannerGuide() {
     setReconnectMessage(result === "restarting" ? "再接続を開始しました。接続状態は数秒以内に更新されます。" : "Bridgeに接続できません。左側のセットアップ・修復ツールをダウンロードして実行してください。");
     window.setTimeout(() => setReconnecting(false), result === "restarting" ? 7000 : 1000);
   };
-  return <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+  return <div className="grid w-full max-w-[1132px] gap-3 xl:grid-cols-[minmax(0,760px)_360px]">
     <div className="space-y-4">
       <Card className="p-5">
         <h3 className="text-base font-black">初回セットアップ</h3>

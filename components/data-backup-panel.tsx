@@ -77,13 +77,17 @@ export function DataBackupPanel() {
   };
 
   const busy = status !== "idle";
-  return <div data-kiosk-auto-home-blocked={busy || summary !== null} className="grid gap-5 xl:grid-cols-2">
-    <Card className="p-5">
-      <span className="grid size-12 place-items-center rounded-2xl bg-blue-50 text-blue-700"><DatabaseBackup className="size-6" /></span>
-      <h3 className="mt-4 text-lg font-black">JSON一括書き出し</h3>
-      <p className="mt-1 text-sm leading-6 text-slate-500">社員・車両・駐車区画・NFC・利用予定・利用履歴・操作履歴を、1つのJSONファイルに保存します。</p>
-      <Button className="mt-5 w-full" disabled={busy} onClick={() => void exportData()}>{status === "exporting" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}{status === "exporting" ? "書き出し中…" : "全データをJSONで保存"}</Button>
-      <p className="mt-3 text-xs leading-5 text-slate-400">NFC UIDや氏名を含むため、安全な場所で保管してください。</p>
+  return <div data-kiosk-auto-home-blocked={busy || summary !== null} className="w-full max-w-[760px] space-y-4">
+    <Card className="p-4 sm:p-5">
+      <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600"><DatabaseBackup className="size-5" /></span>
+        <div className="min-w-0 flex-1 basis-72">
+          <h3 className="text-base font-black">JSON一括書き出し</h3>
+          <p className="mt-0.5 text-xs leading-5 text-slate-500">社員・車両・駐車区画・NFC・利用予定・利用履歴・操作履歴を、1つのJSONファイルに保存します。</p>
+          <p className="mt-1 text-[11px] leading-5 text-slate-400">個人情報を含むため、安全な場所で保管してください。</p>
+        </div>
+        <Button className="w-full sm:w-auto" disabled={busy} onClick={() => void exportData()}>{status === "exporting" ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}{status === "exporting" ? "書き出し中…" : "JSONで保存"}</Button>
+      </div>
     </Card>
 
     <Card className="p-5">

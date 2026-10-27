@@ -91,6 +91,6 @@ export function OperationsDashboard() {
         {data && data.pagination.pageCount > 1 ? <div className="flex items-center justify-center gap-3 border-t border-slate-100 bg-slate-50 p-3"><Button variant="ghost" disabled={loading || page === 1} onClick={() => void load(query, page - 1)}>前へ</Button><span className="text-xs font-bold text-slate-600">{page} / {data.pagination.pageCount}ページ（全{data.pagination.total}件）</span><Button variant="ghost" disabled={loading || page === data.pagination.pageCount} onClick={() => void load(query, page + 1)}>次へ</Button></div> : null}
       </Card></div>
     </main>
-    <Navigation view="operations" className="fixed inset-x-3 bottom-3 z-40 flex rounded-2xl border border-slate-200 bg-white/95 p-1.5 shadow-2xl backdrop-blur md:hidden" />
+    <Navigation view="operations" className="fixed inset-x-3 bottom-3 z-40 flex rounded-2xl border border-slate-200 bg-white/95 p-1.5 shadow-2xl backdrop-blur lg:hidden" />
   </div>;
 }

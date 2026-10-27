@@ -36,7 +36,7 @@ export function DepartmentSettings({ data, mutate }: { data: DashboardData; muta
     if (await run("new", { action: "createDepartment", name: normalizedNewName }, `部署「${normalizedNewName}」を追加しました`)) setNewName("");
   };
 
-  return <div data-kiosk-auto-home-blocked={busyId !== null || newName !== ""} className="grid w-full max-w-[1092px] gap-3 lg:grid-cols-[minmax(0,760px)_320px]">
+  return <div data-kiosk-auto-home-blocked={busyId !== null || newName !== ""} className="grid w-full max-w-[1092px] gap-3 xl:grid-cols-[minmax(0,760px)_320px]">
     <div className="min-w-0 space-y-3">
       <Card className="overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-slate-100 px-4 py-2.5"><h3 className="text-sm font-black">利用中の部署<span className="ml-1.5 text-xs font-bold text-slate-400">{active.length}件</span></h3><span className="text-xs text-slate-500">この順に社員画面の選択肢へ並びます</span></div>
@@ -57,8 +57,8 @@ export function DepartmentSettings({ data, mutate }: { data: DashboardData; muta
     </div>
 
     {/* 一覧が長くなっても追加欄を見失わないよう、広い画面では右側に固定する。狭い画面では追加欄を一覧より上、使い方を下に出す。 */}
-    <div className="contents lg:sticky lg:top-4 lg:block lg:space-y-3 lg:self-start">
-      <Card className="order-first p-4 lg:order-none">
+    <div className="contents xl:sticky xl:top-4 xl:block xl:space-y-3 xl:self-start">
+      <Card className="order-first p-4 xl:order-none">
         <form onSubmit={create} className="space-y-2">
           <label className="block">
             <span className="text-xs font-bold text-slate-600">部署を追加</span>

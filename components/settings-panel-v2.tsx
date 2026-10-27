@@ -49,11 +49,11 @@ const DEFAULT_PAGE_SIZE = 30;
 const PAGE_SIZES = [30, 60, 100] as const;
 type PageSize = (typeof PAGE_SIZES)[number];
 const nfcUidLabel = (uid: string) => uid || "NFC未登録";
-// 社員一覧の見出しと各行で同じ列幅を使う。車両一覧と同じく、広い画面では列を左に詰めて編集ボタンをNFC UIDの隣に置く。
-const employeeGrid = "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 md:grid-cols-[84px_minmax(0,12rem)_minmax(0,9rem)_minmax(0,14rem)_auto] md:justify-start md:gap-4 xl:grid-cols-[84px_minmax(0,10rem)_minmax(0,16rem)_minmax(0,8rem)_minmax(0,13rem)_auto]";
+// 社員一覧の見出しと各行で同じ列幅を使う。広い画面でも列を広げすぎず、視線移動を短くする。
+const employeeGrid = "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 md:grid-cols-[84px_minmax(0,12rem)_minmax(0,8rem)_minmax(0,12rem)_auto] md:gap-4 xl:grid-cols-[88px_minmax(0,10rem)_minmax(0,14rem)_minmax(0,8rem)_minmax(0,12rem)_auto]";
 // 車両は列が多いため、広い画面でだけ表形式にする。狭い画面では状態と駐車位置を車両名の下に出す。
-// 広い画面では列を左に詰め、操作ボタンを状態の隣に置いて視線の移動を減らす。
-const vehicleGrid = "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-4 xl:grid-cols-[112px_minmax(0,11rem)_minmax(0,10rem)_minmax(0,9rem)_minmax(0,16rem)_auto] xl:justify-start xl:gap-4";
+// 広い画面でも一覧を横へ広げすぎず、状態列だけを残り幅に応じて伸縮させる。
+const vehicleGrid = "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-4 xl:grid-cols-[104px_minmax(0,10rem)_minmax(0,9rem)_minmax(0,8rem)_minmax(12rem,1fr)_auto] xl:gap-4";
 
 export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "vehicle"; data: DashboardData; mutate: Mutate }) {
   const [query, setQuery] = useState("");
@@ -590,6 +590,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
 
   return (
     <>
+      <div className={cn("w-full space-y-5", kind === "employee" ? "max-w-[1080px]" : "max-w-[1120px]")}>
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs text-slate-500 shadow-sm">
         <span>
           <b className="text-slate-800">FleetFlow {data.system.appVersion}</b> ・ {data.system.environment === "production" ? "本番環境" : "開発環境"}
@@ -884,6 +885,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
           </div>
         ) : null}
       </Card>
+      </div>
 
       {nfcCheckOpen ? (
         <NfcCheckDialog
