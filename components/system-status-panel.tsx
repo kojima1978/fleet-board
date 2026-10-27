@@ -28,7 +28,7 @@ export function SystemStatusPanel({ system, syncState, nfcStatus, qrStatus }: { 
   const nfcDetail = nfcStatus === "ready" ? "接続済み" : nfcStatus === "connecting" ? "確認中" : nfcStatus === "no-reader" ? "Bridge起動・機器未接続" : nfcStatus === "idle" ? "この端末では未使用" : "Bridge未接続";
   const qrDetail = qrStatus === "ready" ? "接続済み" : qrStatus === "not-configured" ? "未設定" : "未接続";
 
-  return <section aria-label="システム状態一覧" className="flex flex-wrap overflow-hidden rounded-2xl border border-slate-200 bg-slate-200 shadow-sm">
+  return <section aria-label="システム状態一覧" className="w-full max-w-[760px] divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <StatusCard icon={<Server className="size-5" />} title="アプリ" detail={appDetail} tone={appHealthy ? "healthy" : "error"} />
       <StatusCard icon={<Database className="size-5" />} title="データベース" detail={appHealthy ? system.schemaVersion : "接続を確認してください"} tone={appHealthy ? "healthy" : "error"} />
       <StatusCard icon={<DatabaseBackup className="size-5" />} title="バックアップ" detail={backupDetail} subdetail={verificationHealthy ? "復元確認済み" : "復元確認が必要"} tone={backupHealthy && verificationHealthy ? "healthy" : "warning"} href="/settings/data" action="保存・復元" />
@@ -38,9 +38,15 @@ export function SystemStatusPanel({ system, syncState, nfcStatus, qrStatus }: { 
 }
 
 function StatusCard({ icon, title, detail, subdetail, tone, href, action }: { icon: React.ReactNode; title: string; detail: string; subdetail?: string; tone: "healthy" | "warning" | "error" | "neutral"; href?: string; action?: string }) {
-  const style = tone === "healthy" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : tone === "warning" ? "border-amber-200 bg-amber-50 text-amber-800" : tone === "error" ? "border-rose-200 bg-rose-50 text-rose-800" : "border-slate-200 bg-slate-50 text-slate-700";
-  const marker = tone === "healthy" ? <Check className="size-4" /> : tone === "neutral" ? null : <AlertTriangle className="size-4" />;
-  const content = <><div className="flex items-start gap-2"><span className="grid size-8 shrink-0 place-items-center rounded-lg bg-white/80 [&>svg]:size-4">{icon}</span><div className="min-w-0 flex-1"><p className="text-[11px] font-bold opacity-75">{title}</p><p className="truncate text-xs font-black" title={detail}>{detail}</p>{subdetail ? <p className="mt-0.5 text-[10px] font-bold opacity-75">{subdetail}</p> : null}</div>{marker}</div>{action ? <span className="mt-2 flex items-center justify-end gap-0.5 text-[11px] font-black">{action}<ChevronRight className="size-3.5" /></span> : null}</>;
-  const className = cn("min-h-20 min-w-44 flex-1 p-3 outline-none transition focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-blue-500", style);
-  return href ? <Link href={href} className={cn(className, "hover:brightness-[0.98]")}>{content}</Link> : <div className={className}>{content}</div>;
+  const markerStyle = tone === "healthy" ? "bg-emerald-100 text-emerald-700" : tone === "warning" ? "bg-amber-100 text-amber-800" : tone === "error" ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-600";
+  const markerLabel = tone === "healthy" ? "正常" : tone === "warning" ? "要確認" : tone === "error" ? "異常" : "未設定";
+  const markerIcon = tone === "healthy" ? <Check className="size-3.5" /> : tone === "neutral" ? null : <AlertTriangle className="size-3.5" />;
+  const content = <div className="grid min-h-[68px] grid-cols-[2.5rem_minmax(0,1fr)_4.5rem] items-center gap-3 px-4 py-2.5 sm:grid-cols-[2.5rem_minmax(0,1fr)_4.75rem_5.5rem] sm:px-5">
+    <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600 [&>svg]:size-5">{icon}</span>
+    <div className="min-w-0 flex-1"><p className="text-sm font-black text-slate-900">{title}</p><p className="mt-0.5 truncate text-xs text-slate-600" title={detail}>{detail}</p>{subdetail ? <p className="mt-0.5 text-[11px] text-slate-500">{subdetail}</p> : null}</div>
+    <span className={cn("inline-flex w-fit items-center gap-1 rounded-full px-2 py-1 text-[10px] font-black", markerStyle)}>{markerIcon}{markerLabel}</span>
+    <span className="hidden min-w-0 items-center justify-end gap-0.5 text-xs font-bold text-slate-500 sm:flex">{action ? <>{action}<ChevronRight className="size-3.5 shrink-0" /></> : null}</span>
+  </div>;
+  const className = "block outline-none transition focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500";
+  return href ? <Link href={href} className={cn(className, "hover:bg-slate-50")}>{content}</Link> : <div className={className}>{content}</div>;
 }

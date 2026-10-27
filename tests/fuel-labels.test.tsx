@@ -6,7 +6,7 @@ import { FUEL_LEVEL_LABELS } from "../lib/fuel-level";
 FUEL_LEVEL_LABELS.forEach((label, level) => {
   const compact = renderToStaticMarkup(<FuelLevelLabel level={level} compact />);
   const detail = renderToStaticMarkup(<FuelLevelLabel level={level} />);
-  assert.equal(compact, `<span class="whitespace-nowrap">燃料 ${label}</span>`);
+  assert.equal(compact, `<span class="whitespace-nowrap">ガソリン残量 ${label}</span>`);
   assert.equal(detail, `<span class="whitespace-nowrap">ガソリン残量 ${label}</span>`);
   assert.doesNotMatch(compact, /<br/);
 });

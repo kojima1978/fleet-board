@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { CarFront, Check, Download, FileJson, Mail, MapPin, Nfc, Pencil, Plus, Power, QrCode, RotateCcw, Search, Send, Upload, UserRound, Wrench, X } from "lucide-react";
 import type { DashboardData, Employee, ParkingSpot, Vehicle } from "@/lib/types";
@@ -45,7 +45,9 @@ const emptyVehicle = {
 };
 const field = "min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500";
 const NFC_SCAN_TIMEOUT_MS = 15_000;
-const PAGE_SIZE = 30;
+const DEFAULT_PAGE_SIZE = 30;
+const PAGE_SIZES = [30, 60, 100] as const;
+type PageSize = (typeof PAGE_SIZES)[number];
 const nfcUidLabel = (uid: string) => uid || "NFC未登録";
 // 社員一覧の見出しと各行で同じ列幅を使う。車両一覧と同じく、広い画面では列を左に詰めて編集ボタンをNFC UIDの隣に置く。
 const employeeGrid = "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 md:grid-cols-[84px_minmax(0,12rem)_minmax(0,9rem)_minmax(0,14rem)_auto] md:justify-start md:gap-4 xl:grid-cols-[84px_minmax(0,10rem)_minmax(0,16rem)_minmax(0,8rem)_minmax(0,13rem)_auto]";
@@ -91,6 +93,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
   const [importFileName, setImportFileName] = useState("");
   const [urlHydrated, setUrlHydrated] = useState(false);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<PageSize>(DEFAULT_PAGE_SIZE);
   const nfcInput = useRef<HTMLInputElement | null>(null);
   const drawerRef = useRef<HTMLElement | null>(null);
   const drawerReturnFocus = useRef<HTMLElement | null>(null);
@@ -105,6 +108,8 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
     setNfc(savedNfc === "registered" || savedNfc === "unregistered" ? savedNfc : "all");
     const savedEmail = params.get("email") as EmailFilter | null;
     setEmail(savedEmail === "registered" || savedEmail === "unregistered" ? savedEmail : "all");
+    const savedPageSize = Number(params.get("limit"));
+    setPageSize(PAGE_SIZES.includes(savedPageSize as PageSize) ? (savedPageSize as PageSize) : DEFAULT_PAGE_SIZE);
     setUrlHydrated(true);
   }, [kind]);
 
@@ -116,9 +121,10 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
     nfc !== "all" ? params.set("nfc", nfc) : params.delete("nfc");
     kind === "employee" && email !== "all" ? params.set("email", email) : params.delete("email");
     kind === "employee" && department !== "all" ? params.set("department", department) : params.delete("department");
+    pageSize !== DEFAULT_PAGE_SIZE ? params.set("limit", String(pageSize)) : params.delete("limit");
     const suffix = params.toString();
     window.history.replaceState({}, "", `${window.location.pathname}${suffix ? `?${suffix}` : ""}`);
-  }, [department, email, kind, nfc, query, status, urlHydrated]);
+  }, [department, email, kind, nfc, pageSize, query, status, urlHydrated]);
 
   useEffect(() => {
     if (!highlightId) return;
@@ -137,7 +143,9 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
     const requested = new URLSearchParams(window.location.search).get("department");
     if (requested) setDepartment(requested);
   }, []);
-  const normalizedQuery = query.trim().toLowerCase();
+  // 件数が多い場合も入力を妨げないよう、一覧の絞り込みだけを遅延させる。
+  const deferredQuery = useDeferredValue(query);
+  const normalizedQuery = deferredQuery.trim().toLowerCase();
   const employees = useMemo(
     () =>
       data.employees.filter((person) => {
@@ -159,7 +167,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
   );
   useEffect(() => {
     setPage(1);
-  }, [department, email, kind, nfc, normalizedQuery, status]);
+  }, [department, email, kind, nfc, normalizedQuery, pageSize, status]);
 
   const currentNfc = kind === "employee" ? employeeForm.nfcUid : vehicleForm.nfcUid;
   const editingId = editingEmployee?.id ?? editingVehicle?.id;
@@ -573,10 +581,12 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
   const active = kind === "employee" ? data.employees.filter((person) => person.active).length : data.vehicles.filter((vehicle) => vehicle.active).length;
   const emailReady = kind === "employee" ? data.employees.filter((person) => person.active && person.email).length : 0;
   const shown = kind === "employee" ? employees.length : vehicles.length;
-  const pageCount = Math.max(1, Math.ceil(shown / PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(shown / pageSize));
   const currentPage = Math.min(page, pageCount);
-  const visibleEmployees = employees.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-  const visibleVehicles = vehicles.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const rangeStart = shown === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const rangeEnd = Math.min(currentPage * pageSize, shown);
+  const visibleEmployees = employees.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const visibleVehicles = vehicles.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   return (
     <>
@@ -650,7 +660,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 px-4 py-3 text-xs text-slate-500">
           <span>
-            <b className="text-slate-900">{shown}</b>件を表示
+            <b className="text-slate-900">{rangeStart}–{rangeEnd}</b> / {shown}件
           </span>
           <span className="flex flex-wrap items-center gap-2">
             <span>
@@ -662,6 +672,14 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                 利用停止中の{total - active}
                 {kind === "employee" ? "人" : "台"}を表示
               </button>
+            ) : null}
+            {shown > DEFAULT_PAGE_SIZE ? (
+              <label className="ml-1 inline-flex items-center gap-1.5 whitespace-nowrap">
+                <span>表示件数</span>
+                <select aria-label="1ページの表示件数" value={pageSize} onChange={(event) => setPageSize(Number(event.target.value) as PageSize)} className="min-h-8 rounded-lg border border-slate-200 bg-white px-2 font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                  {PAGE_SIZES.map((size) => <option key={size} value={size}>{size}件</option>)}
+                </select>
+              </label>
             ) : null}
           </span>
         </div>
@@ -842,16 +860,26 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
               : null}
           </div>
         )}
-        {shown > PAGE_SIZE ? (
-          <div className="flex items-center justify-center gap-3 border-t border-slate-100 bg-slate-50 px-4 py-3">
+        {shown > pageSize ? (
+          <div className="flex flex-wrap items-center justify-center gap-2 border-t border-slate-100 bg-slate-50 px-4 py-3">
+            <button type="button" disabled={currentPage === 1} onClick={() => setPage(1)} className="min-h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 disabled:opacity-35">
+              先頭
+            </button>
             <button type="button" disabled={currentPage === 1} onClick={() => setPage((value) => Math.max(1, value - 1))} className="min-h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 disabled:opacity-35">
               前へ
             </button>
-            <span className="text-xs font-bold text-slate-600">
-              {currentPage} / {pageCount}ページ
-            </span>
+            <label className="inline-flex min-h-9 items-center gap-1.5 px-1 text-xs font-bold text-slate-600">
+              <span className="sr-only">表示ページ</span>
+              <select aria-label="表示ページ" value={currentPage} onChange={(event) => setPage(Number(event.target.value))} className="min-h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                {Array.from({ length: pageCount }, (_, index) => index + 1).map((pageNumber) => <option key={pageNumber} value={pageNumber}>{pageNumber}</option>)}
+              </select>
+              <span>/ {pageCount}ページ</span>
+            </label>
             <button type="button" disabled={currentPage === pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))} className="min-h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 disabled:opacity-35">
               次へ
+            </button>
+            <button type="button" disabled={currentPage === pageCount} onClick={() => setPage(pageCount)} className="min-h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 disabled:opacity-35">
+              末尾
             </button>
           </div>
         ) : null}

@@ -14,11 +14,11 @@ export function ReservationStartEditor({ trip, busy, onSave }: { trip: Pick<Star
   let message = "";
   try { validateReservationStart(start, new Date(trip.plannedEnd), new Date()); } catch (error) { message = (error as Error).message; }
   const changed = Number.isFinite(start.getTime()) && value !== localInput(trip.plannedStart);
-  return <section className="rounded-2xl border border-violet-200 bg-violet-50 p-4">
-    <label className="text-xs font-bold text-violet-900">予約の開始日時<input aria-label="予約の開始日時" type="datetime-local" step={900} value={value} disabled={busy} onChange={(event) => { setValue(event.target.value); setConfirm(false); }} className={inputClass} /></label>
+  return <section className="rounded-2xl border border-slate-200 bg-white p-4">
+    <label className="text-xs font-bold text-slate-700">予約の開始日時<input aria-label="予約の開始日時" type="datetime-local" step={900} value={value} disabled={busy} onChange={(event) => { setValue(event.target.value); setConfirm(false); }} className={inputClass} /></label>
     <p className="mt-2 text-xs text-slate-600">終了予定 {display(trip.plannedEnd)} は変更しません。利用時間は15分以上7日以内です。</p>
     {changed && message ? <p role="alert" className="mt-2 text-xs font-bold text-rose-700">{message}</p> : null}
-    {confirm && changed && !message ? <div className="mt-3 rounded-xl bg-white p-3 text-sm"><p>変更前：{display(trip.plannedStart)}</p><p>変更後：{display(start.toISOString())}</p><Button disabled={busy} className="mt-3" onClick={() => void onSave(start.toISOString()).then((ok) => { if (!ok) setConfirm(false); })}>予約の開始日時を変更する</Button></div> : <Button disabled={busy || !changed || !!message} className="mt-3" onClick={() => setConfirm(true)}>開始日時の変更を確認</Button>}
+    {confirm && changed && !message ? <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm"><p>変更前：{display(trip.plannedStart)}</p><p>変更後：{display(start.toISOString())}</p><Button disabled={busy} className="mt-3" onClick={() => void onSave(start.toISOString()).then((ok) => { if (!ok) setConfirm(false); })}>予約の開始日時を変更する</Button></div> : <Button disabled={busy || !changed || !!message} className="mt-3" onClick={() => setConfirm(true)}>開始日時の変更を確認</Button>}
   </section>;
 }
 
