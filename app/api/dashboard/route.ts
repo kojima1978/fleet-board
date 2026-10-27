@@ -12,6 +12,7 @@ import { canUseSpot, formatSpotLabel, PARKING_SPOT_ROLES, SPOT_LABEL_MAX_LENGTH,
 import { isRecordCode, normalizeRecordCode, recordCodeMessage } from "@/lib/record-codes";
 import { formatMaintenanceTime, MAINTENANCE_KIND_SHORT_LABELS, MAINTENANCE_KINDS, MAINTENANCE_MAX_DAYS, MAINTENANCE_NOTE_MAX, MAINTENANCE_SCHEDULE_DAYS_AHEAD, maintenanceConflictMessage } from "@/lib/maintenance";
 import { createQrToken, qrPayload } from "@/lib/qr-code";
+import { updateTripStart } from "@/lib/trip-time-actions";
 import type { Prisma } from "@/prisma/generated/client";
 
 export const dynamic = "force-dynamic";
@@ -126,6 +127,8 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("moveTrip"), tripId: idSchema, version: z.number().int().nonnegative(), plannedStart: z.string().datetime(), plannedEnd: z.string().datetime(), ...actorSchema }),
   z.object({ action: z.literal("adjustTrip"), tripId: idSchema, version: z.number().int().nonnegative(), minutes: z.union([z.literal(-60), z.literal(-30), z.literal(-15), z.literal(15), z.literal(30), z.literal(60), z.literal(180), z.literal(300)]), ...actorSchema }),
   z.object({ action: z.literal("setTripEnd"), tripId: idSchema, version: z.number().int().nonnegative(), plannedEnd: z.string().datetime(), ...actorSchema }),
+  z.object({ action: z.literal("setReservationStart"), tripId: idSchema, version: z.number().int().nonnegative(), plannedStart: z.string().datetime(), ...actorSchema }),
+  z.object({ action: z.literal("correctActualStart"), tripId: idSchema, version: z.number().int().nonnegative(), actualStart: z.string().datetime(), reason: z.string().trim().min(1).max(200), ...actorSchema, actorEmployeeId: idSchema }),
   z.object({ action: z.literal("cancelTrip"), tripId: idSchema, version: z.number().int().nonnegative(), ...actorSchema }),
   z.object({ action: z.literal("moveVehicle"), vehicleId: idSchema, version: z.number().int().nonnegative(), spotId: idSchema, ...actorSchema }),
   z.object({ action: z.literal("updateSpot"), id: idSchema, version: z.number().int().nonnegative(), code: spotCodeSchema, label: spotLabelSchema.nullable(), role: z.enum(PARKING_SPOT_ROLES), dedicatedVehicleId: idSchema.nullable() }),
@@ -199,6 +202,11 @@ async function assertNoTripOverlap(tx: Prisma.TransactionClient, vehicleId: stri
 }
 
 const lockVehicle = (tx: Prisma.TransactionClient, vehicleId: string) => tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-vehicle:${vehicleId}`}))::text AS vehicle_lock`;
+async function lockTripForTimeChange(tx: Prisma.TransactionClient, tripId: string) {
+  const original = await tx.trip.findUniqueOrThrow({ where: { id: tripId }, select: { employeeId: true, vehicleId: true } });
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-employee:${original.employeeId}`}))::text AS employee_lock, pg_advisory_xact_lock(hashtext(${`fleet-vehicle:${original.vehicleId}`}))::text AS vehicle_lock`;
+  return tx.trip.findUniqueOrThrow({ where: { id: tripId } });
+}
 
 export async function GET(request: Request) {
   await expireStaleReservations();
@@ -766,9 +774,12 @@ export async function POST(request: Request) {
         await tx.auditLog.create({ data: { operationId, ...auditActor, action: "返却取消", targetType: "Trip", targetId: trip.id, description: `${trip.vehicle.name}の返却を取り消して利用中へ復元` } });
       });
     }
+    if (input.action === "setReservationStart" || input.action === "correctActualStart") {
+      await updateTripStart(input, operationId, auditActor);
+    }
     if (input.action === "moveTrip") {
       await prisma.$transaction(async (tx) => {
-        const trip = await tx.trip.findUniqueOrThrow({ where: { id: input.tripId } });
+        const trip = await lockTripForTimeChange(tx, input.tripId);
         if (trip.status !== "RESERVED") throw new Error("ドラッグで移動できるのは予約だけです");
         const plannedStart = new Date(input.plannedStart);
         const plannedEnd = new Date(input.plannedEnd);
@@ -789,7 +800,7 @@ export async function POST(request: Request) {
     }
     if (input.action === "adjustTrip") {
       await prisma.$transaction(async (tx) => {
-        const trip = await tx.trip.findUniqueOrThrow({ where: { id: input.tripId } });
+        const trip = await lockTripForTimeChange(tx, input.tripId);
         if (trip.status !== "RESERVED" && trip.status !== "IN_USE") throw new Error("完了・取消済みの予定時間は変更できません");
         const newEnd = new Date(trip.plannedEnd.getTime() + input.minutes * 60_000);
         const minimumEnd = new Date(trip.plannedStart.getTime() + 15 * 60_000);
@@ -816,7 +827,7 @@ export async function POST(request: Request) {
     }
     if (input.action === "setTripEnd") {
       await prisma.$transaction(async (tx) => {
-        const trip = await tx.trip.findUniqueOrThrow({ where: { id: input.tripId } });
+        const trip = await lockTripForTimeChange(tx, input.tripId);
         if (trip.status !== "RESERVED" && trip.status !== "IN_USE") throw new Error("完了・取消済みの予定時間は変更できません");
         const newEnd = new Date(input.plannedEnd);
         const minimumEnd = new Date(trip.plannedStart.getTime() + 15 * 60_000);

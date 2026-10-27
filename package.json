@@ -23,6 +23,8 @@
     "test:scanner-setup": "tsx tests/scanner-setup.test.ts",
     "test:parking-reservations": "tsx tests/parking-reservations.test.tsx",
     "test:departure-guidance": "tsx tests/departure-guidance.test.tsx",
+    "test:trip-times": "tsx tests/trip-times.test.tsx",
+    "test:integration:trip-times": "tsx tests/integration/trip-start-times.ts",
     "db:migrate:employee-numbers": "node scripts/migrations/migrate-employee-numbers.mjs",
     "db:migrate:employee-normalization": "node scripts/migrations/migrate-employee-normalization.mjs",
     "db:migrate:unified-nfc": "node scripts/migrations/migrate-unified-nfc-assignments.mjs",
