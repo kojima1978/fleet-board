@@ -36,7 +36,7 @@ export function DepartmentSettings({ data, mutate }: { data: DashboardData; muta
     if (await run("new", { action: "createDepartment", name: normalizedNewName }, `部署「${normalizedNewName}」を追加しました`)) setNewName("");
   };
 
-  return <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
+  return <div data-kiosk-auto-home-blocked={busyId !== null || newName !== ""} className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
     <div className="min-w-0 space-y-3">
       <Card className="overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-slate-100 px-4 py-2.5"><h3 className="text-sm font-black">利用中の部署<span className="ml-1.5 text-xs font-bold text-slate-400">{active.length}件</span></h3><span className="text-xs text-slate-500">この順に社員画面の選択肢へ並びます</span></div>
@@ -96,7 +96,7 @@ function DepartmentRow({ department, departments, order, first, last, busy, edit
   const members = department.employeeCount;
 
   // 利用停止は誤操作を防ぐため編集中だけ出す。一覧では並び替えと編集に絞る。
-  return <li className={cn("px-4 py-2.5", editing && "bg-blue-50/40")}>
+  return <li data-kiosk-auto-home-blocked={editing || busy} className={cn("px-4 py-2.5", editing && "bg-blue-50/40")}>
     {editing ? <form onSubmit={save} className="space-y-2">
       <div className="flex flex-wrap items-start gap-2">
         <div className="min-w-0 flex-1 basis-56 md:max-w-sm">

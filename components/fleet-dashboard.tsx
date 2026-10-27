@@ -332,7 +332,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   };
   // 各自のPCでは入力途中の画面も利用者も残す。リセットするのは入口の共用端末だけ。
   const idleWarningSeconds = useKioskIdle({
-    enabled: kiosk && nfcListening,
+    enabled: kiosk && view === "parking" && dialog === null && !pendingAction,
     onReset: () => {
       resetKioskSession();
       if (window.location.pathname !== "/") window.location.assign("/?idle=1");
@@ -342,7 +342,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   // 入口の共用端末では、認証した利用者を操作が途切れたら（初期値3分、端末ごとに変更可）解除し、次の人が前の人のまま操作しないようにする。
   const userTimeoutMinutes = useUserTimeoutMinutes();
   const userRemainingSeconds = useKioskUserTimeout({
-    enabled: kiosk && nfcListening && employee !== null,
+    enabled: kiosk && view === "parking" && employee !== null && dialog === null && !pendingAction,
     timeoutMs: userTimeoutMinutes * 60_000,
     resetKey: `${employee?.id ?? ""}:${authenticatedAt}`,
     onTimeout: () => {
@@ -468,7 +468,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   };
   return (
     <div className="min-h-screen bg-[#f4f7fb] text-slate-900">
-      <AppHeader view={view} actions={<>
+      <AppHeader view={view} kiosk={kiosk} autoHomeBlocked={dialog !== null || pendingAction} actions={<>
             <HeaderSystemStatus syncState={syncState} lastSuccessfulSync={lastSuccessfulSync} nfcStatus={nfcHealth} qrStatus={qrHealth} />
             <HeaderDeviceMode nfcStatus={scannerHealth} />
             <HeaderUserControl nfcStatus={scannerHealth} nfcListening={nfcListening} employeeName={employee?.name ?? null} remainingSeconds={userRemainingSeconds} onPick={() => setDialog("user")} onClear={clearEmployee} />

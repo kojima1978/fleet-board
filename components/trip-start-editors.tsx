@@ -31,7 +31,7 @@ export function ActualStartEditor({ trip, busy, actorAvailable, onSave }: { trip
   let message = "";
   try { validateActualStart({ ...trip, actualStart: new Date(trip.actualStart), actualEnd: trip.actualEnd ? new Date(trip.actualEnd) : null }, start, reason, new Date()); } catch (error) { message = (error as Error).message; }
   if (!message && value === localInput(trip.actualStart)) message = "変更後の開始時刻を指定してください";
-  return <details className="rounded-xl border border-slate-200 p-3">
+  return <details data-kiosk-auto-home-blocked={busy || confirm || reason !== "" || value !== localInput(trip.actualStart)} className="rounded-xl border border-slate-200 p-3">
     <summary className="min-h-9 cursor-pointer text-xs font-bold text-slate-600">その他：利用開始時刻を訂正</summary>
     <p className="mt-2 text-xs text-slate-600">予約日時・返却予定・駐車位置は変更せず、実際の開始時刻だけ訂正します。変更前後・理由・操作者を履歴に残します。</p>
     <p className="mt-2 text-xs font-bold">現在の開始：{display(trip.actualStart)}</p>

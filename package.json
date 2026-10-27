@@ -20,6 +20,7 @@
     "test:operation-id": "tsx tests/operation-id.test.ts",
     "test:development-origins": "tsx tests/development-origins.test.ts",
     "test:scanner-monitoring": "tsx tests/scanner-monitoring.test.ts",
+    "test:kiosk-auto-home": "tsx tests/kiosk-auto-home.test.ts",
     "test:scanner-setup": "tsx tests/scanner-setup.test.ts",
     "test:parking-reservations": "tsx tests/parking-reservations.test.tsx",
     "test:parking-appearance": "tsx tests/parking-appearance.test.ts",

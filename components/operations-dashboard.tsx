@@ -76,7 +76,7 @@ export function OperationsDashboard() {
     anchor.click();
   };
   return <div className="min-h-screen bg-[#f4f7fb] text-slate-900">
-    <AppHeader view="operations" actions={<>
+    <AppHeader view="operations" kiosk={kiosk} actions={<>
       <HeaderSystemStatus syncState={syncState} lastSuccessfulSync={lastSuccessfulSync} nfcStatus={nfcHealth} qrStatus={qrHealth} />
       <HeaderDeviceMode nfcStatus={scannerHealth} />
       <HeaderUserControl nfcStatus={scannerHealth} nfcListening={false} employeeName={employeeName} onPick={() => window.location.assign("/?user=1")} onClear={clearEmployee} />

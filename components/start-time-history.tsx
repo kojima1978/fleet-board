@@ -48,7 +48,7 @@ export function StartTimeHistory({ onSaved }: { onSaved: () => void }) {
     } catch (failure) { setError((failure as Error).name === "AbortError" ? "応答を確認できませんでした。同じ内容で再試行できます。" : (failure as Error).message); return false; }
     finally { window.clearTimeout(timeout); setBusy(false); }
   }
-  return <section className="mt-3 rounded-xl border border-slate-200 bg-white p-4">
+  return <section data-kiosk-auto-home-blocked={busy} className="mt-3 rounded-xl border border-slate-200 bg-white p-4">
     <h3 className="text-sm font-black">利用開始時刻の訂正（利用中・返却済み）</h3>
     <div className="mt-3 flex gap-2"><input aria-label="訂正する利用記録を検索" placeholder="車両名・利用者名" value={query} onChange={(event) => setQuery(event.target.value)} className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-200 px-3 text-sm" /><Button disabled={busy || loading} onClick={() => void load(query, 1)}>検索</Button></div>
     {error ? <p role="alert" className="mt-3 text-sm font-bold text-rose-700">{error}</p> : null}
