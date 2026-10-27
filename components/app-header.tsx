@@ -8,6 +8,7 @@ import type { NfcBridgeStatus, QrBridgeStatus } from "@/lib/use-nfc-bridge";
 import { isKioskDevice, setDeviceMode, setIdleTrafficEnabled, setNfcSoundEnabled, setUserTimeoutMinutes, useDeviceMode, useIdleTrafficEnabled, useNfcSoundEnabled, USER_TIMEOUT_CHOICES, useUserTimeoutMinutes, type DeviceMode } from "@/lib/device-mode";
 import { playNfcSound } from "@/lib/nfc-sound";
 import { cn } from "./ui";
+import { KioskAutoHome } from "./kiosk-auto-home";
 
 export type AppView = "parking" | "timeline" | "settingsEmployees" | "settingsDepartments" | "settingsVehicles" | "settingsSpots" | "settingsData" | "settingsSystem" | "settingsScanner" | "settingsEmergency" | "operations";
 export type HeaderSyncState = "loading" | "healthy" | "stale";
@@ -16,8 +17,8 @@ const jpTimeSeconds = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo",
 const jpClockDate = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", month: "long", day: "numeric", weekday: "short" });
 const jpClockTime = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false });
 
-export function AppHeader({ view, actions }: { view: AppView; actions?: ReactNode }) {
-  return <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
+export function AppHeader({ view, actions, kiosk = false, autoHomeBlocked = false }: { view: AppView; actions?: ReactNode; kiosk?: boolean; autoHomeBlocked?: boolean }) {
+  return <><KioskAutoHome key={view} enabled={kiosk && view !== "parking"} blocked={autoHomeBlocked} /><header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
     <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-3 px-4 py-3 md:px-8 2xl:gap-5">
       <div className="flex min-w-0 items-center gap-3">
         <div className="grid size-11 place-items-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-200"><CarFront /></div>
@@ -26,7 +27,7 @@ export function AppHeader({ view, actions }: { view: AppView; actions?: ReactNod
       <Navigation view={view} className="hidden md:flex" />
       {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
     </div>
-  </header>;
+  </header></>;
 }
 
 // どの画面でも今日の日付と現在時刻が分かるよう、ロゴの下に出す。分の切り替わりに遅れないよう10秒ごとに更新する。

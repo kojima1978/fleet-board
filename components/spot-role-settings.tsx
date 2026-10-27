@@ -116,7 +116,7 @@ function SpotEditor({ spot, spots, vehicles, mutate }: { spot: ParkingSpot; spot
   };
   // 番号は返却先や印刷にも出るため、変えるときだけ保存前に確認する。
   const requestSave = () => { if (!changed || !valid || saving) return; if (codeChanged) setConfirming(true); else void save(); };
-  return <div className="mt-4 space-y-3">
+  return <div data-kiosk-auto-home-blocked={changed || saving} className="mt-4 space-y-3">
     <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-600">区画番号</span>
       <input aria-label={`区画 ${spot.code}の番号`} disabled={saving} value={code} maxLength={20} onChange={(event) => setCode(event.target.value)} className={cn(field, codeError && "border-rose-300")} />
       {codeError ? <span className="mt-1 block text-[11px] font-bold text-rose-600">{codeError}</span> : <span className="mt-1 block text-[11px] text-slate-400">過去の利用履歴は、変更前の番号のまま残ります</span>}

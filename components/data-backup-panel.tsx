@@ -77,7 +77,7 @@ export function DataBackupPanel() {
   };
 
   const busy = status !== "idle";
-  return <div className="grid gap-5 xl:grid-cols-2">
+  return <div data-kiosk-auto-home-blocked={busy || summary !== null} className="grid gap-5 xl:grid-cols-2">
     <Card className="p-5">
       <span className="grid size-12 place-items-center rounded-2xl bg-blue-50 text-blue-700"><DatabaseBackup className="size-6" /></span>
       <h3 className="mt-4 text-lg font-black">JSON一括書き出し</h3>
