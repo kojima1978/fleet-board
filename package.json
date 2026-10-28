@@ -21,6 +21,8 @@
     "test:development-origins": "tsx tests/development-origins.test.ts",
     "test:scanner-monitoring": "tsx tests/scanner-monitoring.test.ts",
     "test:kiosk-auto-home": "tsx tests/kiosk-auto-home.test.ts",
+    "test:vehicle-history": "tsx tests/vehicle-history.test.ts",
+    "test:integration:vehicle-history": "tsx tests/integration/vehicle-history.ts",
     "test:scanner-setup": "tsx tests/scanner-setup.test.ts",
     "test:parking-reservations": "tsx tests/parking-reservations.test.tsx",
     "test:parking-appearance": "tsx tests/parking-appearance.test.ts",

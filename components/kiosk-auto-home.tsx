@@ -18,7 +18,7 @@ export function KioskAutoHome({ enabled, blocked = false }: { enabled: boolean; 
     const value = (input: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) => input instanceof HTMLInputElement && ["checkbox", "radio"].includes(input.type) ? String(input.checked) : input.value;
     const remember = (event: Event) => {
       const input = control(event.target);
-      if (input?.closest("form") && !originals.has(input)) originals.set(input, value(input));
+      if (input?.closest("form:not([data-kiosk-filter-form])") && !originals.has(input)) originals.set(input, value(input));
     };
     const protectedNow = () => {
       if (blockedRef.current || document.querySelector('[role="dialog"], [role="alertdialog"], dialog[open], [data-kiosk-auto-home-blocked="true"]')) return true;

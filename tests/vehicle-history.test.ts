@@ -1,0 +1,21 @@
+import assert from "node:assert/strict";
+import { vehicleHistoryPeriod, vehicleHistoryQuery } from "../lib/vehicle-history";
+
+const now = new Date("2026-10-28T03:00:00Z");
+const query = (value: string) => vehicleHistoryQuery(new URLSearchParams(value), now);
+const range = query("vehicleId=v1&from=2026-10-27T23:00&to=2026-10-28T01:00&q=山田");
+assert.equal(range.where.vehicleId, "v1");
+assert.deepEqual(range.where.actualStart, { not: null, lte: new Date("2026-10-27T16:00:00Z") });
+assert.deepEqual(range.where.OR, [{ actualEnd: { gt: new Date("2026-10-27T14:00:00Z") } }, { status: "IN_USE", actualEnd: null }]);
+assert.deepEqual(query("").where.status, { in: ["IN_USE", "COMPLETED"] });
+assert.deepEqual(query("from=2026-10-29T10:00").where.OR, [{ actualEnd: { gt: new Date("2026-10-29T01:00:00Z") } }]);
+assert.deepEqual(query("to=2026-10-29T10:00").where.actualStart, { not: null, lte: now });
+assert.doesNotThrow(() => query("from=2026-10-28T10:00&to=2026-10-28T10:00"));
+for (const value of ["from=2026-02-30T10:00", "from=2026-10-28T25:00", "from=2026-10-28", "from=bad", "from=2026-10-29T10:00&to=2026-10-28T10:00"]) assert.throws(() => query(value));
+assert.equal(query("page=-1").page, 1);
+assert.equal(query("page=99999999").page, 10_000);
+assert.deepEqual(vehicleHistoryPeriod(1, new Date("2026-03-31T16:20:00Z")), { from: "2026-03-01T01:20", to: "2026-04-01T01:20" });
+assert.deepEqual(vehicleHistoryPeriod(1, new Date("2026-03-31T03:20:00Z")), { from: "2026-02-28T12:20", to: "2026-03-31T12:20" });
+assert.deepEqual(vehicleHistoryPeriod(1, new Date("2024-03-31T03:20:00Z")), { from: "2024-02-29T12:20", to: "2024-03-31T12:20" });
+assert.deepEqual(vehicleHistoryPeriod(3, new Date("2026-01-31T03:20:00Z")), { from: "2025-10-31T12:20", to: "2026-01-31T12:20" });
+console.log("Vehicle history filters passed: JST, midnight, exact moment, future, invalid ranges and pagination");
