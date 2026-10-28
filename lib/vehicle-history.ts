@@ -3,7 +3,9 @@ import type { Prisma } from "@/prisma/generated/client";
 export type VehicleHistoryVehicle = { id: string; name: string; plateNumber: string; active: boolean; vehicleNumber: { code: string } };
 export type VehicleHistoryData = {
   records: { id: string; status: "IN_USE" | "COMPLETED"; actualStart: string; actualEnd: string | null; plannedEnd: string;
-    vehicle: VehicleHistoryVehicle; employee: { name: string; employeeNumber: { code: string } } }[];
+    snapshotCapturedAt: string | null; employeeNameAtStart: string | null; employeeCodeAtStart: string | null; departmentNameAtStart: string | null;
+    vehicleNameAtStart: string | null; vehicleCodeAtStart: string | null; plateNumberAtStart: string | null;
+    vehicle: VehicleHistoryVehicle; employee: { name: string; employeeNumber: { code: string }; department: { name: string } } }[];
   vehicles: VehicleHistoryVehicle[];
   pagination: { page: number; pageCount: number; total: number };
 };
@@ -39,7 +41,10 @@ export function vehicleHistoryQuery(params: URLSearchParams, now = new Date()) {
     status: { in: ["IN_USE", "COMPLETED"] },
     actualStart: { not: null, lte: to && to < now ? to : now },
     ...(vehicleId ? { vehicleId } : {}),
-    ...(q ? { employee: { name: { contains: q, mode: "insensitive" } } } : {}),
+    ...(q ? { AND: [{ OR: [
+      { employeeNameAtStart: { contains: q, mode: "insensitive" } },
+      { employee: { name: { contains: q, mode: "insensitive" } } },
+    ] }] } : {}),
     ...(from ? { OR: [
       { actualEnd: { gt: from } },
       ...(from <= now ? [{ status: "IN_USE" as const, actualEnd: null }] : []),

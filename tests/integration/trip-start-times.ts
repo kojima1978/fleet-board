@@ -39,7 +39,7 @@ try {
   const maintenance = await prisma.vehicleMaintenance.create({ data: { vehicleId: car.id, kind: "ON_SITE", status: "SCHEDULED", plannedStart: at(70), plannedEnd: at(85) } });
   const maintenanceResult = await post({ ...reservedBody, version: 2, plannedStart: at(75).toISOString() });
   assert.equal(maintenanceResult.status, 400); assert.match(maintenanceResult.result.message, /整備/);
-  await prisma.vehicleMaintenance.update({ where: { id: maintenance.id }, data: { status: "COMPLETED" } });
+  await prisma.vehicleMaintenance.update({ where: { id: maintenance.id }, data: { status: "CANCELLED" } });
   await prisma.trip.create({ data: { employeeId: user2.id, vehicleId: car.id, plannedStart: at(45), plannedEnd: at(80) } });
   assert.equal((await post({ ...reservedBody, version: 2, plannedStart: at(60).toISOString() })).status, 400, "別の予約と重なる変更を拒否");
 

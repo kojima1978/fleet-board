@@ -6,6 +6,7 @@ import { FUEL_LEVEL_MAX } from "@/lib/fuel-level";
 import { upgradeLegacyCodes } from "@/lib/record-codes";
 import { defaultSpotRoles } from "@/prisma/parking-spot-seed";
 import { createQrToken } from "@/lib/qr-code";
+import { validateBackupIntegrity } from "@/lib/backup-integrity";
 
 export const JSON_BACKUP_FORMAT_VERSION = 1;
 export const JSON_BACKUP_MAX_BYTES = 50 * 1024 * 1024;
@@ -21,10 +22,19 @@ const parkingSpotSchema = z.object({ id, code: z.string().min(1).max(100), x: z.
 const nfcTagSchema = z.object({ id, uid: z.string().min(1).max(100), createdAt: dateTime, updatedAt: dateTime }).strict();
 const employeeSchema = z.object({ id, employeeNumberId: id, departmentId: id, name: z.string().min(1).max(100), email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()).nullable().optional(), qrToken: z.string().min(16).max(100).optional(), active: z.boolean(), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
 const fuelLevelSchema = z.number().int().min(0).max(FUEL_LEVEL_MAX).nullable().optional();
+const snapshotSchema = {
+  snapshotCapturedAt: nullableDateTime.default(null),
+  employeeNameAtStart: z.string().min(1).max(100).nullable().default(null),
+  employeeCodeAtStart: z.string().min(1).max(100).nullable().default(null),
+  departmentNameAtStart: z.string().min(1).max(100).nullable().default(null),
+  vehicleNameAtStart: z.string().min(1).max(100).nullable().default(null),
+  vehicleCodeAtStart: z.string().min(1).max(100).nullable().default(null),
+  plateNumberAtStart: z.string().min(1).max(100).nullable().default(null),
+};
 const vehicleSchema = z.object({ id, vehicleNumberId: id, name: z.string().min(1).max(100), qrToken: z.string().min(16).max(100).optional(), plateNumber: z.string().min(1).max(100), color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean(), hasNavigation: z.boolean(), fuelLevel: fuelLevelSchema, active: z.boolean(), status: z.enum(["AVAILABLE", "RESERVED", "IN_USE", "MAINTENANCE"]), parkingSpotId: id.nullable(), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
 // clearedを追加する前のバックアップにはないため、UIDを消して外していない割り当てとして読む。
 const nfcAssignmentSchema = z.object({ id, employeeId: id.nullable(), vehicleId: id.nullable(), nfcTagId: id, validFrom: dateTime, validTo: nullableDateTime, cleared: z.boolean().default(false), createdAt: dateTime }).strict();
-const tripSchema = z.object({ id, employeeId: id, vehicleId: id, plannedStart: dateTime, plannedEnd: dateTime, actualStart: nullableDateTime, actualEnd: nullableDateTime, returnSpotCode: z.string().max(100).nullable(), returnFuelLevel: fuelLevelSchema, previousFuelLevel: fuelLevelSchema, purpose: z.string().max(500).nullable(), status: z.enum(["RESERVED", "IN_USE", "COMPLETED", "CANCELLED"]), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
+const tripSchema = z.object({ id, employeeId: id, vehicleId: id, plannedStart: dateTime, plannedEnd: dateTime, actualStart: nullableDateTime, actualEnd: nullableDateTime, ...snapshotSchema, returnSpotCode: z.string().max(100).nullable(), returnFuelLevel: fuelLevelSchema, previousFuelLevel: fuelLevelSchema, purpose: z.string().max(500).nullable(), status: z.enum(["RESERVED", "IN_USE", "COMPLETED", "CANCELLED"]), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
 const vehicleMaintenanceSchema = z.object({ id, vehicleId: id, kind: z.enum(["ON_SITE", "OFF_SITE"]), status: z.enum(["SCHEDULED", "ACTIVE", "COMPLETED", "CANCELLED"]), note: z.string().max(500).nullable(), plannedStart: dateTime, plannedEnd: nullableDateTime, actualStart: nullableDateTime, actualEnd: nullableDateTime, returnSpotCode: z.string().max(100).nullable(), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
 const auditLogSchema = z.object({ id, operationId: z.string().max(100).nullable(), actorEmployeeId: id.nullable(), actorName: z.string().max(100), action: z.string().max(100), targetType: z.string().max(100), targetId: z.string().max(100), description: z.string().max(1000), createdAt: dateTime }).strict();
 
@@ -157,6 +167,9 @@ export function parseFleetBackup(value: unknown): FleetBackup {
   }
   for (const maintenance of data.vehicleMaintenances) assertReference(vehicleIds, maintenance.vehicleId, "整備記録の車両");
   for (const log of data.auditLogs) assertReference(employeeIds, log.actorEmployeeId, "操作履歴の社員");
+  data.parkingSpots = data.parkingSpots.map((item) => ({ ...item, ...(item.role === undefined ? legacySpotRole(item.code, data) : {}) }));
+  try { validateBackupIntegrity(data); }
+  catch (error) { throw new FleetBackupValidationError((error as Error).message); }
   return backup;
 }
 
@@ -223,7 +236,7 @@ export async function restoreFleetBackup(backup: FleetBackup) {
     if (data.employees.length) await tx.employee.createMany({ data: data.employees.map((item) => ({ ...item, qrToken: item.qrToken!, createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
     if (data.vehicles.length) await tx.vehicle.createMany({ data: data.vehicles.map((item) => ({ ...item, qrToken: item.qrToken!, createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
     if (data.nfcAssignments.length) await tx.nfcAssignment.createMany({ data: data.nfcAssignments.map((item) => ({ ...item, validFrom: asDate(item.validFrom), validTo: asNullableDate(item.validTo), createdAt: asDate(item.createdAt) })) });
-    if (data.trips.length) await tx.trip.createMany({ data: data.trips.map((item) => ({ ...item, plannedStart: asDate(item.plannedStart), plannedEnd: asDate(item.plannedEnd), actualStart: asNullableDate(item.actualStart), actualEnd: asNullableDate(item.actualEnd), createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
+    if (data.trips.length) await tx.trip.createMany({ data: data.trips.map((item) => ({ ...item, plannedStart: asDate(item.plannedStart), plannedEnd: asDate(item.plannedEnd), actualStart: asNullableDate(item.actualStart), actualEnd: asNullableDate(item.actualEnd), snapshotCapturedAt: asNullableDate(item.snapshotCapturedAt), createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
     if (data.vehicleMaintenances.length) await tx.vehicleMaintenance.createMany({ data: data.vehicleMaintenances.map((item) => ({ ...item, plannedStart: asDate(item.plannedStart), plannedEnd: asNullableDate(item.plannedEnd), actualStart: asNullableDate(item.actualStart), actualEnd: asNullableDate(item.actualEnd), createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
     if (data.auditLogs.length) await tx.auditLog.createMany({ data: data.auditLogs.map((item) => ({ ...item, createdAt: asDate(item.createdAt) })) });
     await tx.auditLog.create({ data: { operationId: randomUUID(), actorName: "設定画面", action: "JSON一括復元", targetType: "System", targetId: backup.exportedAt, description: `${backup.exportedAt}に書き出したJSONバックアップを復元` } });

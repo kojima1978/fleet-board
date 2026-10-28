@@ -19,7 +19,9 @@ export async function GET(request: Request) {
   const [records, total, vehicles] = await Promise.all([
     prisma.trip.findMany({ where, orderBy: [{ actualStart: "desc" }, { id: "asc" }], skip: (page - 1) * pageSize, take: pageSize,
       select: { id: true, status: true, actualStart: true, actualEnd: true, plannedEnd: true,
-        vehicle: { select: vehicleSelect }, employee: { select: { name: true, employeeNumber: { select: { code: true } } } } },
+        snapshotCapturedAt: true, employeeNameAtStart: true, employeeCodeAtStart: true, departmentNameAtStart: true,
+        vehicleNameAtStart: true, vehicleCodeAtStart: true, plateNumberAtStart: true,
+        vehicle: { select: vehicleSelect }, employee: { select: { name: true, employeeNumber: { select: { code: true } }, department: { select: { name: true } } } } },
     }),
     prisma.trip.count({ where }),
     // Inactive vehicles remain searchable for past trips.
