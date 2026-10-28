@@ -100,6 +100,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   const [dialog, setDialog] = useState<Dialog>(null);
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
+  const [parkingVehicleId, setParkingVehicleId] = useState<string | null>(null);
   const [returnTrip, setReturnTrip] = useState<Trip | null>(null);
   // 駐車場画面で利用中の車両タグをかざしたとき、配置図で返却先を選ぶよう伝える。nonceで同じ車両の再タッチも拾う。
   const [mapReturnRequest, setMapReturnRequest] = useState<{ tripId: string; nonce: number } | null>(null);
@@ -496,7 +497,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
             <div aria-hidden className="hidden flex-1 basis-0 md:block" />
           </div>
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_240px]">
-            <ParkingMap data={data} trips={activeTrips} changedVehicleIds={changedVehicleIds} mutate={mutate} openStart={openStart} openReturn={openParkingReturn} openFuel={openFuel} openEdit={openEdit} openEnd={openEnd} actorName={employee?.name ?? "共用端末"} currentEmployeeId={employee?.id ?? null} returnRequest={mapReturnRequest} />
+            <ParkingMap selectedVehicleId={parkingVehicleId} setSelectedVehicleId={setParkingVehicleId} data={data} trips={activeTrips} changedVehicleIds={changedVehicleIds} mutate={mutate} openStart={openStart} openReturn={openParkingReturn} openFuel={openFuel} openEdit={openEdit} openEnd={openEnd} actorName={employee?.name ?? "共用端末"} currentEmployeeId={employee?.id ?? null} returnRequest={mapReturnRequest} />
           </div>
         </section> : null}
 
@@ -521,7 +522,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
 
       {dialog === "nfc" && <NfcDialog employees={activeEmployees} vehicles={activeVehicles} onEmployee={(person) => { authenticateEmployee(person); setDialog(null); }} onVehicle={(vehicle) => { setDialog(null); openVehicleFromNfc(vehicle); }} onClose={() => setDialog(null)} />}
       {dialog === "user" && <UserPickerDialog employees={activeEmployees} currentId={employee?.id ?? null} nfcEnabled={nfcAvailable} onSelect={(person) => { authenticateEmployee(person); setDialog(null); }} onClose={() => setDialog(null)} />}
-      {dialog === "start" && <StartDialog kiosk={kiosk} submitting={pendingAction} employees={activeEmployees} vehicles={available} trips={data.trips} initialEmployee={employee?.active ? employee : null} initialVehicleId={selectedVehicleId} onClose={() => setDialog(null)} onSubmit={async (values) => { const identifiedEmployee = activeEmployees.find((person) => person.id === values.employeeId) ?? null; const scheduled = values.plannedStart !== null; const ok = await mutate(scheduled ? { action: "reserve", employeeId: values.employeeId, vehicleId: values.vehicleId, plannedStart: values.plannedStart!, minutes: values.minutes, actorName: values.employeeName, actorEmployeeId: values.employeeId } : { action: "start", employeeId: values.employeeId, vehicleId: values.vehicleId, minutes: values.minutes, actorName: values.employeeName, actorEmployeeId: values.employeeId }, scheduled ? "予約を登録しました" : "利用を開始しました"); if (ok && identifiedEmployee) { if (kiosk) finishKioskCheck(); else if (!employee) selectEmployee(identifiedEmployee); setDialog(null); if (!scheduled) window.location.assign(`/timeline?started=1&vehicleId=${encodeURIComponent(values.vehicleId)}&employeeId=${encodeURIComponent(values.employeeId)}`); } }} />}
+      {dialog === "start" && <StartDialog kiosk={kiosk} submitting={pendingAction} employees={activeEmployees} vehicles={available} trips={data.trips} initialEmployee={employee?.active ? employee : null} initialVehicleId={selectedVehicleId} onClose={() => setDialog(null)} onSubmit={async (values) => { const identifiedEmployee = activeEmployees.find((person) => person.id === values.employeeId) ?? null; const scheduled = values.plannedStart !== null; const ok = await mutate(scheduled ? { action: "reserve", employeeId: values.employeeId, vehicleId: values.vehicleId, plannedStart: values.plannedStart!, minutes: values.minutes, actorName: values.employeeName, actorEmployeeId: values.employeeId } : { action: "start", employeeId: values.employeeId, vehicleId: values.vehicleId, minutes: values.minutes, actorName: values.employeeName, actorEmployeeId: values.employeeId }, scheduled ? "予約を登録しました" : "利用を開始しました"); if (ok) { setParkingVehicleId(null); setDialog(null); } if (ok && identifiedEmployee) { if (kiosk) finishKioskCheck(); else if (!employee) selectEmployee(identifiedEmployee); if (!scheduled) window.location.assign(`/timeline?started=1&vehicleId=${encodeURIComponent(values.vehicleId)}&employeeId=${encodeURIComponent(values.employeeId)}`); } }} />}
       {dialog === "end" && returnTrip && <EndDialog submitting={pendingAction} trip={returnTrip} spots={data.spots} initialSpotId={returnSpotId} onChangeSpot={changeReturnSpot ? () => { setDialog(null); changeReturnSpot(); } : undefined} onClose={() => setDialog(null)} onSubmit={async (spotId, fuelLevel) => { const ok = await completeReturn(returnTrip, spotId, fuelLevel); if (ok) setDialog(null); }} />}
       {dialog === "parkingReturn" && returnSpot && <ParkingReturnDialog submitting={pendingAction} spot={returnSpot} trips={activeTrips} vehicles={data.vehicles} onClose={() => setDialog(null)} onSubmit={async (trip, fuelLevel) => { const ok = await completeReturn(trip, returnSpot.id, fuelLevel); if (ok) { setDialog(null); setReturnSpot(null); } }} />}
       {dialog === "fuel" && fuelVehicle && <FuelLevelDialog submitting={pendingAction} vehicle={fuelVehicle} onClose={() => setDialog(null)} onSubmit={async (fuelLevel) => { const ok = await mutate({ action: "setFuelLevel", vehicleId: fuelVehicle.id, version: fuelVehicle.version, fuelLevel, actorName: employee?.name ?? "共用端末" }, `${fuelVehicle.name}のガソリン残量を${formatFuelLevel(fuelLevel)}へ変更しました`); if (ok) setDialog(null); }} />}
@@ -908,7 +909,7 @@ function VehicleEquipmentBadges({ vehicle, compact = false }: { vehicle: Pick<Ve
   </span>;
 }
 
-function ParkingMap({ data, trips, changedVehicleIds, mutate, openStart, openReturn, openFuel, openEdit, openEnd, actorName, currentEmployeeId, returnRequest }: { data: DashboardData; trips: Trip[]; changedVehicleIds: string[]; mutate: (body: object, success: string) => Promise<boolean>; openStart: (vehicle?: Vehicle) => void; openReturn: (spot: ParkingSpot) => void; openFuel: (vehicle: Vehicle) => void; openEdit: (trip: Trip) => void; openEnd: (trip: Trip, spotId?: string, changeSpot?: () => void) => void; actorName: string; currentEmployeeId: string | null; returnRequest: { tripId: string; nonce: number } | null }) {
+function ParkingMap({ selectedVehicleId, setSelectedVehicleId, data, trips, changedVehicleIds, mutate, openStart, openReturn, openFuel, openEdit, openEnd, actorName, currentEmployeeId, returnRequest }: { selectedVehicleId: string | null; setSelectedVehicleId: React.Dispatch<React.SetStateAction<string | null>>; data: DashboardData; trips: Trip[]; changedVehicleIds: string[]; mutate: (body: object, success: string) => Promise<boolean>; openStart: (vehicle?: Vehicle) => void; openReturn: (spot: ParkingSpot) => void; openFuel: (vehicle: Vehicle) => void; openEdit: (trip: Trip) => void; openEnd: (trip: Trip, spotId?: string, changeSpot?: () => void) => void; actorName: string; currentEmployeeId: string | null; returnRequest: { tripId: string; nonce: number } | null }) {
   // 車両移動モードでドラッグ中、またはタップで選んだ移動元の車両。
   const [movingVehicleId, setMovingVehicleId] = useState<string | null>(null);
   const idleTrafficEnabled = useIdleTrafficEnabled();
@@ -941,7 +942,6 @@ function ParkingMap({ data, trips, changedVehicleIds, mutate, openStart, openRet
   }
   // 詳細欄の「位置変更」で車を選んでいる間だけ、車のドラッグと空き区画のタップで移動できる。
   const moveMode = movingVehicle !== null;
-  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const selectedSpot = selectedVehicleId ? data.spots.find((spot) => spot.vehicle?.id === selectedVehicleId) : undefined;
   const selectedVehicle = selectedSpot?.vehicle ?? null;
   // 選んだ時点の版を覚えておき、位置変更・残量変更などで車両が更新されたら詳細を閉じる。
