@@ -31,8 +31,10 @@ elif [ "$schema_state" != "empty" ]; then
   exit 1
 fi
 
-# Creates every table on a fresh database and reconciles an upgraded database.
-npm run db:push
+# Development and production now use the same versioned SQL, including checks,
+# partial indexes, deferred foreign keys and immutable history triggers.
+node scripts/production/prepare-migrations.mjs
+npm run db:migrate:deploy
 
 # Idempotent post-schema checks ensure indexes and normalized data exist.
 npm run db:migrate:employee-numbers

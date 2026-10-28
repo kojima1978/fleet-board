@@ -13,6 +13,7 @@ import { isRecordCode, normalizeRecordCode, recordCodeMessage } from "@/lib/reco
 import { formatMaintenanceTime, MAINTENANCE_KIND_SHORT_LABELS, MAINTENANCE_KINDS, MAINTENANCE_MAX_DAYS, MAINTENANCE_NOTE_MAX, MAINTENANCE_SCHEDULE_DAYS_AHEAD, maintenanceConflictMessage } from "@/lib/maintenance";
 import { createQrToken, qrPayload } from "@/lib/qr-code";
 import { updateTripStart } from "@/lib/trip-time-actions";
+import { captureTripStartSnapshot } from "@/lib/trip-snapshot";
 import type { Prisma } from "@/prisma/generated/client";
 
 export const dynamic = "force-dynamic";
@@ -701,10 +702,11 @@ export async function POST(request: Request) {
         if (employeeConflict) throw new Error(`${employee.name}さんは${employeeConflict.vehicle.name}を利用中または予約中です`);
         const updated = await tx.vehicle.updateMany({ where: { id: vehicle.id, version: vehicle.version }, data: { status: "IN_USE", parkingSpotId: null, version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
+        const snapshot = await captureTripStartSnapshot(tx, employee.id, vehicle.id, now);
         if (reservation) {
-          await tx.trip.update({ where: { id: reservation.id }, data: { status: "IN_USE", actualStart: now, version: { increment: 1 } } });
+          await tx.trip.update({ where: { id: reservation.id }, data: { status: "IN_USE", actualStart: now, ...snapshot, version: { increment: 1 } } });
         } else {
-          await tx.trip.create({ data: { employeeId: input.employeeId, vehicleId: input.vehicleId, plannedStart: now, plannedEnd, actualStart: now, status: "IN_USE", purpose: "" } });
+          await tx.trip.create({ data: { employeeId: input.employeeId, vehicleId: input.vehicleId, plannedStart: now, plannedEnd, actualStart: now, status: "IN_USE", purpose: "", ...snapshot } });
         }
         await tx.auditLog.create({ data: { operationId, ...auditActor, action: "利用開始", targetType: "Vehicle", targetId: input.vehicleId, description: reservation ? "予約から利用を開始" : `${input.minutes}分の利用を開始` } });
       });

@@ -21,6 +21,9 @@
     "test:development-origins": "tsx tests/development-origins.test.ts",
     "test:scanner-monitoring": "tsx tests/scanner-monitoring.test.ts",
     "test:kiosk-auto-home": "tsx tests/kiosk-auto-home.test.ts",
+    "test:vehicle-history": "tsx tests/vehicle-history.test.ts",
+    "test:integration:vehicle-history": "tsx tests/integration/vehicle-history.ts",
+    "test:integration:database-hardening": "tsx tests/integration/database-hardening.ts",
     "test:scanner-setup": "tsx tests/scanner-setup.test.ts",
     "test:parking-reservations": "tsx tests/parking-reservations.test.tsx",
     "test:parking-appearance": "tsx tests/parking-appearance.test.ts",
@@ -39,7 +42,6 @@
     "db:migrate:employee-emails": "node scripts/migrations/migrate-employee-emails.mjs",
     "nfc:build": "docker compose --profile tools run --rm nfc-bridge-build",
     "db:generate": "prisma generate",
-    "db:push": "prisma db push",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:production": "tsx prisma/seed-production.ts"
