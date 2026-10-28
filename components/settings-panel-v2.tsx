@@ -1630,8 +1630,10 @@ function QrPreviewDialog({
 }) {
   const [sending, setSending] = useState(false);
   const [confirmRotate, setConfirmRotate] = useState(false);
+  const [rotated, setRotated] = useState(false);
+  const [qrRevision, setQrRevision] = useState(0);
   const [message, setMessage] = useState("");
-  const imageUrl = `/api/qr/${owner.kind}/${encodeURIComponent(owner.id)}${owner.version === undefined ? "" : `?v=${owner.version}`}`;
+  const imageUrl = `/api/qr/${owner.kind}/${encodeURIComponent(owner.id)}?v=${owner.version ?? 0}-${qrRevision}`;
   const sendMail = async () => {
     setSending(true);
     setMessage("");
@@ -1645,11 +1647,16 @@ function QrPreviewDialog({
     }
   };
   const rotate = async () => {
-    if (owner.kind !== "employee" || owner.version === undefined) return;
+    if (owner.version === undefined || rotated) return;
     setSending(true);
     try {
-      const ok = await mutate({ action: "rotateEmployeeQr", id: owner.id, version: owner.version }, "社員QRを再発行し、旧QRを無効化しました");
-      if (ok) onClose();
+      const noun = owner.kind === "employee" ? "社員" : "車両";
+      const ok = await mutate({ action: owner.kind === "employee" ? "rotateEmployeeQr" : "rotateVehicleQr", id: owner.id, version: owner.version }, `${noun}QRを再発行し、旧QRを無効化しました`);
+      if (ok) {
+        setQrRevision(Date.now());
+        setConfirmRotate(false);
+        setRotated(true);
+      }
     } finally {
       setSending(false);
     }
@@ -1690,25 +1697,34 @@ function QrPreviewDialog({
                 {message}
               </p>
             ) : null}
-            {!confirmRotate ? (
-              <button type="button" disabled={sending} onClick={() => setConfirmRotate(true)} className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-rose-200 text-xs font-bold text-rose-700 hover:bg-rose-50">
-                <RotateCcw className="size-4" />
-                紛失・誤送信のため再発行
-              </button>
-            ) : (
-              <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3">
-                <p className="text-xs font-bold text-rose-800">旧QRは直ちに使えなくなります。再発行しますか？</p>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <Button variant="ghost" disabled={sending} onClick={() => setConfirmRotate(false)}>
-                    戻る
-                  </Button>
-                  <Button variant="danger" disabled={sending} onClick={() => void rotate()}>
-                    {sending ? "処理中…" : "再発行する"}
-                  </Button>
-                </div>
-              </div>
-            )}
           </div>
+        ) : null}
+        {rotated ? (
+          <div role="status" className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-left">
+            <p className="text-xs font-black text-emerald-800">新しいQRへ切り替わりました</p>
+            <p className="mt-1 text-xs leading-5 text-emerald-700">上のQRを保存・印刷して貼り替えてください。以前のQRは使用できません。</p>
+          </div>
+        ) : owner.version !== undefined ? (
+          <details className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 text-left">
+            <summary className="cursor-pointer px-4 py-3 text-xs font-bold text-slate-600">管理操作</summary>
+            <div className="border-t border-slate-200 p-3">
+              <p className="mb-3 text-xs leading-5 text-slate-500">紛失・破損・誤送信時だけ使用します。通常の表示・保存では再発行は不要です。</p>
+              {!confirmRotate ? (
+                <button type="button" disabled={sending} onClick={() => setConfirmRotate(true)} className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-white text-xs font-bold text-rose-700 hover:bg-rose-50">
+                  <RotateCcw className="size-4" />
+                  紛失・破損のため再発行
+                </button>
+              ) : (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 p-3">
+                  <p className="text-xs font-bold text-rose-800">旧QRは直ちに使えなくなります。貼付済み・配布済みのQRもすべて無効になります。</p>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <Button variant="ghost" disabled={sending} onClick={() => setConfirmRotate(false)}>戻る</Button>
+                    <Button variant="danger" disabled={sending} onClick={() => void rotate()}>{sending ? "処理中…" : "再発行する"}</Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </details>
         ) : null}
         <div className="mt-5 grid grid-cols-2 gap-2">
           <Button variant="ghost" onClick={onClose}>

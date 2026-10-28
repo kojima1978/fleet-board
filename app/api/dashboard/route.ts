@@ -110,6 +110,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("updateEmployee"), id: idSchema, version: z.number().int().nonnegative(), code: recordCodeSchema.optional(), name: z.string().trim().min(1).max(50), email: optionalEmailSchema, department: departmentNameSchema, nfcUid: optionalNfcUidSchema }),
   z.object({ action: z.literal("updateEmployeeNfc"), id: idSchema, version: z.number().int().nonnegative(), nfcUid: optionalNfcUidSchema }),
   z.object({ action: z.literal("rotateEmployeeQr"), id: idSchema, version: z.number().int().nonnegative() }),
+  z.object({ action: z.literal("rotateVehicleQr"), id: idSchema, version: z.number().int().nonnegative() }),
   z.object({ action: z.literal("updateVehicle"), id: idSchema, version: z.number().int().nonnegative(), code: recordCodeSchema.optional(), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().optional(), hasNavigation: z.boolean().optional() }),
   z.object({ action: z.literal("updateVehicleNfc"), id: idSchema, version: z.number().int().nonnegative(), nfcUid: optionalNfcUidSchema }),
   z.object({ action: z.literal("setEmployeeActive"), id: idSchema, version: z.number().int().nonnegative(), active: z.boolean() }),
@@ -425,6 +426,27 @@ export async function POST(request: Request) {
             targetType: "Employee",
             targetId: input.id,
             description: `${employee.name}のQRコードを再発行（旧QRを無効化）`,
+          },
+        });
+      });
+    }
+    if (input.action === "rotateVehicleQr") {
+      await prisma.$transaction(async (tx) => {
+        const vehicle = await tx.vehicle.findUniqueOrThrow({ where: { id: input.id }, select: { name: true, active: true } });
+        if (!vehicle.active) throw new Error("利用停止中の車両QRは再発行できません");
+        const updated = await tx.vehicle.updateMany({
+          where: { id: input.id, version: input.version, active: true },
+          data: { qrToken: createQrToken(), version: { increment: 1 } },
+        });
+        if (updated.count !== 1) throw new Error("CONFLICT");
+        await tx.auditLog.create({
+          data: {
+            operationId,
+            actorName: "設定画面",
+            action: "車両QR再発行",
+            targetType: "Vehicle",
+            targetId: input.id,
+            description: `${vehicle.name}のQRコードを再発行（旧QRを無効化）`,
           },
         });
       });
@@ -1049,7 +1071,7 @@ export async function POST(request: Request) {
       const completed = await prisma.auditLog.findUnique({ where: { operationId }, select: { id: true } });
       if (completed) return NextResponse.json({ ok: true, replayed: true });
     }
-    const employeeAction = input.action === "createEmployee" || input.action === "updateEmployee" || input.action === "rotateEmployeeQr" || input.action === "importEmployees";
+    const employeeAction = input.action === "createEmployee" || input.action === "updateEmployee" || input.action === "updateEmployeeNfc" || input.action === "rotateEmployeeQr" || input.action === "importEmployees";
     const departmentAction = input.action === "createDepartment" || input.action === "renameDepartment";
     const duplicateMessage = departmentAction ? "同じ名前の部署がすでに登録されています" : employeeAction ? "社員番号・メールアドレス・NFC UIDのいずれかがすでに登録されています" : "車両番号・ナンバー・NFC UIDのいずれかがすでに登録されています";
     const rawMessage = error instanceof Error ? error.message : "";

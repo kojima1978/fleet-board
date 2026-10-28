@@ -52,6 +52,24 @@ assert.notEqual(rotatedEmployee.qrCode, previousQr, "再発行でQR識別子が�
 assert.equal((await resolve(previousQr)).response.status, 404, "旧QRは再発行後に無効になる");
 assert.equal((await resolve(rotatedEmployee.qrCode)).response.status, 200, "新QRは再発行後に利用できる");
 
+const vehicle = rotatedDashboard.vehicles.find((item) => item.active);
+assert.ok(vehicle, "QR再発行を確認できる有効な車両がいる");
+const previousVehicleQr = vehicle.qrCode;
+const rotateVehicleResponse = await fetch(`${appUrl}/api/dashboard`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json", Origin: origin },
+  body: JSON.stringify({ operationId: crypto.randomUUID(), action: "rotateVehicleQr", id: vehicle.id, version: vehicle.version }),
+});
+assert.equal(rotateVehicleResponse.status, 200, await rotateVehicleResponse.text());
+const vehicleDashboardResponse = await fetch(`${appUrl}/api/dashboard`);
+assert.equal(vehicleDashboardResponse.status, 200);
+const vehicleDashboard = await vehicleDashboardResponse.json();
+const rotatedVehicle = vehicleDashboard.vehicles.find((item) => item.id === vehicle.id);
+assert.ok(rotatedVehicle);
+assert.notEqual(rotatedVehicle.qrCode, previousVehicleQr, "車両QR再発行で識別子が変わる");
+assert.equal((await resolve(previousVehicleQr)).response.status, 404, "車両の旧QRは再発行後に無効になる");
+assert.equal((await resolve(rotatedVehicle.qrCode)).response.status, 200, "車両の新QRは再発行後に利用できる");
+
 const mailStatus = await fetch(`${appUrl}/api/qr/email`);
 assert.equal(mailStatus.status, 200);
 const mailConfiguration = await mailStatus.json();
@@ -63,4 +81,4 @@ if (!mailConfiguration.configured) {
   assert.equal(unavailableMail.status, 503, "SMTP未設定時は送信せず案内する");
 }
 
-console.log("QR integration passed: employee, vehicle, SVG, rotation, mail status, invalid code and cross-origin rejection");
+console.log("QR integration passed: employee, vehicle, SVG, employee/vehicle rotation, mail status, invalid code and cross-origin rejection");
