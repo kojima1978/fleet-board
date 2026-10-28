@@ -66,6 +66,10 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
+  const [nfcEmployee, setNfcEmployee] = useState<Employee | null>(null);
+  const [nfcEmployeeValue, setNfcEmployeeValue] = useState("");
+  const [nfcVehicle, setNfcVehicle] = useState<Vehicle | null>(null);
+  const [nfcVehicleValue, setNfcVehicleValue] = useState("");
   const [employeeForm, setEmployeeForm] = useState(emptyEmployee);
   const [vehicleForm, setVehicleForm] = useState(emptyVehicle);
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);
@@ -94,7 +98,6 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
   const [urlHydrated, setUrlHydrated] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSize>(DEFAULT_PAGE_SIZE);
-  const nfcInput = useRef<HTMLInputElement | null>(null);
   const drawerRef = useRef<HTMLElement | null>(null);
   const drawerReturnFocus = useRef<HTMLElement | null>(null);
 
@@ -172,6 +175,12 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
   const currentNfc = kind === "employee" ? employeeForm.nfcUid : vehicleForm.nfcUid;
   const editingId = editingEmployee?.id ?? editingVehicle?.id;
   const duplicateNfc = currentNfc ? [...data.employees.filter((person) => person.active), ...data.vehicles].find((item) => item.id !== editingId && sameNfcUid(item.nfcUid, currentNfc)) : undefined;
+  const nfcVehicleDuplicate = nfcVehicleValue && nfcVehicle
+    ? [...data.employees.filter((person) => person.active), ...data.vehicles].find((item) => item.id !== nfcVehicle.id && sameNfcUid(item.nfcUid, nfcVehicleValue))
+    : undefined;
+  const nfcEmployeeDuplicate = nfcEmployeeValue && nfcEmployee
+    ? [...data.employees.filter((person) => person.active), ...data.vehicles].find((item) => item.id !== nfcEmployee.id && sameNfcUid(item.nfcUid, nfcEmployeeValue))
+    : undefined;
 
   const employeeCodeInvalid = !isRecordCode(normalizeRecordCode(employeeForm.code));
   const vehicleCodeInvalid = !isRecordCode(normalizeRecordCode(vehicleForm.code));
@@ -247,7 +256,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
   }, [drawerOpen]);
 
   useEffect(() => {
-    if (!drawerOpen && !confirmTarget && !maintenanceVehicleId && !nfcChangeConfirm) return;
+    if (!drawerOpen && !confirmTarget && !maintenanceVehicleId && !nfcChangeConfirm && !nfcEmployee && !nfcVehicle) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       const activeLayer = document.querySelector<HTMLElement>("[role='alertdialog'], [data-focus-layer]") ?? drawerRef.current;
       if (event.key === "Escape") {
@@ -269,6 +278,18 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
           setConfirmTarget(null);
           return;
         }
+        if (nfcEmployee) {
+          setNfcEmployee(null);
+          setNfcEmployeeValue("");
+          setScanning(false);
+          return;
+        }
+        if (nfcVehicle) {
+          setNfcVehicle(null);
+          setNfcVehicleValue("");
+          setScanning(false);
+          return;
+        }
         closeDrawer();
         return;
       }
@@ -287,7 +308,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [closeDrawer, confirmTarget, discardConfirm, drawerOpen, maintenanceVehicleId, nfcChangeConfirm, submitting]);
+  }, [closeDrawer, confirmTarget, discardConfirm, drawerOpen, maintenanceVehicleId, nfcChangeConfirm, nfcEmployee, nfcVehicle, submitting]);
   const openCreate = () => {
     closeDrawer(true);
     setDrawerOpen(true);
@@ -303,6 +324,17 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
     });
     setDrawerOpen(true);
   };
+  const openEmployeeNfc = (person: Employee) => {
+    setNfcEmployee(person);
+    setNfcEmployeeValue(person.nfcUid);
+    setScanning(false);
+  };
+  const closeEmployeeNfc = (force = false) => {
+    if (submitting && !force) return;
+    setNfcEmployee(null);
+    setNfcEmployeeValue("");
+    setScanning(false);
+  };
   const openVehicle = (vehicle: Vehicle) => {
     setEditingVehicle(vehicle);
     setVehicleForm({
@@ -317,10 +349,18 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
     });
     setDrawerOpen(true);
   };
-  const beginNfcScan = () => {
-    setScanning(true);
-    window.setTimeout(() => nfcInput.current?.focus(), 0);
+  const openVehicleNfc = (vehicle: Vehicle) => {
+    setNfcVehicle(vehicle);
+    setNfcVehicleValue(vehicle.nfcUid);
+    setScanning(false);
   };
+  const closeVehicleNfc = (force = false) => {
+    if (submitting && !force) return;
+    setNfcVehicle(null);
+    setNfcVehicleValue("");
+    setScanning(false);
+  };
+  const beginNfcScan = () => setScanning(true);
   const closeImport = () => {
     if (submitting) return;
     setImportOpen(false);
@@ -499,11 +539,28 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
   };
   const submitEmployee = (event: React.FormEvent) => {
     event.preventDefault();
-    if (editingEmployee?.nfcUid && !sameNfcUid(editingEmployee.nfcUid, employeeForm.nfcUid)) {
-      setNfcChangeConfirm({ kind: "employee", previous: editingEmployee.nfcUid, next: employeeForm.nfcUid });
-      return;
-    }
     void persistEmployee();
+  };
+  const persistEmployeeNfc = async () => {
+    if (!nfcEmployee || nfcEmployeeDuplicate || sameNfcUid(nfcEmployee.nfcUid, nfcEmployeeValue) || submitting) return;
+    setSubmitting(true);
+    try {
+      const ok = await mutate(
+        {
+          action: "updateEmployeeNfc",
+          id: nfcEmployee.id,
+          version: nfcEmployee.version,
+          nfcUid: nfcEmployeeValue,
+        },
+        nfcEmployeeValue ? (nfcEmployee.nfcUid ? "NFCカードを変更しました" : "NFCカードを登録しました") : "NFCカードの登録を解除しました",
+      );
+      if (ok) {
+        setHighlightId(nfcEmployee.id);
+        closeEmployeeNfc(true);
+      }
+    } finally {
+      setSubmitting(false);
+    }
   };
   const persistVehicle = async () => {
     if (duplicateNfc || vehicleCodeInvalid || submitting) return;
@@ -538,17 +595,36 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
   };
   const submitVehicle = (event: React.FormEvent) => {
     event.preventDefault();
-    if (editingVehicle?.nfcUid && !sameNfcUid(editingVehicle.nfcUid, vehicleForm.nfcUid)) {
-      setNfcChangeConfirm({ kind: "vehicle", previous: editingVehicle.nfcUid, next: vehicleForm.nfcUid });
-      return;
-    }
     void persistVehicle();
+  };
+  const persistVehicleNfc = async () => {
+    if (!nfcVehicle || nfcVehicleDuplicate || sameNfcUid(nfcVehicle.nfcUid, nfcVehicleValue) || submitting) return;
+    setSubmitting(true);
+    try {
+      const ok = await mutate(
+        {
+          action: "updateVehicleNfc",
+          id: nfcVehicle.id,
+          version: nfcVehicle.version,
+          nfcUid: nfcVehicleValue,
+        },
+        nfcVehicleValue ? (nfcVehicle.nfcUid ? "NFCタグを変更しました" : "NFCタグを登録しました") : "NFCタグの登録を解除しました",
+      );
+      if (ok) {
+        setHighlightId(nfcVehicle.id);
+        closeVehicleNfc(true);
+      }
+    } finally {
+      setSubmitting(false);
+    }
   };
   const applyNfcChange = async () => {
     if (!nfcChangeConfirm || submitting) return;
     const targetKind = nfcChangeConfirm.kind;
     setNfcChangeConfirm(null);
-    if (targetKind === "employee") await persistEmployee();
+    if (targetKind === "employee" && nfcEmployee) await persistEmployeeNfc();
+    else if (targetKind === "employee") await persistEmployee();
+    else if (nfcVehicle) await persistVehicleNfc();
     else await persistVehicle();
   };
   const applyActiveChange = async () => {
@@ -752,6 +828,9 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                   <RowActions
                     active={person.active}
                     name={person.name}
+                    nfcRegistered={!!person.nfcUid}
+                    nfcMedium="カード"
+                    onNfc={() => openEmployeeNfc(person)}
                     onQr={() =>
                       setQrPreview({
                         kind: "employee",
@@ -833,6 +912,8 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                     <RowActions
                       active={vehicle.active}
                       name={vehicle.name}
+                      nfcRegistered={!!vehicle.nfcUid}
+                      onNfc={() => openVehicleNfc(vehicle)}
                       onQr={() =>
                         setQrPreview({
                           kind: "vehicle",
@@ -915,7 +996,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
               <div>
                 <p className="text-xs font-bold text-blue-600">一括登録</p>
                 <h2 className="mt-1 text-xl font-black">{kind === "employee" ? "社員情報" : "車両情報"}をJSONから取込</h2>
-                <p className="mt-1 text-xs text-slate-500">最大500件。NFC UIDは省略でき、後から編集画面で登録できます。</p>
+                <p className="mt-1 text-xs text-slate-500">最大500件。NFC UIDは省略でき、後から一覧のNFCボタンで登録できます。</p>
               </div>
               <button type="button" aria-label="閉じる" disabled={submitting} onClick={closeImport} className="grid size-10 place-items-center rounded-xl bg-slate-100 disabled:opacity-40">
                 <X className="size-4" />
@@ -1057,7 +1138,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
             if (event.target === event.currentTarget && !submitting) closeDrawer();
           }}
         >
-          <aside ref={drawerRef} role="dialog" aria-modal="true" aria-busy={submitting} aria-label={kind === "employee" ? "社員情報" : "車両情報"} className="ml-auto flex h-full w-full max-w-md flex-col bg-white shadow-2xl">
+          <aside ref={drawerRef} role="dialog" aria-modal="true" aria-busy={submitting} aria-label={kind === "employee" ? "社員情報" : "車両情報"} className="ml-auto flex h-full w-full max-w-xl flex-col bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-100 p-5">
               <div>
                 <div className="flex items-center gap-2">
@@ -1126,23 +1207,6 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                         {selectableDepartments.length ? "部署を管理" : "部署を追加する"}
                       </Link>
                     </Field>
-                    <NfcField
-                      kind="employee"
-                      optional
-                      registered={!!editingEmployee?.nfcUid}
-                      inputRef={nfcInput}
-                      value={employeeForm.nfcUid}
-                      scanning={scanning}
-                      duplicate={duplicateNfc?.name}
-                      onScan={beginNfcScan}
-                      onChange={(value) =>
-                        setEmployeeForm((current) => ({
-                          ...current,
-                          nfcUid: value,
-                        }))
-                      }
-                      onDone={() => setScanning(false)}
-                    />
                   </div>
                   <div className="mt-auto space-y-4 pt-6">
                     <Button type="submit" className="w-full" disabled={submitting || !!duplicateNfc || employeeCodeInvalid}>
@@ -1169,7 +1233,10 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
             ) : (
               <form className="flex flex-1 flex-col overflow-y-auto p-5" onSubmit={submitVehicle}>
                 <fieldset disabled={submitting} className="flex min-h-0 min-w-0 flex-1 flex-col border-0 p-0">
-                  <div className="space-y-4">
+                  <div className="space-y-5">
+                    <section className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div><h3 className="text-sm font-black">基本情報</h3><p className="mt-1 text-xs text-slate-500">車両を識別する番号・名称・ナンバーを管理します。</p></div>
+                      <div className="mt-4 space-y-4">
                     <Field label="車両番号">
                       <RecordCodeInput kind="vehicle" autoFocus={!editingVehicle} value={vehicleForm.code} onChange={(code) => setVehicleForm((current) => ({ ...current, code }))} placeholder="例：C018" />
                       {editingVehicle && normalizeRecordCode(vehicleForm.code) !== editingVehicle.code ? <p className="mt-1 text-xs font-bold text-amber-700">変更すると、過去の利用履歴も新しい車両番号で表示されます</p> : null}
@@ -1223,6 +1290,11 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                         <p className="mt-1 text-xs text-slate-500">登録と同時に配置図へ表示します。場所が決まっていない場合は仮置き区画を選び、決まったら配置図の「位置変更」で移動してください。</p>
                       </Field>
                     ) : null}
+                      </div>
+                    </section>
+                    <section className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div><h3 className="text-sm font-black">装備・表示</h3><p className="mt-1 text-xs text-slate-500">利用者が車両を選ぶときに表示する情報です。</p></div>
+                      <div className="mt-4 space-y-4">
                     <Field label="車両装備">
                       <div className="grid grid-cols-2 gap-2">
                         <EquipmentToggle
@@ -1247,23 +1319,6 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                         />
                       </div>
                     </Field>
-                    <NfcField
-                      kind="vehicle"
-                      optional
-                      registered={!!editingVehicle?.nfcUid}
-                      inputRef={nfcInput}
-                      value={vehicleForm.nfcUid}
-                      scanning={scanning}
-                      duplicate={duplicateNfc?.name}
-                      onScan={beginNfcScan}
-                      onChange={(value) =>
-                        setVehicleForm((current) => ({
-                          ...current,
-                          nfcUid: value,
-                        }))
-                      }
-                      onDone={() => setScanning(false)}
-                    />
                     <Field label="表示色">
                       <span className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 px-3">
                         <input
@@ -1281,11 +1336,10 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                         <span className="text-xs font-bold text-slate-500">{vehicleForm.color.toUpperCase()}</span>
                       </span>
                     </Field>
+                      </div>
+                    </section>
                   </div>
                   <div className="mt-auto space-y-4 pt-6">
-                    <Button type="submit" className="w-full" disabled={submitting || !!duplicateNfc || vehicleCodeInvalid}>
-                      {submitting ? "保存中…" : editingVehicle ? "変更を保存" : "車両を登録"}
-                    </Button>
                     {editingVehicle ? (
                       <ActiveControl
                         kind="vehicle"
@@ -1302,11 +1356,112 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                         }
                       />
                     ) : null}
+                    <div className="sticky -bottom-5 z-10 -mx-5 border-t border-slate-200 bg-white/95 px-5 pb-5 pt-4 backdrop-blur">
+                      <Button type="submit" className="w-full" disabled={submitting || !!duplicateNfc || vehicleCodeInvalid}>
+                        {submitting ? "保存中…" : editingVehicle ? "変更を保存" : "車両を登録"}
+                      </Button>
+                    </div>
                   </div>
                 </fieldset>
               </form>
             )}
           </aside>
+        </div>
+      ) : null}
+
+      {nfcEmployee ? (
+        <div
+          className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeEmployeeNfc();
+          }}
+        >
+          <div data-focus-layer role="dialog" aria-modal="true" aria-busy={submitting} aria-label={`${nfcEmployee.name}のNFCカード管理`} className="w-full max-w-lg rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b border-slate-100 p-5">
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-slate-500">{nfcEmployee.code}・{nfcEmployee.name}</p>
+                <h2 className="mt-1 text-xl font-black">NFCカード{nfcEmployee.nfcUid ? "を変更" : "を登録"}</h2>
+                <p className="mt-1 text-xs leading-5 text-slate-500">社員情報は変更せず、NFCカードだけを管理します。</p>
+              </div>
+              <button type="button" aria-label="閉じる" disabled={submitting} onClick={() => closeEmployeeNfc()} className="grid size-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600 disabled:opacity-40">
+                <X className="size-4" />
+              </button>
+            </div>
+            <div className="p-5">
+              <NfcField
+                kind="employee"
+                registered={!!nfcEmployee.nfcUid}
+                originalValue={nfcEmployee.nfcUid}
+                value={nfcEmployeeValue}
+                scanning={scanning}
+                duplicate={nfcEmployeeDuplicate?.name}
+                onScan={beginNfcScan}
+                onChange={setNfcEmployeeValue}
+                onDone={() => setScanning(false)}
+              />
+              <div className="mt-5 grid grid-cols-2 gap-2">
+                <Button type="button" variant="ghost" disabled={submitting} onClick={() => closeEmployeeNfc()}>キャンセル</Button>
+                <Button
+                  type="button"
+                  disabled={submitting || scanning || !!nfcEmployeeDuplicate || sameNfcUid(nfcEmployee.nfcUid, nfcEmployeeValue)}
+                  onClick={() => {
+                    if (nfcEmployeeValue) void persistEmployeeNfc();
+                    else setNfcChangeConfirm({ kind: "employee", previous: nfcEmployee.nfcUid, next: "" });
+                  }}
+                >
+                  {submitting ? "保存中…" : nfcEmployeeValue ? (nfcEmployee.nfcUid ? "このカードへ変更" : "このカードを登録") : "解除内容を確認"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {nfcVehicle ? (
+        <div
+          className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeVehicleNfc();
+          }}
+        >
+          <div data-focus-layer role="dialog" aria-modal="true" aria-busy={submitting} aria-label={`${nfcVehicle.name}のNFCタグ管理`} className="w-full max-w-lg rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b border-slate-100 p-5">
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-slate-500">{nfcVehicle.code}・{nfcVehicle.name}</p>
+                <h2 className="mt-1 text-xl font-black">NFCタグ{nfcVehicle.nfcUid ? "を変更" : "を登録"}</h2>
+                <p className="mt-1 text-xs leading-5 text-slate-500">車両情報は変更せず、NFCタグだけを管理します。</p>
+              </div>
+              <button type="button" aria-label="閉じる" disabled={submitting} onClick={() => closeVehicleNfc()} className="grid size-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600 disabled:opacity-40">
+                <X className="size-4" />
+              </button>
+            </div>
+            <div className="p-5">
+              <NfcField
+                kind="vehicle"
+                registered={!!nfcVehicle.nfcUid}
+                originalValue={nfcVehicle.nfcUid}
+                value={nfcVehicleValue}
+                scanning={scanning}
+                duplicate={nfcVehicleDuplicate?.name}
+                onScan={beginNfcScan}
+                onChange={setNfcVehicleValue}
+                onDone={() => setScanning(false)}
+              />
+              <div className="mt-5 grid grid-cols-2 gap-2">
+                <Button type="button" variant="ghost" disabled={submitting} onClick={() => closeVehicleNfc()}>キャンセル</Button>
+                <Button
+                  type="button"
+                  disabled={submitting || scanning || !!nfcVehicleDuplicate || sameNfcUid(nfcVehicle.nfcUid, nfcVehicleValue)}
+                  onClick={() => {
+                    if (nfcVehicleValue) void persistVehicleNfc();
+                    else setNfcChangeConfirm({ kind: "vehicle", previous: nfcVehicle.nfcUid, next: "" });
+                  }}
+                >
+                  {submitting ? "保存中…" : nfcVehicleValue ? (nfcVehicle.nfcUid ? "このタグへ変更" : "このタグを登録") : "解除内容を確認"}
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -1343,15 +1498,15 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
         <div className="fixed inset-0 z-[70] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm">
           <div role="alertdialog" aria-modal="true" aria-busy={submitting} className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl">
             <span className="mx-auto grid size-12 place-items-center rounded-full bg-blue-50 text-blue-700"><Nfc /></span>
-            <h2 className="mt-4 text-center text-lg font-black">NFC{nfcChangeConfirm.next ? "を変更" : "登録を解除"}しますか？</h2>
+            <h2 className="mt-4 text-center text-lg font-black">NFC{nfcChangeConfirm.previous ? nfcChangeConfirm.next ? "を変更" : "登録を解除" : "を登録"}しますか？</h2>
             <div className="mt-4 space-y-2 rounded-2xl bg-slate-50 p-4 text-xs">
-              <p><span className="font-bold text-slate-500">現在</span><span className="ml-3 font-mono font-bold text-slate-800">{nfcChangeConfirm.previous}</span></p>
+              <p><span className="font-bold text-slate-500">現在</span><span className="ml-3 font-mono font-bold text-slate-800">{nfcChangeConfirm.previous || "登録なし"}</span></p>
               <p><span className="font-bold text-slate-500">変更後</span><span className="ml-3 font-mono font-bold text-blue-800">{nfcChangeConfirm.next || "登録なし"}</span></p>
             </div>
-            <p className="mt-3 text-xs text-slate-600">保存が完了すると、現在の{nfcChangeConfirm.kind === "employee" ? "カード" : "タグ"}は自動的に解除され、呼び出しに使えなくなります。</p>
+            <p className="mt-3 text-xs text-slate-600">{nfcChangeConfirm.previous ? nfcChangeConfirm.next ? `保存が完了すると現在の${nfcChangeConfirm.kind === "employee" ? "カード" : "タグ"}は自動的に解除され、新しい登録へ切り替わります。` : `保存が完了すると現在の${nfcChangeConfirm.kind === "employee" ? "カード" : "タグ"}は呼び出しに使えなくなります。` : "保存が完了すると、このNFCで呼び出せるようになります。"}</p>
             <div className="mt-5 grid grid-cols-2 gap-2">
               <Button autoFocus variant="ghost" disabled={submitting} onClick={() => setNfcChangeConfirm(null)}>戻る</Button>
-              <Button disabled={submitting} variant={nfcChangeConfirm.next ? "primary" : "danger"} onClick={() => void applyNfcChange()}>{submitting ? "保存中…" : nfcChangeConfirm.next ? "このNFCへ変更" : "登録を解除"}</Button>
+              <Button disabled={submitting} variant={nfcChangeConfirm.next ? "primary" : "danger"} onClick={() => void applyNfcChange()}>{submitting ? "保存中…" : nfcChangeConfirm.previous ? nfcChangeConfirm.next ? "このNFCへ変更" : "登録を解除" : "このNFCを登録"}</Button>
             </div>
           </div>
         </div>
@@ -1423,7 +1578,7 @@ function VehicleLocation({ vehicle, spots, offSite }: { vehicle: Vehicle; spots:
 }
 
 // 利用停止は誤操作を防ぐため編集画面に置き、一覧には停止中の行の「利用再開」だけを出す。
-function RowActions({ active, name, maintenance, maintenanceScheduled, maintenanceDisabled, onQr, onEdit, onResume, onMaintenance }: { active: boolean; name: string; maintenance?: boolean; maintenanceScheduled?: boolean; maintenanceDisabled?: boolean; onQr: () => void; onEdit: () => void; onResume: () => void; onMaintenance?: () => void }) {
+function RowActions({ active, name, maintenance, maintenanceScheduled, maintenanceDisabled, nfcRegistered, nfcMedium = "タグ", onQr, onNfc, onEdit, onResume, onMaintenance }: { active: boolean; name: string; maintenance?: boolean; maintenanceScheduled?: boolean; maintenanceDisabled?: boolean; nfcRegistered?: boolean; nfcMedium?: "カード" | "タグ"; onQr: () => void; onNfc?: () => void; onEdit: () => void; onResume: () => void; onMaintenance?: () => void }) {
   return (
     <div className="flex justify-end gap-2">
       {onMaintenance ? (
@@ -1437,6 +1592,12 @@ function RowActions({ active, name, maintenance, maintenanceScheduled, maintenan
         <QrCode className="size-3.5" />
         <span className="hidden md:inline">QR</span>
       </button>
+      {onNfc ? (
+        <button type="button" disabled={!active} onClick={onNfc} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35" aria-label={`${name}のNFC${nfcMedium}を${nfcRegistered ? "変更" : "登録"}`}>
+          <Nfc className="size-3.5" />
+          <span className="hidden md:inline">NFC{nfcRegistered ? "変更" : "登録"}</span>
+        </button>
+      ) : null}
       <button type="button" onClick={onEdit} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:bg-slate-50" aria-label={`${name}を編集`}>
         <Pencil className="size-3.5" />
         <span className="hidden md:inline">編集</span>
@@ -1732,7 +1893,7 @@ function EquipmentToggle({ checked, label, onChange }: { checked: boolean; label
   );
 }
 
-function NfcField({ kind, inputRef, value, scanning, duplicate, onScan, onChange, onDone, optional = false, registered = false }: { kind: "employee" | "vehicle"; optional?: boolean; registered?: boolean; inputRef: React.RefObject<HTMLInputElement | null>; value: string; scanning: boolean; duplicate?: string; onScan: () => void; onChange: (value: string) => void; onDone: () => void }) {
+function NfcField({ kind, value, scanning, duplicate, onScan, onChange, onDone, registered = false, originalValue = "" }: { kind: "employee" | "vehicle"; registered?: boolean; originalValue?: string; value: string; scanning: boolean; duplicate?: string; onScan: () => void; onChange: (value: string) => void; onDone: () => void }) {
   const [timedOut, setTimedOut] = useState(false);
   const [readMessage, setReadMessage] = useState("");
   const onDoneRef = useRef(onDone);
@@ -1748,30 +1909,35 @@ function NfcField({ kind, inputRef, value, scanning, duplicate, onScan, onChange
   }, [scanning]);
   const bridgeStatus = useNfcBridge(scanning, (uid) => {
     setTimedOut(false);
-    if (value && sameNfcUid(uid, value)) setReadMessage(`現在登録されている${kind === "employee" ? "カード" : "タグ"}です`);
+    if (originalValue && sameNfcUid(uid, originalValue)) {
+      onChange(originalValue);
+      setReadMessage(`現在登録されている${kind === "employee" ? "カード" : "タグ"}です。変更はありません`);
+    }
     else {
       onChange(uid);
-      setReadMessage(`${kind === "employee" ? "カード" : "タグ"}を読み取りました。保存すると${registered ? "変更" : "登録"}されます`);
+      setReadMessage(`${kind === "employee" ? "カード" : "タグ"}を読み取りました。内容を確認して保存してください`);
     }
     onDone();
   });
   const statusText = nfcBridgeStatusText(bridgeStatus);
-  const changeValue = (next: string) => {
-    setTimedOut(false);
-    setReadMessage("");
-    onChange(next);
-  };
   // 社員はカード、車両はタグを使う。
   const medium = kind === "employee" ? "カード" : "タグ";
-  const inputId = `${kind}-nfc-uid`;
+  const hasCurrent = registered || !!originalValue;
+  const changed = !sameNfcUid(originalValue, value);
+  const pendingRemoval = hasCurrent && changed && !value;
+  const pendingRegistration = !hasCurrent && !!value;
+  const pendingChange = hasCurrent && changed && !!value;
+  const stateLabel = scanning ? "読取待機中" : duplicate ? "他で登録済み" : pendingRemoval ? "解除予定" : pendingChange ? "変更予定" : pendingRegistration ? "登録予定" : hasCurrent ? "登録済み" : "未登録";
   return (
     <div>
-      <label htmlFor={inputId} className="mb-1.5 block text-xs font-bold text-slate-600">{optional ? "NFC UID（任意）" : "NFC UID"}</label>
-      <div className={cn("rounded-2xl border p-3", scanning ? "border-blue-300 bg-blue-50" : timedOut ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-slate-50")}>
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Nfc className={cn("size-5", scanning ? "animate-pulse text-blue-600" : timedOut ? "text-amber-600" : "text-slate-400")} />
-            <span className="text-xs font-bold text-slate-600">{scanning ? `${medium}をかざしてください` : timedOut ? "読み取りを確認できませんでした" : `NFC${medium}`}</span>
+      <div className={cn("rounded-2xl border bg-white p-4 transition", scanning ? "border-blue-300 ring-4 ring-blue-50" : duplicate ? "border-rose-300" : timedOut || pendingRemoval || pendingChange || pendingRegistration ? "border-amber-300" : "border-slate-200")}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className={cn("grid size-10 shrink-0 place-items-center rounded-xl", scanning ? "bg-blue-50 text-blue-700" : duplicate ? "bg-rose-50 text-rose-700" : "bg-slate-100 text-slate-600")}><Nfc className={cn("size-5", scanning && "animate-pulse")} /></span>
+            <span className="min-w-0">
+              <span className="flex flex-wrap items-center gap-2"><b className="text-sm">NFC{medium}</b><span className={cn("rounded-full px-2 py-0.5 text-[10px] font-black", duplicate ? "bg-rose-100 text-rose-700" : scanning ? "bg-blue-100 text-blue-700" : pendingRemoval || pendingChange || pendingRegistration ? "bg-amber-100 text-amber-800" : hasCurrent ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600")}>{stateLabel}</span></span>
+              <span className="mt-1 block text-[11px] leading-5 text-slate-500">{scanning ? `新しい${medium}をリーダーにかざしてください` : hasCurrent ? `登録済みの${medium}でこの${kind === "employee" ? "社員" : "車両"}を呼び出せます` : `${medium}は後からでも登録できます`}</span>
+            </span>
           </div>
           <button
             type="button"
@@ -1783,41 +1949,29 @@ function NfcField({ kind, inputRef, value, scanning, duplicate, onScan, onChange
                 onScan();
               }
             }}
-            className={cn("shrink-0 rounded-lg bg-white px-3 py-1.5 text-xs font-bold shadow-sm", scanning ? "text-slate-600" : "text-blue-700")}
+            className={cn("min-h-10 shrink-0 rounded-xl border px-3 text-xs font-bold transition", scanning ? "border-slate-200 bg-white text-slate-700 hover:bg-slate-50" : "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100")}
           >
-            {scanning ? "読取を停止" : timedOut ? "再試行" : registered ? "NFC変更" : "NFC登録"}
+            {scanning ? "読み取りを中止" : timedOut ? "もう一度読み取る" : pendingChange || pendingRegistration ? `別の${medium}を読み直す` : hasCurrent ? `NFC${medium}を変更` : `NFC${medium}を登録`}
           </button>
         </div>
-        <input
-          id={inputId}
-          ref={inputRef}
-          required={!optional}
-          className={field}
-          value={value}
-          onChange={(event) => changeValue(event.target.value)}
-          onBlur={() => value && changeValue(normalizeNfcUid(value))}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              changeValue(normalizeNfcUid(value));
-              onDone();
-            }
-          }}
-          placeholder={`UIDを入力または${medium}を読み取り`}
-        />
+        {!scanning && !pendingChange && !pendingRegistration && !pendingRemoval ? <p className="mt-3 text-[10px] text-slate-500">読み取り後、画面下のボタンで内容を確認して確定します。</p> : null}
+        {hasCurrent ? <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5"><span className="block text-[10px] font-bold text-slate-500">現在の登録</span><code className="mt-0.5 block break-all text-xs font-bold text-slate-800">{originalValue}</code></div> : null}
+        {pendingChange || pendingRegistration ? <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5"><span className="block text-[10px] font-bold text-amber-700">保存後の登録</span><code className="mt-0.5 block break-all text-xs font-bold text-amber-950">{value}</code><p className="mt-1 text-[10px] text-amber-800">保存が完了するまで、現在の{medium}は引き続き使えます。</p></div> : null}
+        {pendingRemoval ? <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs font-bold text-amber-900">保存するとNFC登録が解除されます。保存前なら取り消せます。</div> : null}
         {duplicate ? (
           <p className="mt-2 text-xs font-bold text-rose-600">このUIDは「{duplicate}」で登録済みです</p>
         ) : timedOut ? (
           <p role="status" className="mt-2 text-[11px] font-bold text-amber-800">
-            15秒以内に読み取れませんでした。再試行するか、UIDを手入力してください。
+            15秒以内に読み取れませんでした。もう一度読み取るか、接続状態を確認してください。
           </p>
         ) : scanning ? (
           <p role="status" aria-live="polite" className={cn("mt-2 text-[11px]", bridgeStatus === "ready" ? "font-bold text-emerald-700" : bridgeStatus === "offline" ? "text-amber-700" : "text-blue-600")}>
             {statusText}
           </p>
         ) : readMessage ? <p role="status" className="mt-2 text-[11px] font-bold text-emerald-700">{readMessage}</p> : null}
-        {registered && value && !scanning ? <button type="button" onClick={() => { setReadMessage("保存すると現在のNFC登録が解除されます"); onChange(""); }} className="mt-2 min-h-9 w-full rounded-lg border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 hover:bg-rose-50">NFC登録を解除</button> : null}
         {scanning ? <NfcBridgeHelp status={bridgeStatus} className="mt-2" /> : null}
+        {!scanning && pendingRemoval ? <button type="button" onClick={() => { setReadMessage(""); onChange(originalValue); }} className="mt-3 min-h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 hover:bg-slate-50">解除を取り消す</button> : null}
+        {!scanning && hasCurrent && !changed ? <button type="button" onClick={() => { setReadMessage("保存すると現在のNFC登録が解除されます"); onChange(""); }} className="mt-3 min-h-9 text-xs font-bold text-rose-700 underline decoration-rose-200 underline-offset-4 hover:text-rose-800">この{medium}の登録を解除</button> : null}
       </div>
     </div>
   );

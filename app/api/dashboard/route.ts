@@ -108,8 +108,10 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("createEmployee"), code: recordCodeSchema, name: z.string().trim().min(1).max(50), email: optionalEmailSchema, department: departmentNameSchema, nfcUid: optionalNfcUidSchema }),
   z.object({ action: z.literal("createVehicle"), code: recordCodeSchema, name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, spotId: idSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().default(false), hasNavigation: z.boolean().default(false) }),
   z.object({ action: z.literal("updateEmployee"), id: idSchema, version: z.number().int().nonnegative(), code: recordCodeSchema.optional(), name: z.string().trim().min(1).max(50), email: optionalEmailSchema, department: departmentNameSchema, nfcUid: optionalNfcUidSchema }),
+  z.object({ action: z.literal("updateEmployeeNfc"), id: idSchema, version: z.number().int().nonnegative(), nfcUid: optionalNfcUidSchema }),
   z.object({ action: z.literal("rotateEmployeeQr"), id: idSchema, version: z.number().int().nonnegative() }),
   z.object({ action: z.literal("updateVehicle"), id: idSchema, version: z.number().int().nonnegative(), code: recordCodeSchema.optional(), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().optional(), hasNavigation: z.boolean().optional() }),
+  z.object({ action: z.literal("updateVehicleNfc"), id: idSchema, version: z.number().int().nonnegative(), nfcUid: optionalNfcUidSchema }),
   z.object({ action: z.literal("setEmployeeActive"), id: idSchema, version: z.number().int().nonnegative(), active: z.boolean() }),
   z.object({ action: z.literal("setVehicleActive"), id: idSchema, version: z.number().int().nonnegative(), active: z.boolean() }),
   // maintenanceIdを渡すと、登録済みの整備予定を開始する。plannedEndは戻り予定で、nullなら未定。
@@ -370,6 +372,42 @@ export async function POST(request: Request) {
         await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "社員情報修正", targetType: "Employee", targetId: input.id, description: codeChanged ? `${input.name}の登録情報を修正（社員番号 ${employee.employeeNumber.code}→${input.code}）` : `${input.name}の登録情報を修正` } });
       });
     }
+    if (input.action === "updateEmployeeNfc") {
+      if (input.nfcUid) await assertNfcAvailable(input.nfcUid, { employeeId: input.id });
+      await prisma.$transaction(async (tx) => {
+        const employee = await tx.employee.findUniqueOrThrow({
+          where: { id: input.id },
+          include: { nfcAssignments: { where: { validTo: null }, include: { nfcTag: true }, take: 1 } },
+        });
+        if (!employee.active) throw new Error("利用停止中の社員のNFCカードは変更できません。先に利用を再開してください");
+        const currentUid = employee.nfcAssignments[0]?.nfcTag.uid ?? "";
+        if (currentUid === input.nfcUid) return;
+        const updated = await tx.employee.updateMany({
+          where: { id: input.id, version: input.version },
+          data: { version: { increment: 1 } },
+        });
+        if (updated.count !== 1) throw new Error("CONFLICT");
+        const changedAt = new Date();
+        await tx.nfcAssignment.updateMany({
+          where: { employeeId: employee.id, validTo: null },
+          data: { validTo: changedAt, cleared: !input.nfcUid },
+        });
+        if (input.nfcUid) {
+          const nfcTag = await tx.nfcTag.upsert({ where: { uid: input.nfcUid }, update: {}, create: { uid: input.nfcUid } });
+          await tx.nfcAssignment.create({ data: { employeeId: employee.id, nfcTagId: nfcTag.id, validFrom: changedAt } });
+        }
+        await tx.auditLog.create({
+          data: {
+            operationId,
+            actorName: "設定画面",
+            action: input.nfcUid ? (currentUid ? "社員NFC変更" : "社員NFC登録") : "社員NFC解除",
+            targetType: "Employee",
+            targetId: employee.id,
+            description: `${employee.name}のNFCカードを${input.nfcUid ? (currentUid ? "変更" : "登録") : "解除"}`,
+          },
+        });
+      });
+    }
     if (input.action === "rotateEmployeeQr") {
       await prisma.$transaction(async (tx) => {
         const employee = await tx.employee.findUniqueOrThrow({ where: { id: input.id }, select: { name: true, active: true } });
@@ -422,6 +460,42 @@ export async function POST(request: Request) {
           }
         }
         await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "車両情報修正", targetType: "Vehicle", targetId: input.id, description: codeChanged ? `${input.name}の登録情報を修正（車両番号 ${vehicle.vehicleNumber.code}→${input.code}）` : `${input.name}の登録情報を修正` } });
+      });
+    }
+    if (input.action === "updateVehicleNfc") {
+      if (input.nfcUid) await assertNfcAvailable(input.nfcUid, { vehicleId: input.id });
+      await prisma.$transaction(async (tx) => {
+        const vehicle = await tx.vehicle.findUniqueOrThrow({
+          where: { id: input.id },
+          include: { nfcAssignments: { where: { validTo: null }, include: { nfcTag: true }, take: 1 } },
+        });
+        if (!vehicle.active) throw new Error("利用停止中の車両のNFCタグは変更できません。先に利用を再開してください");
+        const currentUid = vehicle.nfcAssignments[0]?.nfcTag.uid ?? "";
+        if (currentUid === input.nfcUid) return;
+        const updated = await tx.vehicle.updateMany({
+          where: { id: input.id, version: input.version },
+          data: { version: { increment: 1 } },
+        });
+        if (updated.count !== 1) throw new Error("CONFLICT");
+        const changedAt = new Date();
+        await tx.nfcAssignment.updateMany({
+          where: { vehicleId: vehicle.id, validTo: null },
+          data: { validTo: changedAt, cleared: !input.nfcUid },
+        });
+        if (input.nfcUid) {
+          const nfcTag = await tx.nfcTag.upsert({ where: { uid: input.nfcUid }, update: {}, create: { uid: input.nfcUid } });
+          await tx.nfcAssignment.create({ data: { vehicleId: vehicle.id, nfcTagId: nfcTag.id, validFrom: changedAt } });
+        }
+        await tx.auditLog.create({
+          data: {
+            operationId,
+            actorName: "設定画面",
+            action: input.nfcUid ? (currentUid ? "車両NFC変更" : "車両NFC登録") : "車両NFC解除",
+            targetType: "Vehicle",
+            targetId: vehicle.id,
+            description: `${vehicle.name}のNFCタグを${input.nfcUid ? (currentUid ? "変更" : "登録") : "解除"}`,
+          },
+        });
       });
     }
     if (input.action === "setEmployeeActive") {
