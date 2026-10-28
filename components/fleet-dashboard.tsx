@@ -10,7 +10,6 @@ import { normalizeNfcUid } from "@/lib/nfc";
 import { createOperationId } from "@/lib/operation-id";
 import { getParkingReservations, PARKING_RESERVATION_NOTICE_MINUTES } from "@/lib/parking-reservations";
 import { ParkingReservationBadge, ParkingReservations } from "./parking-reservations";
-import { ActualStartEditor, ReservationStartEditor } from "./trip-start-editors";
 import { resolveNfcUid } from "@/lib/resolve-nfc";
 import { resolveQrCode } from "@/lib/resolve-qr";
 import { canUseSpot, formatSpotLabel, isDashedSpot, spotRoleTag } from "@/lib/parking-spots";
@@ -22,8 +21,6 @@ import { playNfcSound } from "@/lib/nfc-sound";
 import { clearSavedEmployee, forgetPersistentEmployee, readSavedEmployee, saveEmployee } from "@/lib/employee-session";
 import { isKioskDevice, readDeviceMode, useDeviceMode, useIdleTrafficEnabled, useUserTimeoutMinutes } from "@/lib/device-mode";
 import { formatMaintenanceTime, MAINTENANCE_KIND_SHORT_LABELS } from "@/lib/maintenance";
-import { activeMaintenanceOf, MaintenanceDialog } from "./maintenance-dialog";
-import { NfcBridgeHelp } from "./nfc-bridge-help";
 import { Button, Card, cn } from "./ui";
 import { IdleTraffic, reportActivity } from "./idle-traffic";
 import { AppHeader, HeaderDeviceMode, HeaderSystemStatus, HeaderUserControl, Navigation, type HeaderSyncState } from "./app-header";
@@ -46,6 +43,11 @@ const DepartmentSettings = dynamic(() => import("./department-settings").then((m
 const DataBackupPanel = dynamic(() => import("./data-backup-panel").then((module) => module.DataBackupPanel), { loading: SettingsSectionLoading });
 const SystemStatusPanel = dynamic(() => import("./system-status-panel").then((module) => module.SystemStatusPanel), { loading: SettingsSectionLoading });
 const ScannerGuide = dynamic(() => import("./scanner-guide").then((module) => module.ScannerGuide), { loading: SettingsSectionLoading });
+// 操作時だけ必要なフォームを初期バンドルから外す。配置図とタイムラインの初回表示を軽くする。
+const MaintenanceDialog = dynamic(() => import("./maintenance-dialog").then((module) => module.MaintenanceDialog));
+const ActualStartEditor = dynamic(() => import("./trip-start-editors").then((module) => module.ActualStartEditor));
+const ReservationStartEditor = dynamic(() => import("./trip-start-editors").then((module) => module.ReservationStartEditor));
+const NfcBridgeHelp = dynamic(() => import("./nfc-bridge-help").then((module) => module.NfcBridgeHelp));
 const jpTime = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false });
 const jpTimeSeconds = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 const jpDate = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", month: "long", day: "numeric", weekday: "long" });
@@ -76,6 +78,7 @@ const timelineEndOf = (trip: Trip, now = Date.now()) => {
   if (trip.status === "IN_USE" && new Date(trip.plannedEnd).getTime() < now) return new Date(now).toISOString();
   return trip.plannedEnd;
 };
+const activeMaintenanceOf = (data: Pick<DashboardData, "maintenances">, vehicleId: string) => data.maintenances.find((item) => item.vehicleId === vehicleId && item.status === "ACTIVE") ?? null;
 const formatPlateShort = (value: string) => {
   const parts = value.trim().split(/\s+/);
   return parts[parts.length - 1] || value;
@@ -119,7 +122,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   const [isOnline, setIsOnline] = useState(true);
   const [lastSuccessfulSync, setLastSuccessfulSync] = useState<Date | null>(null);
   const lastSuccessfulSyncRef = useRef<Date | null>(null);
-  const dashboardEtag = useRef("");
+  const dashboardEtags = useRef(new Map<string, string>());
   const loadInFlight = useRef(false);
   const dataRef = useRef<DashboardData | null>(null);
   const [pendingAction, setPendingAction] = useState(false);
@@ -178,10 +181,18 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 4000);
     try {
-      const query = view === "timeline" ? `?from=${encodeURIComponent(timelineDate.toISOString())}&days=${timelineDays}` : "";
-      const response = await fetch(`/api/dashboard${query}`, {
+      const query = new URLSearchParams();
+      if (view === "timeline") {
+        query.set("from", timelineDate.toISOString());
+        query.set("days", String(timelineDays));
+      } else if (view !== "parking") {
+        query.set("scope", "settings");
+      }
+      const endpoint = `/api/dashboard${query.size > 0 ? `?${query}` : ""}`;
+      const knownEtag = dashboardEtags.current.get(endpoint);
+      const response = await fetch(endpoint, {
         cache: "no-store",
-        headers: dashboardEtag.current ? { "If-None-Match": dashboardEtag.current } : undefined,
+        headers: knownEtag ? { "If-None-Match": knownEtag } : undefined,
         signal: controller.signal,
       });
       if (response.status === 304) {
@@ -190,7 +201,14 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
         return true;
       }
       if (!response.ok) throw new Error();
-      dashboardEtag.current = response.headers.get("ETag") ?? "";
+      const nextEtag = response.headers.get("ETag");
+      if (nextEtag) {
+        if (!dashboardEtags.current.has(endpoint) && dashboardEtags.current.size >= 12) {
+          const oldest = dashboardEtags.current.keys().next().value;
+          if (oldest) dashboardEtags.current.delete(oldest);
+        }
+        dashboardEtags.current.set(endpoint, nextEtag);
+      }
       const next = await response.json() as DashboardData;
       if (quiet && vehicleVersions.current.size > 0) {
         const changed = next.vehicles.filter((vehicle) => vehicleVersions.current.get(vehicle.id) !== vehicle.version).map((vehicle) => vehicle.id);
@@ -224,19 +242,21 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
     let cancelled = false;
     let timer = 0;
     let consecutiveFailures = 0;
+    // 日常画面は即時性を優先する。設定画面は操作直後に再取得されるため、待機中の確認頻度を下げる。
+    const normalDelay = view === "parking" || view === "timeline" ? 5_000 : 30_000;
     const poll = async () => {
       if (document.visibilityState === "visible" && navigator.onLine) {
         const ok = await load(true);
         consecutiveFailures = ok ? 0 : Math.min(consecutiveFailures + 1, 3);
       }
       if (!cancelled) {
-        const delay = [5_000, 10_000, 30_000, 60_000][consecutiveFailures];
+        const delay = [normalDelay, Math.max(normalDelay, 10_000), 30_000, 60_000][consecutiveFailures];
         timer = window.setTimeout(poll, delay);
       }
     };
-    timer = window.setTimeout(poll, 5_000);
+    timer = window.setTimeout(poll, normalDelay);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [load]);
+  }, [load, view]);
 
   useEffect(() => {
     const handleOffline = () => { setIsOnline(false); setSyncState("stale"); };

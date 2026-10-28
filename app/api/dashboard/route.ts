@@ -14,11 +14,47 @@ import { formatMaintenanceTime, MAINTENANCE_KIND_SHORT_LABELS, MAINTENANCE_KINDS
 import { createQrToken, qrPayload } from "@/lib/qr-code";
 import { updateTripStart } from "@/lib/trip-time-actions";
 import { captureTripStartSnapshot } from "@/lib/trip-snapshot";
+import { dashboardDataVersion, markDashboardDataChanged } from "@/lib/dashboard-data-version";
 import type { Prisma } from "@/prisma/generated/client";
 
 export const dynamic = "force-dynamic";
 const activeOperationIds = new Set<string>();
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+type DashboardSnapshot = { body: string; etag: string; expiresAt: number };
+const dashboardSnapshots = new Map<string, DashboardSnapshot>();
+const dashboardSnapshotBuilds = new Map<string, Promise<DashboardSnapshot>>();
+let nextStaleReservationCheckAt = 0;
+let staleReservationCheck: Promise<boolean> | null = null;
+let cachedDataVersion = dashboardDataVersion();
+
+function invalidateDashboardSnapshots() {
+  dashboardSnapshots.clear();
+  // 変更前のDBを読み込み中のPromiseを、変更後の要求が再利用しないようにする。
+  dashboardSnapshotBuilds.clear();
+}
+
+function syncDashboardSnapshotVersion() {
+  const version = dashboardDataVersion();
+  if (version === cachedDataVersion) return;
+  cachedDataVersion = version;
+  invalidateDashboardSnapshots();
+}
+
+function saveDashboardSnapshot(key: string, snapshot: DashboardSnapshot) {
+  const now = Date.now();
+  for (const [cachedKey, cached] of dashboardSnapshots) if (cached.expiresAt <= now) dashboardSnapshots.delete(cachedKey);
+  if (!dashboardSnapshots.has(key) && dashboardSnapshots.size >= 24) {
+    const oldest = dashboardSnapshots.keys().next().value;
+    if (oldest) dashboardSnapshots.delete(oldest);
+  }
+  dashboardSnapshots.set(key, snapshot);
+}
+
+function dashboardResponse(snapshot: DashboardSnapshot, request: Request) {
+  const headers = { "Cache-Control": "private, no-cache, must-revalidate", ETag: snapshot.etag };
+  if (request.headers.get("If-None-Match") === snapshot.etag) return new Response(null, { status: 304, headers });
+  return new Response(snapshot.body, { headers: { ...headers, "Content-Type": "application/json; charset=utf-8" } });
+}
 
 type LatestNfcAssignment = { cleared: boolean; nfcTag: { id: string; uid: string } };
 
@@ -48,7 +84,8 @@ async function expireStaleReservations(now = new Date()) {
     where: { status: "RESERVED", plannedStart: { lte: cutoff } },
     select: { id: true, version: true, employee: { select: { name: true } }, vehicle: { select: { name: true } } },
   });
-  if (staleReservations.length === 0) return;
+  if (staleReservations.length === 0) return false;
+  let changed = false;
   await prisma.$transaction(async (tx) => {
     for (const reservation of staleReservations) {
       const updated = await tx.trip.updateMany({
@@ -56,6 +93,7 @@ async function expireStaleReservations(now = new Date()) {
         data: { status: "CANCELLED", version: { increment: 1 } },
       });
       if (updated.count !== 1) continue;
+      changed = true;
       await tx.auditLog.create({
         data: {
           actorName: "システム",
@@ -67,6 +105,24 @@ async function expireStaleReservations(now = new Date()) {
       });
     }
   });
+  return changed;
+}
+
+// 複数端末の5秒更新が重なっても、期限切れ予約の検索は1分に1回だけ実行する。
+async function checkStaleReservations(now = new Date()) {
+  if (staleReservationCheck) return staleReservationCheck;
+  if (now.getTime() < nextStaleReservationCheckAt) return false;
+  nextStaleReservationCheckAt = now.getTime() + 60_000;
+  staleReservationCheck = expireStaleReservations(now)
+    .then((changed) => {
+      if (changed) {
+        markDashboardDataChanged();
+        syncDashboardSnapshotVersion();
+      }
+      return changed;
+    })
+    .finally(() => { staleReservationCheck = null; });
+  return staleReservationCheck;
 }
 
 // rowを渡すと、JSON取込の何件目かを添えて知らせる。
@@ -213,22 +269,38 @@ async function lockTripForTimeChange(tx: Prisma.TransactionClient, tripId: strin
 }
 
 export async function GET(request: Request) {
-  await expireStaleReservations();
+  await checkStaleReservations();
+  syncDashboardSnapshotVersion();
   const defaults = todayInTokyo();
   const url = new URL(request.url);
+  const scope = url.searchParams.get("scope") === "settings" ? "settings" : "operations";
   const requestedStart = url.searchParams.get("from");
   const parsedStart = requestedStart ? new Date(requestedStart) : defaults.start;
   const dayStart = Number.isNaN(parsedStart.getTime()) ? defaults.start : parsedStart;
   const requestedDays = Number(url.searchParams.get("days"));
   const days = requestedDays === 1 || requestedDays === 3 ? requestedDays : 3;
   const dayEnd = new Date(dayStart.getTime() + days * 24 * 60 * 60_000);
+  const cacheKey = `${scope}:${dayStart.toISOString()}:${days}`;
+  const cached = dashboardSnapshots.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return dashboardResponse(cached, request);
+  const existingBuild = dashboardSnapshotBuilds.get(cacheKey);
+  if (existingBuild) return dashboardResponse(await existingBuild, request);
+  let resolveBuild!: (snapshot: DashboardSnapshot) => void;
+  let rejectBuild!: (error: unknown) => void;
+  const build = new Promise<DashboardSnapshot>((resolve, reject) => { resolveBuild = resolve; rejectBuild = reject; });
+  // 最初の要求が失敗した場合も、待機者がいないPromiseを未処理にしない。
+  void build.catch(() => undefined);
+  dashboardSnapshotBuilds.set(cacheKey, build);
+  const buildDataVersion = dashboardDataVersion();
+  try {
   const [employees, departments, vehicles, spots, trips, nextReservations, maintenances, backup, system] = await Promise.all([
     prisma.employee.findMany({ include: { employeeNumber: true, department: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } }, orderBy: { employeeNumber: { code: "asc" } } }),
     prisma.department.findMany({ include: { _count: { select: { employees: { where: { active: true } } } } }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
     prisma.vehicle.findMany({ include: { vehicleNumber: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } }, orderBy: { vehicleNumber: { code: "asc" } } }),
-    prisma.parkingSpot.findMany({ include: { vehicle: { include: { vehicleNumber: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } } } }, orderBy: { code: "asc" } }),
+    // 車両本体は直前の一覧で取得済み。区画側はIDだけ取得し、重複したJOINとNFC検索を避ける。
+    prisma.parkingSpot.findMany({ include: { vehicle: { select: { id: true } } }, orderBy: { code: "asc" } }),
     prisma.trip.findMany({
-      where: { OR: [
+      where: scope === "settings" ? { status: "IN_USE" } : { OR: [
         { status: "RESERVED", plannedStart: { lt: dayEnd }, plannedEnd: { gt: dayStart } },
         { status: "IN_USE" },
         { status: "COMPLETED", actualStart: { lt: dayEnd }, actualEnd: { gt: dayStart } },
@@ -237,7 +309,7 @@ export async function GET(request: Request) {
       include: { employee: { include: { employeeNumber: true, department: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } } }, vehicle: { include: { vehicleNumber: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } } } }, orderBy: { plannedStart: "asc" },
     }),
     // 利用中の車両の予約は表示範囲に関係なく返す。延長できる上限と、超過が次の人へ響くかの表示に使う。
-    prisma.trip.findMany({
+    scope === "settings" ? Promise.resolve([]) : prisma.trip.findMany({
       where: { status: "RESERVED", vehicle: { trips: { some: { status: "IN_USE" } } } },
       include: { employee: { include: { employeeNumber: true, department: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } } }, vehicle: { include: { vehicleNumber: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } } } }, orderBy: { plannedStart: "asc" },
     }),
@@ -249,11 +321,13 @@ export async function GET(request: Request) {
     getBackupStatus(),
     getApplicationSystemStatus(),
   ]);
+  const vehiclePayload = vehicles.map((vehicle) => withVehicleCode(vehicle));
+  const vehicleById = new Map(vehiclePayload.map((vehicle) => [vehicle.id, vehicle]));
   const payload = {
     employees: employees.map((employee) => withEmployeeCode(employee)),
     departments: departments.map((department) => ({ id: department.id, name: department.name, active: department.active, version: department.version, employeeCount: department._count.employees })),
-    vehicles: vehicles.map((vehicle) => withVehicleCode(vehicle)),
-    spots: spots.map((spot) => ({ ...spot, dedicatedVehicleName: vehicles.find((vehicle) => vehicle.id === spot.dedicatedVehicleId)?.name ?? null, vehicle: spot.vehicle ? withVehicleCode(spot.vehicle) : null })),
+    vehicles: vehiclePayload,
+    spots: spots.map((spot) => ({ ...spot, dedicatedVehicleName: spot.dedicatedVehicleId ? vehicleById.get(spot.dedicatedVehicleId)?.name ?? null : null, vehicle: spot.vehicle ? vehicleById.get(spot.vehicle.id) ?? null : null })),
     trips: trips.map((trip) => ({ ...trip, employee: withEmployeeCode(trip.employee), vehicle: withVehicleCode(trip.vehicle) })),
     nextReservations: nextReservations.map((trip) => ({ ...trip, employee: withEmployeeCode(trip.employee), vehicle: withVehicleCode(trip.vehicle) })),
     maintenances,
@@ -265,10 +339,18 @@ export async function GET(request: Request) {
   };
   const body = JSON.stringify(payload);
   const etag = `"${createHash("sha256").update(body).digest("base64url")}"`;
-  const headers = { "Cache-Control": "private, no-cache, must-revalidate", ETag: etag };
-  // 5秒ごとの確認で内容が同じなら本文を返さず、通信量とクライアントの再描画を抑える。
-  if (request.headers.get("If-None-Match") === etag) return new Response(null, { status: 304, headers });
-  return new Response(body, { headers: { ...headers, "Content-Type": "application/json; charset=utf-8" } });
+  // DB変更はPOST成功時に即座に破棄する。上限時間は、外部からDBが更新された場合の保険。
+  const unchangedWhileBuilding = buildDataVersion === dashboardDataVersion();
+  const snapshot = { body, etag, expiresAt: unchangedWhileBuilding ? Date.now() + (scope === "settings" ? 60_000 : 30_000) : 0 };
+  if (unchangedWhileBuilding) saveDashboardSnapshot(cacheKey, snapshot);
+  resolveBuild(snapshot);
+  return dashboardResponse(snapshot, request);
+  } catch (error) {
+    rejectBuild(error);
+    throw error;
+  } finally {
+    if (dashboardSnapshotBuilds.get(cacheKey) === build) dashboardSnapshotBuilds.delete(cacheKey);
+  }
 }
 
 export async function POST(request: Request) {
@@ -295,7 +377,7 @@ export async function POST(request: Request) {
   try {
     const completed = await prisma.auditLog.findUnique({ where: { operationId }, select: { id: true } });
     if (completed) return NextResponse.json({ ok: true, replayed: true });
-    await expireStaleReservations();
+    await checkStaleReservations();
     let auditActor: { actorEmployeeId: string | null; actorName: string } = { actorEmployeeId: null, actorName: "共用端末" };
     if ("actorEmployeeId" in input && input.actorEmployeeId) {
       const actor = await prisma.employee.findFirst({ where: { id: input.actorEmployeeId, active: true }, select: { id: true, name: true } });
@@ -1064,6 +1146,8 @@ export async function POST(request: Request) {
         await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "部署並べ替え", targetType: "Department", targetId: input.id, description: `部署「${departments[target].name}」を${input.direction === "up" ? "上" : "下"}へ移動` } });
       });
     }
+    markDashboardDataChanged();
+    syncDashboardSnapshotVersion();
     return NextResponse.json({ ok: true });
   } catch (error) {
     const duplicate = typeof error === "object" && error !== null && "code" in error && error.code === "P2002";

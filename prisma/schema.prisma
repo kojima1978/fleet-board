@@ -195,6 +195,7 @@ model Trip {
   @@index([vehicleId, status])
   @@index([vehicleId, actualStart, id])
   @@index([employeeId, status])
+  @@index([status, plannedStart])
 }
 
 // 車両の整備記録。予定（SCHEDULED）の期間は予約できない。plannedEndは戻り予定で、未定ならnull。

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { backupCounts, createFleetBackup, FleetBackupValidationError, JSON_BACKUP_MAX_BYTES, parseFleetBackup, restoreFleetBackup } from "@/lib/json-backup";
 import { consumeRateLimit, isSameOriginRequest, readJsonBody, requestClientKey } from "@/lib/request-security";
+import { markDashboardDataChanged } from "@/lib/dashboard-data-version";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,7 @@ export async function POST(request: Request) {
     if (body.confirmation !== "RESTORE") return NextResponse.json({ message: "確認欄へRESTOREと入力してください" }, { status: 400 });
     try {
       await restoreFleetBackup(backup);
+      markDashboardDataChanged();
       return NextResponse.json({ restored: true, counts });
     } catch (error) {
       console.error("JSON backup database restore failed", error);
