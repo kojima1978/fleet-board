@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { AlertTriangle, CalendarClock, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Fuel, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Move, Nfc, Pencil, Play, Plus, Printer, QrCode, RefreshCw, Snowflake, UserRound, Utensils, Wrench, X } from "lucide-react";
+import { AlertTriangle, CalendarClock, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Fuel, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Move, Nfc, Play, Plus, Printer, QrCode, RefreshCw, Snowflake, UserRound, Utensils, Wrench, X } from "lucide-react";
 import type { DashboardData, Employee, ParkingSpot, Trip, Vehicle, VehicleMaintenance } from "@/lib/types";
 import { normalizeNfcUid } from "@/lib/nfc";
 import { createOperationId } from "@/lib/operation-id";
@@ -52,7 +52,6 @@ const ScannerGuide = dynamic(() => import("./scanner-guide").then((module) => mo
 // 操作時だけ必要なフォームを初期バンドルから外す。配置図とタイムラインの初回表示を軽くする。
 const MaintenanceDialog = dynamic(() => import("./maintenance-dialog").then((module) => module.MaintenanceDialog));
 const SendOutDialog = dynamic(() => import("./maintenance-dialog").then((module) => module.SendOutDialog));
-const ActualStartEditor = dynamic(() => import("./trip-start-editors").then((module) => module.ActualStartEditor));
 const NfcBridgeHelp = dynamic(() => import("./nfc-bridge-help").then((module) => module.NfcBridgeHelp));
 const jpTime = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false });
 const jpTimeSeconds = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
@@ -63,8 +62,8 @@ const formatTime = (value: string | Date) => jpTime.format(new Date(value));
 const formatDateTime = (value: string | Date) => jpDateTime.format(new Date(value));
 // 一覧の時刻。今日なら時刻だけ、明日なら「翌」を付け、それ以降は日付も出す。
 const formatShortTime = (value: string | Date, now: Date) => { const date = new Date(value); const days = Math.round((new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime() - new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()) / 86_400_000); return days === 0 ? formatTime(date) : days === 1 ? `翌${formatTime(date)}` : formatDateTime(date); };
-// 返却予定・予約の変更の通知。閉じた後でも結果が分かるよう、新しい時刻を入れる。
-const tripEndChangedMessage = (trip: Trip, end: string | Date) => `${trip.vehicle.name}の${trip.status === "IN_USE" ? "返却予定" : "終了予定"}を${formatDateTime(end)}に変更しました`;
+// 操作の結果を出す通知。undoがあれば「元に戻す」を添える。
+type Mutate = (body: object, success: string, options?: { undo?: () => void }) => Promise<boolean>;
 const formatMinutes = (minutes: number) => minutes >= 60 ? `${Math.floor(minutes / 60)}時間${minutes % 60 ? `${minutes % 60}分` : ""}` : `${minutes}分`;
 // 同じ車両の次の予約。延長できる上限と、超過が次の人へ響くかの判断に使う。
 const nextReservationFor = (trip: Trip, reservations: Trip[]) => reservations.filter((item) => item.vehicleId === trip.vehicleId).sort((a, b) => a.plannedStart.localeCompare(b.plannedStart))[0] ?? null;
@@ -117,7 +116,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   const [fuelVehicle, setFuelVehicle] = useState<Vehicle | null>(null);
   const [startIntent, setStartIntent] = useState<"now" | "scheduled">("now");
   const [editTrip, setEditTrip] = useState<Trip | null>(null);
-  const [toast, setToast] = useState<{ message: string; tone: "success" | "error"; thanks?: string; brief?: boolean } | null>(null);
+  const [toast, setToast] = useState<{ message: string; tone: "success" | "error"; thanks?: string; brief?: boolean; undo?: () => void } | null>(null);
   const [undoReturn, setUndoReturn] = useState<UndoReturn | null>(null);
   const [returnAnimation, setReturnAnimation] = useState<ReturnAnimation | null>(null);
   const [undoSecondsLeft, setUndoSecondsLeft] = useState(UNDO_RETURN_SECONDS);
@@ -343,8 +342,8 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   useEffect(() => {
     // エラーは読み落とさないよう閉じるまで残す。ただしNFCをかざしたときの通知は、次の人の邪魔にならないよう6秒で消す。
     if (!toast || (toast.tone !== "success" && !toast.brief)) return;
-    // お礼は読み切れるよう長めに残す。
-    const timer = window.setTimeout(() => setToast(null), toast.thanks ? 7_000 : toast.brief ? 6_000 : 4_000);
+    // お礼と「元に戻す」は読み切れるよう長めに残す。
+    const timer = window.setTimeout(() => setToast(null), toast.undo ? 8_000 : toast.thanks ? 7_000 : toast.brief ? 6_000 : 4_000);
     return () => window.clearTimeout(timer);
   }, [toast]);
 
@@ -377,7 +376,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
     },
   });
 
-  const mutate = useCallback(async (body: object, success: string) => {
+  const mutate: Mutate = useCallback(async (body, success, options) => {
     if (pendingRef.current) return false;
     pendingRef.current = true;
     setPendingAction(true);
@@ -400,7 +399,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
         response = await send();
       }
       const result = await response.json().catch(() => ({ message: "サーバーから正しい応答を受信できませんでした" }));
-      setToast({ message: response.ok ? success : result.message, tone: response.ok ? "success" : "error" });
+      setToast({ message: response.ok ? success : result.message, tone: response.ok ? "success" : "error", undo: response.ok ? options?.undo : undefined });
       await load(true);
       return response.ok;
     } catch (error) {
@@ -535,7 +534,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
           </Card> : null}
           {activeVehicles.length === 0 ? <TimelineEmptyState /> : <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
             {timelineMode === "chart" ? <Card className="min-w-0 overflow-hidden"><TimelinePanelHeader mode={timelineMode} onChange={setTimelineMode} /><Timeline data={data} openStart={openStart} openEdit={openEdit} highlightTripId={confirmedTrip?.id} timelineDate={timelineDate} timelineDays={timelineDays} setTimelineDate={setTimelineDate} setTimelineDays={setTimelineDays} /></Card> : <TimelineList trips={data.trips} openEdit={openEdit} mode={timelineMode} onChange={setTimelineMode} timelineDate={timelineDate} timelineDays={timelineDays} setTimelineDate={setTimelineDate} setTimelineDays={setTimelineDays} />}
-            <ActiveTripsPanel trips={activeTrips} reservations={data.nextReservations} mutate={mutate} actorName={employee?.name ?? "共用端末"} openEdit={openEdit} />
+            <ActiveTripsPanel trips={activeTrips} reservations={data.nextReservations} mutate={mutate} actorName={employee?.name ?? "共用端末"} />
           </section>}
         </> : null}
 
@@ -552,11 +551,11 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
       {dialog === "end" && returnTrip && <EndDialog submitting={pendingAction} trip={returnTrip} spots={data.spots} initialSpotId={returnSpotId} onChangeSpot={changeReturnSpot ? () => { setDialog(null); changeReturnSpot(); } : undefined} onClose={() => setDialog(null)} onSubmit={async (spotId, fuelLevel) => { const ok = await completeReturn(returnTrip, spotId, fuelLevel); if (ok) setDialog(null); }} />}
       {dialog === "parkingReturn" && returnSpot && <ParkingReturnDialog submitting={pendingAction} spot={returnSpot} spots={data.spots} trips={activeTrips} vehicles={data.vehicles} onClose={() => setDialog(null)} onSubmit={async (trip, fuelLevel) => { const ok = await completeReturn(trip, returnSpot.id, fuelLevel); if (ok) { setDialog(null); setReturnSpot(null); } }} />}
       {dialog === "fuel" && fuelVehicle && <FuelLevelDialog submitting={pendingAction} vehicle={fuelVehicle} onClose={() => setDialog(null)} onSubmit={async (fuelLevel) => { const ok = await mutate({ action: "setFuelLevel", vehicleId: fuelVehicle.id, version: fuelVehicle.version, fuelLevel, actorName: employee?.name ?? "共用端末" }, `${fuelVehicle.name}のガソリン残量を${formatFuelLevel(fuelLevel)}へ変更しました`); if (ok) setDialog(null); }} />}
-      {dialog === "edit" && editTrip && <EditTripDialog actorAvailable={!!employee?.id} submitting={pendingAction} trip={editTrip} onClose={() => setDialog(null)} onSetEnd={async (plannedEnd) => { const ok = await mutate({ action: "setTripEnd", tripId: editTrip.id, version: editTrip.version, plannedEnd, actorName: employee?.name ?? "共用端末" }, tripEndChangedMessage(editTrip, plannedEnd)); if (ok) { setDialog(null); if (startContext) setStayOnTimeline(false); } }} onSetPeriod={async (plannedStart, plannedEnd) => { const ok = await mutate({ action: "moveTrip", tripId: editTrip.id, version: editTrip.version, plannedStart, plannedEnd, actorName: employee?.name ?? "共用端末" }, "予約日時を変更しました"); if (ok) setDialog(null); return ok; }} onCorrectStart={async (actualStart, reason) => { const ok = await mutate({ action: "correctActualStart", tripId: editTrip.id, version: editTrip.version, actualStart, reason }, "実際の開始時刻を訂正しました"); if (ok) setDialog(null); return ok; }} onCancel={async () => { const ok = await mutate({ action: "cancelTrip", tripId: editTrip.id, version: editTrip.version, actorName: employee?.name ?? "共用端末" }, `${editTrip.vehicle.name}の予約を取り消しました`); if (ok) setDialog(null); }} />}
+      {dialog === "edit" && editTrip?.status === "RESERVED" && <EditTripDialog submitting={pendingAction} trip={editTrip} onClose={() => setDialog(null)} onSetPeriod={async (plannedStart, plannedEnd) => { const ok = await mutate({ action: "moveTrip", tripId: editTrip.id, version: editTrip.version, plannedStart, plannedEnd, actorName: employee?.name ?? "共用端末" }, "予約日時を変更しました"); if (ok) setDialog(null); return ok; }} onCancel={async () => { const ok = await mutate({ action: "cancelTrip", tripId: editTrip.id, version: editTrip.version, actorName: employee?.name ?? "共用端末" }, `${editTrip.vehicle.name}の予約を取り消しました`); if (ok) setDialog(null); }} />}
       {returnAnimation ? <ReturnDriveAnimation animation={returnAnimation} onDone={() => setReturnAnimation(null)} /> : null}
       {pendingAction ? <div className="fixed left-0 top-0 z-[80] h-1 w-full overflow-hidden bg-blue-100"><div className="h-full w-1/2 animate-pulse bg-blue-600" /></div> : null}
       {idleWarningSeconds !== null ? <div role="alert" className="fixed bottom-24 left-1/2 z-[75] flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950 shadow-2xl md:bottom-5"><AlertTriangle className="size-5 shrink-0 text-amber-600" /><div><p className="text-sm font-black">まもなく共用端末をリセットします</p><p className="text-xs text-amber-800">あと{idleWarningSeconds}秒。画面を操作すると継続できます。</p></div></div> : null}
-      {toast ? <div role={toast.tone === "error" ? "alert" : "status"} className={cn("fixed bottom-24 left-1/2 z-[70] flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-xl px-5 py-3 text-sm font-bold text-white shadow-2xl md:bottom-5", toast.tone === "error" ? "bg-rose-700" : "bg-slate-950")} >{toast.tone === "error" ? <AlertTriangle className="size-4 shrink-0" /> : <Check className="size-4 shrink-0" />}<span className="flex flex-col gap-1"><span>{toast.message}</span>{toast.thanks ? <span className="flex items-center gap-1.5 text-base font-black text-emerald-300"><Fuel className="size-5 shrink-0" />{toast.thanks}</span> : null}</span><button type="button" aria-label={toast.tone === "error" ? "エラー通知を閉じる" : "完了通知を閉じる"} onClick={() => setToast(null)} className="ml-1 grid size-7 shrink-0 place-items-center rounded-lg bg-white/15 hover:bg-white/25"><X className="size-3.5" /></button></div> : null}
+      {toast ? <div role={toast.tone === "error" ? "alert" : "status"} className={cn("fixed bottom-24 left-1/2 z-[70] flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-xl px-5 py-3 text-sm font-bold text-white shadow-2xl md:bottom-5", toast.tone === "error" ? "bg-rose-700" : "bg-slate-950")} >{toast.tone === "error" ? <AlertTriangle className="size-4 shrink-0" /> : <Check className="size-4 shrink-0" />}<span className="flex flex-col gap-1"><span>{toast.message}</span>{toast.thanks ? <span className="flex items-center gap-1.5 text-base font-black text-emerald-300"><Fuel className="size-5 shrink-0" />{toast.thanks}</span> : null}</span>{toast.undo ? <button type="button" onClick={() => { const undo = toast.undo; setToast(null); undo?.(); }} className="ml-2 min-h-8 shrink-0 whitespace-nowrap rounded-lg bg-white px-3 text-xs font-black text-slate-900 hover:bg-slate-100">元に戻す</button> : null}<button type="button" aria-label={toast.tone === "error" ? "エラー通知を閉じる" : "完了通知を閉じる"} onClick={() => setToast(null)} className="ml-1 grid size-7 shrink-0 place-items-center rounded-lg bg-white/15 hover:bg-white/25"><X className="size-3.5" /></button></div> : null}
       <Navigation view={view} className="fixed inset-x-3 bottom-3 z-40 flex rounded-2xl border border-slate-200 bg-white/95 p-1.5 shadow-2xl backdrop-blur lg:hidden" />
     </div>
   );
@@ -614,7 +613,7 @@ function TimelineEmptyState() {
 
 // タイムライン右の利用中の車両。超過した人から連絡を受けた社内の人が、延長や返却予定の変更をここで済ませる。
 // 台数が多くても見渡せるよう1台1行にし、操作はタップして開いた行にだけ出す。返却は駐車場の配置図で区画を選んで行う。
-function ActiveTripsPanel({ trips, reservations, mutate, actorName, openEdit }: { trips: Trip[]; reservations: Trip[]; mutate: (body: object, success: string) => Promise<boolean>; actorName: string; openEdit: (trip: Trip) => void }) {
+function ActiveTripsPanel({ trips, reservations, mutate, actorName }: { trips: Trip[]; reservations: Trip[]; mutate: Mutate; actorName: string }) {
   const [openTripId, setOpenTripId] = useState<string | null>(null);
   const now = new Date();
   const inUse = [...trips].sort((a, b) => a.plannedEnd.localeCompare(b.plannedEnd));
@@ -640,7 +639,7 @@ function ActiveTripsPanel({ trips, reservations, mutate, actorName, openEdit }: 
           {open ? <div className="space-y-1.5 px-3 pb-2.5 pt-1">
             <p className="text-[11px] text-slate-500">{trip.employee.department} ・ 返却予定 <span className={cn("font-bold", overdue ? "text-rose-700" : "text-slate-700")}>{formatDateTime(trip.plannedEnd)}</span></p>
             {next ? <p className={cn("flex items-center gap-1 text-[11px] font-bold", tight ? "text-amber-900" : "text-slate-500")}><CalendarClock className="size-3.5 shrink-0" /><span className="truncate">次の予約 {formatDateTime(next.plannedStart)} {next.employee.name}{tight ? gap <= 0 ? "（開始時刻を過ぎています）" : `（あと${formatMinutes(gap)}）` : ""}</span></p> : null}
-            <div className="flex flex-wrap items-center gap-1"><Link href={`/?returnTrip=${trip.id}`} title="駐車場の画面で返却先の区画を選びます" className="inline-flex min-h-8 items-center gap-1 rounded-lg bg-blue-600 px-3 text-xs font-bold text-white hover:bg-blue-700"><LogOut className="size-3.5" />返却</Link><Button variant="ghost" className="min-h-8 px-2 text-xs" onClick={() => openEdit(trip)}><Pencil className="size-3.5" />返却予定を変更</Button><div className="ml-auto flex items-center gap-1"><span className="text-[10px] font-bold text-slate-400">延長</span><TripExtendButtons trip={trip} reservations={reservations} minutes={[30, 60]} mutate={mutate} actorName={actorName} className="min-h-8 bg-white px-2 text-xs" /></div></div>
+            <TripExtendButtons trip={trip} reservations={reservations} mutate={mutate} actorName={actorName} buttonClassName="min-h-8 bg-white text-[11px]" /><div className="flex justify-end"><Link href={`/?returnTrip=${trip.id}`} title="駐車場の画面で返却先の区画を選びます" className="inline-flex min-h-8 items-center gap-1 rounded-lg bg-blue-600 px-4 text-xs font-bold text-white hover:bg-blue-700"><LogOut className="size-3.5" />返却する</Link></div>
           </div> : null}
         </li>;
       })}</ul>}
@@ -648,21 +647,29 @@ function ActiveTripsPanel({ trips, reservations, mutate, actorName, openEdit }: 
   </Card>;
 }
 
-// 返却予定の延長ボタン。次の予約や7日の上限を越える延長は押せない。
-function TripExtendButtons({ trip, reservations, minutes, mutate, actorName, className }: { trip: Trip; reservations: Trip[]; minutes: number[]; mutate: (body: object, success: string) => Promise<boolean>; actorName: string; className?: string }) {
+// 返却予定の延長ボタン。30分〜3時間と、その日いっぱい（終日＝23:59）まで。次の予約や7日の上限を越える延長は押せない。
+// 押し間違いに備えて通知に「元に戻す」を出す。超過中の延長は元の予定が過ぎているので戻せない。
+const EXTEND_MINUTES = [30, 60, 120, 180] as const;
+function TripExtendButtons({ trip, reservations, mutate, actorName, className, buttonClassName }: { trip: Trip; reservations: Trip[]; mutate: Mutate; actorName: string; className?: string; buttonClassName?: string }) {
   const [busy, setBusy] = useState(false);
   const now = Date.now();
-  const overdue = new Date(trip.plannedEnd).getTime() < now;
+  const current = new Date(trip.plannedEnd).getTime();
+  const overdue = current < now;
   const next = nextReservationFor(trip, reservations);
   const limit = Math.min(new Date(trip.plannedStart).getTime() + 7 * 24 * 60 * 60_000, next ? new Date(next.plannedStart).getTime() : Infinity);
-  const extend = async (value: number) => {
-    const end = extendedEnd(trip, value, Date.now());
+  const dayEnd = tokyoDayStart(new Date(now)).getTime() + 86_400_000 - 60_000;
+  const options = [
+    ...EXTEND_MINUTES.map((minutes) => ({ key: String(minutes), label: formatMinutes(minutes), minutes, end: extendedEnd(trip, minutes, now), title: overdue ? `返却予定を今から${formatMinutes(minutes)}後にする` : `返却予定を${formatMinutes(minutes)}延長` })),
+    { key: "day", label: "終日", minutes: undefined, end: dayEnd, title: `返却予定を今日の${formatTime(new Date(dayEnd))}にする` },
+  ];
+  const extend = async (end: number, minutes?: number) => {
     setBusy(true);
     try {
-      await mutate(overdue ? { action: "setTripEnd", tripId: trip.id, version: trip.version, plannedEnd: new Date(end).toISOString(), actorName } : { action: "adjustTrip", tripId: trip.id, version: trip.version, minutes: value, actorName }, `${trip.vehicle.name}の返却予定を${formatDateTime(new Date(end))}に延長しました`);
+      const undo = overdue ? undefined : () => void mutate({ action: "setTripEnd", tripId: trip.id, version: trip.version + 1, plannedEnd: new Date(current).toISOString(), actorName }, `${trip.vehicle.name}の延長を取り消し、返却予定を${formatDateTime(trip.plannedEnd)}に戻しました`);
+      await mutate(minutes && !overdue ? { action: "adjustTrip", tripId: trip.id, version: trip.version, minutes, actorName } : { action: "setTripEnd", tripId: trip.id, version: trip.version, plannedEnd: new Date(end).toISOString(), actorName }, `${trip.vehicle.name}の返却予定を${formatDateTime(new Date(end))}に延長しました`, { undo });
     } finally { setBusy(false); }
   };
-  return <>{minutes.map((value) => <Button key={value} variant="ghost" className={className} title={overdue ? `返却予定を今から${formatMinutes(value)}後にする` : `返却予定を${formatMinutes(value)}延長`} disabled={busy || extendedEnd(trip, value, now) > limit} onClick={() => void extend(value)}>{overdue ? "今から" : "＋"}{formatMinutes(value)}</Button>)}</>;
+  return <div role="group" aria-label="返却予定の延長" className={cn("flex items-center gap-1.5", className)}><span className="w-8 shrink-0 text-[11px] font-bold text-slate-500">{overdue ? "今から" : "延長"}</span><div className="grid min-w-0 flex-1 grid-cols-5 gap-1">{options.map((option) => <Button key={option.key} variant="ghost" className={cn("whitespace-nowrap px-0", buttonClassName)} title={option.title} disabled={busy || option.end <= Math.max(current, now) || option.end > limit} onClick={() => void extend(option.end, option.minutes)}>{option.label}</Button>)}</div></div>;
 }
 function Legend({ color, label }: { color: string; label: string }) { return <span className="flex items-center gap-1.5"><i className={cn("size-2 rounded-full", color)} />{label}</span>; }
 function VehicleCodeBadge({ code }: { code: string }) { return <span className="shrink-0 rounded-md border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[9px] font-black tracking-wide text-slate-600">{code}</span>; }
@@ -892,7 +899,7 @@ function Timeline({ data, openStart, openEdit, highlightTripId, timelineDate, ti
               const color = trip.status === "IN_USE" ? "bg-blue-500" : trip.status === "COMPLETED" ? "bg-slate-400" : "bg-violet-500";
               const isHighlighted = trip.id === highlightTripId;
               if (visibleDuration <= 0) return null;
-              return <button ref={isHighlighted ? highlightedTrip : undefined} key={trip.id} title={`${trip.employee.name} ${trip.status === "COMPLETED" ? "実績" : "予定"} ${formatDateTime(displayStart)}–${formatDateTime(displayEnd)}`} onClick={() => { if (trip.status !== "COMPLETED") openEdit(trip); }} className={cn("absolute top-2 z-[2] h-11 select-none overflow-hidden rounded-xl px-3 text-left text-white shadow-sm", color, trip.status !== "COMPLETED" && "cursor-pointer hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600", isHighlighted && "z-10 ring-4 ring-amber-300 shadow-xl animate-pulse")} style={{ left: visibleStart * pxPerMinute, width: visibleDuration * pxPerMinute }}>
+              return <button ref={isHighlighted ? highlightedTrip : undefined} key={trip.id} title={`${trip.employee.name} ${trip.status === "COMPLETED" ? "実績" : "予定"} ${formatDateTime(displayStart)}–${formatDateTime(displayEnd)}${trip.status === "IN_USE" ? "（返却・延長は右の「利用中」から）" : ""}`} onClick={() => { if (trip.status === "RESERVED") openEdit(trip); }} className={cn("absolute top-2 z-[2] h-11 select-none overflow-hidden rounded-xl px-3 text-left text-white shadow-sm", color, trip.status === "RESERVED" && "cursor-pointer hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600", isHighlighted && "z-10 ring-4 ring-amber-300 shadow-xl animate-pulse")} style={{ left: visibleStart * pxPerMinute, width: visibleDuration * pxPerMinute }}>
                 <span className="block truncate text-xs font-black">{continuesBefore ? "◀ 継続 ・ " : ""}{isHighlighted ? "登録済 ・ " : ""}{trip.employee.name}{continuesAfter ? " ・ 翌日へ ▶" : ""}</span><span className="block truncate text-[10px] opacity-80">{trip.status === "COMPLETED" ? "実績 " : liveOverdue ? "超過中 " : ""}{formatTime(displayStart)}～{liveOverdue ? `現在 ${formatTime(displayEnd)}` : formatTime(displayEnd)}</span>
               </button>;
             })}
@@ -912,7 +919,7 @@ function VehicleEquipmentBadges({ vehicle, compact = false }: { vehicle: Pick<Ve
   </span>;
 }
 
-function ParkingMap({ selectedVehicleId, setSelectedVehicleId, data, trips, changedVehicleIds, mutate, openStart, openReserve, openReturn, openFuel, openEdit, openEnd, actorName, currentEmployeeId, returnRequest }: { selectedVehicleId: string | null; setSelectedVehicleId: React.Dispatch<React.SetStateAction<string | null>>; data: DashboardData; trips: Trip[]; changedVehicleIds: string[]; mutate: (body: object, success: string) => Promise<boolean>; openStart: (vehicle?: Vehicle) => void; openReserve: (vehicle: Vehicle) => void; openReturn: (spot: ParkingSpot) => void; openFuel: (vehicle: Vehicle) => void; openEdit: (trip: Trip) => void; openEnd: (trip: Trip, spotId?: string, changeSpot?: () => void) => void; actorName: string; currentEmployeeId: string | null; returnRequest: { tripId: string; nonce: number } | null }) {
+function ParkingMap({ selectedVehicleId, setSelectedVehicleId, data, trips, changedVehicleIds, mutate, openStart, openReserve, openReturn, openFuel, openEdit, openEnd, actorName, currentEmployeeId, returnRequest }: { selectedVehicleId: string | null; setSelectedVehicleId: React.Dispatch<React.SetStateAction<string | null>>; data: DashboardData; trips: Trip[]; changedVehicleIds: string[]; mutate: Mutate; openStart: (vehicle?: Vehicle) => void; openReserve: (vehicle: Vehicle) => void; openReturn: (spot: ParkingSpot) => void; openFuel: (vehicle: Vehicle) => void; openEdit: (trip: Trip) => void; openEnd: (trip: Trip, spotId?: string, changeSpot?: () => void) => void; actorName: string; currentEmployeeId: string | null; returnRequest: { tripId: string; nonce: number } | null }) {
   // 車両移動モードでドラッグ中、またはタップで選んだ移動元の車両。
   const [movingVehicleId, setMovingVehicleId] = useState<string | null>(null);
   const idleTrafficEnabled = useIdleTrafficEnabled();
@@ -1076,7 +1083,7 @@ function ParkingMap({ selectedVehicleId, setSelectedVehicleId, data, trips, chan
           </div>
           <button type="button" aria-label="車両詳細を閉じる" onClick={() => setSelectedVehicleId(null)} className="absolute -right-2.5 -top-2.5 grid size-8 place-items-center rounded-full border border-slate-300 bg-white text-slate-500 shadow-lg hover:bg-slate-100 hover:text-slate-800"><X className="size-4" /></button>
         </div> : null}
-        {selectedTrip ? <div role="region" aria-label={`${selectedTrip.vehicle.name}の利用状況`} className="absolute inset-x-2 bottom-2 z-30 mx-auto flex max-w-xl flex-col gap-2.5 rounded-2xl border border-slate-300 bg-white p-3 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.55)] ring-1 ring-white/80"><div className="flex min-w-0 items-center gap-2.5 pr-3"><span className="grid size-10 shrink-0 place-items-center rounded-xl border border-slate-200 bg-slate-100"><CarFront className="size-5" style={{ color: selectedTrip.vehicle.color }} /></span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-1.5"><b className="text-sm">{selectedTrip.vehicle.name}</b><span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-700">利用中</span></div><p className="text-[10px] font-bold text-slate-500">{selectedTrip.employee.name} ・ <span className={cn(new Date(selectedTrip.plannedEnd).getTime() < Date.now() && "text-rose-700")}>{formatDateTime(selectedTrip.plannedEnd)}{new Date(selectedTrip.plannedEnd).getTime() < Date.now() ? " 超過" : " 返却予定"}</span></p></div></div><div role="group" aria-label="利用中の車両の操作" className="grid grid-cols-2 gap-2"><Button className="min-h-12 gap-1.5 text-sm" onClick={() => startReturn(selectedTrip)}><LogOut className="size-4" />返却</Button><Button variant="ghost" className="min-h-12 gap-1.5 text-sm" onClick={() => openEdit(selectedTrip)}><Pencil className="size-4" />返却予定を変更</Button></div><div role="group" aria-label="返却予定の延長" className="flex flex-wrap items-center gap-1.5"><span className="text-[11px] font-bold text-slate-500">延長</span><TripExtendButtons trip={selectedTrip} reservations={data.nextReservations} minutes={[15, 30, 60]} mutate={mutate} actorName={actorName} className="min-h-9 px-2.5 text-xs" /><Button variant="ghost" className="ml-auto min-h-9 gap-1 border-violet-200 bg-violet-50 px-2.5 text-xs text-violet-800 hover:bg-violet-100" onClick={() => openReserve(selectedTrip.vehicle)}><CalendarClock className="size-3.5" />予約する</Button></div><button type="button" aria-label="利用状況を閉じる" onClick={() => setSelectedTripId(null)} className="absolute -right-2.5 -top-2.5 grid size-8 place-items-center rounded-full border border-slate-300 bg-white text-slate-500 shadow-lg hover:bg-slate-100 hover:text-slate-800"><X className="size-4" /></button></div> : null}
+        {selectedTrip ? <div role="region" aria-label={`${selectedTrip.vehicle.name}の利用状況`} className="absolute inset-x-2 bottom-2 z-30 mx-auto flex max-w-xl flex-col gap-2.5 rounded-2xl border border-slate-300 bg-white p-3 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.55)] ring-1 ring-white/80"><div className="flex min-w-0 items-center gap-2.5 pr-3"><span className="grid size-10 shrink-0 place-items-center rounded-xl border border-slate-200 bg-slate-100"><CarFront className="size-5" style={{ color: selectedTrip.vehicle.color }} /></span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-1.5"><b className="text-sm">{selectedTrip.vehicle.name}</b><span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-700">利用中</span></div><p className="text-[10px] font-bold text-slate-500">{selectedTrip.employee.name} ・ <span className={cn(new Date(selectedTrip.plannedEnd).getTime() < Date.now() && "text-rose-700")}>{formatDateTime(selectedTrip.plannedEnd)}{new Date(selectedTrip.plannedEnd).getTime() < Date.now() ? " 超過" : " 返却予定"}</span></p></div></div><TripExtendButtons trip={selectedTrip} reservations={data.nextReservations} mutate={mutate} actorName={actorName} className="border-t border-slate-100 pt-2.5" buttonClassName="min-h-9 text-xs" /><div role="group" aria-label="利用中の車両の操作" className="flex items-center justify-between gap-2 border-t border-slate-100 pt-2.5"><Button variant="ghost" className="min-h-10 gap-1 border-violet-200 bg-violet-50 px-3 text-xs text-violet-800 hover:bg-violet-100" onClick={() => openReserve(selectedTrip.vehicle)}><CalendarClock className="size-3.5" />予約する</Button><Button className="min-h-10 gap-1.5 px-5 text-sm" onClick={() => startReturn(selectedTrip)}><LogOut className="size-4" />返却する</Button></div><button type="button" aria-label="利用状況を閉じる" onClick={() => setSelectedTripId(null)} className="absolute -right-2.5 -top-2.5 grid size-8 place-items-center rounded-full border border-slate-300 bg-white text-slate-500 shadow-lg hover:bg-slate-100 hover:text-slate-800"><X className="size-4" /></button></div> : null}
       </div>
       {returningTrip ? <div role="status" className="mx-auto mt-2 flex max-w-md items-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 p-2"><LogOut className="size-4 shrink-0 text-blue-600" /><p className="mr-auto text-xs font-bold"><b>{returningTrip.vehicle.name}</b>{returnableCount > 0 ? <>を返却する区画をタップ（点滅中の空き{returnableCount}区画・ドラッグも可）</> : "を返却できる空き区画がありません"}</p><Button variant="ghost" className="min-h-8 shrink-0 whitespace-nowrap px-3 text-xs" onClick={() => setReturningTripId(null)}>やめる</Button></div> : null}
       {movingVehicle ? <div role="status" className="mx-auto mt-2 flex max-w-md items-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 p-2"><Move className="size-4 shrink-0 text-blue-600" /><p className="mr-auto text-xs font-bold"><b>{movingVehicle.name}</b>{movingVehicle.parkingSpotId ? "の移動先" : "を置く区画"}をタップ（ドラッグも可）</p><Button variant="ghost" className="min-h-8 shrink-0 whitespace-nowrap px-3 text-xs" onClick={() => setMovingVehicleId(null)}>やめる</Button></div> : null}
@@ -1257,37 +1264,14 @@ export function StartDialog({ intent = "now", kiosk, employees, vehicles, trips,
     </StartStep>}
   </form></DialogShell>;
 }
-export function EditTripDialog({ actorAvailable, onSetPeriod, onCorrectStart, trip, submitting, onClose, onSetEnd, onCancel }: { actorAvailable: boolean; onSetPeriod: (start: string, end: string) => Promise<boolean>; onCorrectStart: (value: string, reason: string) => Promise<boolean>; trip: Trip; submitting: boolean; onClose: () => void; onSetEnd: (plannedEnd: string) => void; onCancel: () => void }) {
+// 予約の日時の変更と取消。利用中の車は返却と延長だけにし、この画面は開かない。
+export function EditTripDialog({ onSetPeriod, trip, submitting, onClose, onCancel }: { onSetPeriod: (start: string, end: string) => Promise<boolean>; trip: Trip; submitting: boolean; onClose: () => void; onCancel: () => void }) {
   const [confirmCancel, setConfirmCancel] = useState(false);
   const reservationEdit = useReservationTimeEdit(trip);
-  // 時間のボタンは押してもすぐには変えない。選んだ時刻を入力欄と「変更後」に出し、下の「返却予定を変更」で確定する。
-  const initialEnd = toLocalDateTimeInput(new Date(trip.plannedEnd));
-  const [customEnd, setCustomEnd] = useState(initialEnd);
-  const baseEnd = new Date(initialEnd).getTime();
-  const rawMinimumEnd = Math.max(new Date(trip.plannedStart).getTime() + 15 * 60_000, trip.status === "IN_USE" ? Date.now() : 0);
-  const minimumEnd = new Date(Math.ceil(rawMinimumEnd / (15 * 60_000)) * 15 * 60_000);
-  const maximumEnd = new Date(new Date(trip.plannedStart).getTime() + 7 * 24 * 60 * 60_000);
-  const selectedEnd = new Date(customEnd);
-  const endAllowed = (time: number) => time >= rawMinimumEnd && time <= maximumEnd.getTime();
-  const changed = customEnd !== initialEnd;
-  const customEndValid = changed && Number.isFinite(selectedEnd.getTime()) && endAllowed(selectedEnd.getTime());
-  const difference = Math.round((selectedEnd.getTime() - baseEnd) / 60_000);
-  const quickLabel = (minutes: number) => minutes >= 60 ? `${minutes / 60}時間` : `${minutes}分`;
-  const quickValue = (minutes: number) => toLocalDateTimeInput(new Date(baseEnd + minutes * 60_000));
-  const quickButton = (minutes: number) => <button type="button" key={minutes} aria-pressed={customEnd === quickValue(minutes)} disabled={submitting || !endAllowed(baseEnd + minutes * 60_000)} onClick={() => setCustomEnd(customEnd === quickValue(minutes) ? initialEnd : quickValue(minutes))} className={cn("min-h-12 rounded-xl border px-1 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-35", customEnd === quickValue(minutes) ? "border-blue-600 bg-blue-50 text-blue-700 ring-2 ring-blue-200" : "border-slate-200 bg-white text-slate-700 hover:border-blue-400 hover:bg-slate-50")}>{minutes < 0 ? "−" : "＋"}{quickLabel(Math.abs(minutes))}</button>;
-  const footer = trip.status === "RESERVED" ? <ReservationTimeActions edit={reservationEdit} busy={submitting} onSave={onSetPeriod} onCancel={onClose} />
-    : trip.status === "IN_USE" ? <DialogActions cancelDisabled={submitting} onCancel={onClose}><Button className="min-h-12" disabled={submitting || !customEndValid} onClick={() => onSetEnd(selectedEnd.toISOString())}>{submitting ? <LoaderCircle className="size-4 animate-spin" /> : <Check className="size-4" />}{submitting ? "変更しています…" : "返却予定を変更"}</Button></DialogActions> : undefined;
-  return <DialogShell busy={submitting} title={trip.status === "RESERVED" ? "予約を変更" : "返却予定を変更"} subtitle={`${trip.vehicle.name} ・ ${trip.employee.name}`} onClose={onClose} footer={footer}><div className="space-y-5">
-    <OperationSummary items={[{ label: "状態", value: trip.status === "IN_USE" ? "利用中" : "予約" }, { label: "車両・利用者", value: `${trip.vehicle.name}・${trip.employee.name}` }, { label: "開始", value: formatDateTime(trip.plannedStart) }, { label: trip.status === "IN_USE" ? "現在の返却予定" : "現在の終了予定", value: formatDateTime(trip.plannedEnd) }]} />
-    {trip.status === "RESERVED" ? <ReservationTimeFields edit={reservationEdit} busy={submitting} /> : null}
-    {trip.status === "IN_USE" ? <>
-    <div><p className="mb-2 text-xs font-bold text-slate-600">返却時間を選ぶ</p><div className="grid grid-cols-3 gap-2">{([-15, -30, -60] as const).map(quickButton)}</div><div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-5">{([15, 30, 60, 180, 300] as const).map(quickButton)}</div></div>
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><label htmlFor="custom-trip-end" className="text-xs font-bold text-slate-700">返却日時を指定</label><input id="custom-trip-end" type="datetime-local" step={900} min={toLocalDateTimeInput(minimumEnd)} max={toLocalDateTimeInput(maximumEnd)} value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} className="mt-2 min-h-12 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 text-base font-bold text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" /><p className="mt-2 text-[11px] leading-relaxed text-slate-500">15分単位・開始から7日以内で指定できます。日をまたぐ利用にも対応しています。</p></div>
-    <div aria-live="polite" className={cn("rounded-xl border px-3 py-2.5", !changed ? "border-slate-200 bg-slate-50" : customEndValid ? "border-blue-200 bg-blue-50" : "border-rose-200 bg-rose-50")}><p className="text-[10px] font-bold text-slate-500">変更後の返却予定</p><p className={cn("mt-0.5 text-base font-black", !changed ? "text-slate-400" : customEndValid ? "text-blue-800" : "text-rose-700")}>{!changed ? "時間を選んでください" : customEndValid ? <>{formatDateTime(selectedEnd)}<span className="ml-2 text-sm">（{difference < 0 ? "−" : "＋"}{formatMinutes(Math.abs(difference))}）</span></> : "この日時には変更できません"}</p></div>
-    <p className="text-[11px] text-slate-400">15分未満への短縮、現在時刻以前への短縮、次の予約と重なる延長はできません。</p>
-    </> : null}
-    {trip.status === "IN_USE" ? <ActualStartEditor trip={trip} busy={submitting} actorAvailable={actorAvailable} onSave={onCorrectStart} /> : null}
-    {trip.status === "RESERVED" ? <div className="border-t border-slate-100 pt-4"><p className="mb-3 text-center text-[11px] text-slate-500">開始から{RESERVATION_GRACE_MINUTES}分以内に利用開始されない場合は自動取消されます</p>{confirmCancel ? <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 p-4"><p className="text-sm font-bold text-rose-800">この予約を取り消しますか？</p><div className="mt-3 grid grid-cols-2 gap-2"><Button variant="ghost" disabled={submitting} onClick={() => setConfirmCancel(false)}>戻る</Button><Button variant="danger" disabled={submitting} onClick={onCancel}>予約を取り消す</Button></div></div> : <button type="button" disabled={submitting} className="mx-auto flex min-h-10 items-center rounded-lg px-3 text-sm font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-40" onClick={() => setConfirmCancel(true)}>この予約を取り消す</button>}</div> : null}
+  return <DialogShell busy={submitting} title="予約を変更" subtitle={`${trip.vehicle.name} ・ ${trip.employee.name}`} onClose={onClose} footer={<ReservationTimeActions edit={reservationEdit} busy={submitting} onSave={onSetPeriod} onCancel={onClose} />}><div className="space-y-5">
+    <OperationSummary items={[{ label: "状態", value: "予約" }, { label: "車両・利用者", value: `${trip.vehicle.name}・${trip.employee.name}` }, { label: "開始", value: formatDateTime(trip.plannedStart) }, { label: "現在の終了予定", value: formatDateTime(trip.plannedEnd) }]} />
+    <ReservationTimeFields edit={reservationEdit} busy={submitting} />
+    <div className="border-t border-slate-100 pt-4"><p className="mb-3 text-center text-[11px] text-slate-500">開始から{RESERVATION_GRACE_MINUTES}分以内に利用開始されない場合は自動取消されます</p>{confirmCancel ? <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 p-4"><p className="text-sm font-bold text-rose-800">この予約を取り消しますか？</p><div className="mt-3 grid grid-cols-2 gap-2"><Button variant="ghost" disabled={submitting} onClick={() => setConfirmCancel(false)}>戻る</Button><Button variant="danger" disabled={submitting} onClick={onCancel}>予約を取り消す</Button></div></div> : <button type="button" disabled={submitting} className="mx-auto flex min-h-10 items-center rounded-lg px-3 text-sm font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-40" onClick={() => setConfirmCancel(true)}>この予約を取り消す</button>}</div>
   </div></DialogShell>;
 }
 function ParkingReturnDialog({ spot, spots, trips: allTrips, vehicles, submitting, onClose, onSubmit }: { spot: ParkingSpot; spots: ParkingSpot[]; trips: Trip[]; vehicles: Vehicle[]; submitting: boolean; onClose: () => void; onSubmit: (trip: Trip, fuelLevel: number | null) => void }) {

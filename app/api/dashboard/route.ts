@@ -188,7 +188,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("end"), tripId: idSchema, tripVersion: z.number().int().nonnegative(), vehicleId: idSchema, vehicleVersion: z.number().int().nonnegative(), spotId: idSchema, fuelLevel: z.number().int().min(0).max(FUEL_LEVEL_MAX).nullable().optional(), ...actorSchema }),
   z.object({ action: z.literal("undoReturn"), tripId: idSchema, vehicleId: idSchema, ...actorSchema }),
   z.object({ action: z.literal("moveTrip"), tripId: idSchema, version: z.number().int().nonnegative(), plannedStart: z.string().datetime(), plannedEnd: z.string().datetime(), ...actorSchema }),
-  z.object({ action: z.literal("adjustTrip"), tripId: idSchema, version: z.number().int().nonnegative(), minutes: z.union([z.literal(-60), z.literal(-30), z.literal(-15), z.literal(15), z.literal(30), z.literal(60), z.literal(180), z.literal(300)]), ...actorSchema }),
+  z.object({ action: z.literal("adjustTrip"), tripId: idSchema, version: z.number().int().nonnegative(), minutes: z.union([z.literal(-60), z.literal(-30), z.literal(-15), z.literal(15), z.literal(30), z.literal(60), z.literal(120), z.literal(180), z.literal(300)]), ...actorSchema }),
   z.object({ action: z.literal("setTripEnd"), tripId: idSchema, version: z.number().int().nonnegative(), plannedEnd: z.string().datetime(), ...actorSchema }),
   z.object({ action: z.literal("setReservationStart"), tripId: idSchema, version: z.number().int().nonnegative(), plannedStart: z.string().datetime(), ...actorSchema }),
   z.object({ action: z.literal("correctActualStart"), tripId: idSchema, version: z.number().int().nonnegative(), actualStart: z.string().datetime(), reason: z.string().trim().min(1).max(200), ...actorSchema, actorEmployeeId: idSchema }),
