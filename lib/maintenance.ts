@@ -14,22 +14,32 @@ const tokyoDateTime = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo",
 export const formatMaintenanceTime = (value: Date | string) => tokyoDateTime.format(new Date(value));
 
 // 駐車場の右の列に出す整備予定の範囲と件数。
-export const UPCOMING_MAINTENANCE_DAYS = 7;
+const DAY = 24 * 60 * 60_000;
+const TOKYO_OFFSET = 9 * 60 * 60_000;
+// 東京時間で、今日からdays日後の日の終わり（翌日0時）。
+const tokyoDayEnd = (now: number, days = 0) => Math.floor((now + TOKYO_OFFSET) / DAY) * DAY + (days + 1) * DAY - TOKYO_OFFSET;
+const isTokyoToday = (value: string, now: number) => { const time = Date.parse(value); return time >= tokyoDayEnd(now, -1) && time < tokyoDayEnd(now); };
+const tokyoTime = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false });
+const tokyoDate = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric" });
+
+// 駐車場の画面に出す整備予定は、開始予定日の前日から。
+export const UPCOMING_MAINTENANCE_DAYS_BEFORE = 1;
 export const UPCOMING_MAINTENANCE_LIMIT = 3;
 
-// まだ始めていない整備予定のうち、指定日数以内に始まるものを開始予定の近い順に返す。開始予定を過ぎても始めていない予定も含める。
-export function getUpcomingMaintenances<T extends { status: string; plannedStart: string }>(maintenances: readonly T[], now: number, days = UPCOMING_MAINTENANCE_DAYS) {
-  const until = now + days * 24 * 60 * 60_000;
-  return maintenances.filter((item) => item.status === "SCHEDULED" && Date.parse(item.plannedStart) <= until).sort((a, b) => a.plannedStart.localeCompare(b.plannedStart));
+// まだ始めていない整備予定のうち、開始予定日の前日になったものを開始予定の近い順に返す。開始予定を過ぎても始めていない予定も含める。
+export function getUpcomingMaintenances<T extends { status: string; plannedStart: string }>(maintenances: readonly T[], now: number, daysBefore = UPCOMING_MAINTENANCE_DAYS_BEFORE) {
+  const until = tokyoDayEnd(now, daysBefore);
+  return maintenances.filter((item) => item.status === "SCHEDULED" && Date.parse(item.plannedStart) < until).sort((a, b) => a.plannedStart.localeCompare(b.plannedStart));
 }
 
-// 駐車場の画面から「出す」を押せる予定。日程がずれることがあるため、今日（東京時間）中に始まる予定と、開始予定を過ぎた予定にする。
+// 駐車場の画面から出庫できる予定。日程がずれることがあるため、今日（東京時間）中に始まる予定と、開始予定を過ぎた予定にする。
 export function canSendOutMaintenance(item: { status: string; plannedStart: string }, now: number) {
-  const day = 24 * 60 * 60_000;
-  const tokyoOffset = 9 * 60 * 60_000;
-  const todayEnd = Math.floor((now + tokyoOffset) / day) * day + day - tokyoOffset;
-  return item.status === "SCHEDULED" && Date.parse(item.plannedStart) < todayEnd;
+  return item.status === "SCHEDULED" && Date.parse(item.plannedStart) < tokyoDayEnd(now);
 }
+
+// 予定の開始の表示。今日なら時刻だけ、ほかの日は日付も付ける（配置図の札は日付だけ）。
+export const formatMaintenanceStart = (value: string, now: number) => isTokyoToday(value, now) ? tokyoTime.format(new Date(value)) : formatMaintenanceTime(value);
+export const formatMaintenanceBadge = (value: string, now: number) => isTokyoToday(value, now) ? tokyoTime.format(new Date(value)) : tokyoDate.format(new Date(value));
 
 type MaintenancePeriod = { kind: MaintenanceKind; status: string; plannedStart: Date | string; plannedEnd: Date | string | null };
 

@@ -48,7 +48,7 @@ export function ReturnSpotSelect({ vehicle, data, value, onChange, disabled }: {
   </select>;
 }
 
-export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, currentEmployeeId, onClose, onDone }: { vehicle: Vehicle; data: DashboardData; mutate: Mutate; fromSettings?: boolean; currentEmployeeId?: string | null; onClose: () => void; onDone?: () => void }) {
+export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, currentEmployeeId, initialSpotId, onClose, onDone }: { vehicle: Vehicle; data: DashboardData; mutate: Mutate; fromSettings?: boolean; currentEmployeeId?: string | null; initialSpotId?: string; onClose: () => void; onDone?: () => void }) {
   const active = activeMaintenanceOf(data, vehicle.id);
   const scheduled = data.maintenances.filter((item) => item.vehicleId === vehicle.id && item.status === "SCHEDULED");
   const inMaintenance = vehicle.status === "MAINTENANCE";
@@ -58,7 +58,8 @@ export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, current
   const [note, setNote] = useState(active?.note ?? "");
   const [start, setStart] = useState("");
   const [end, setEnd] = useState(toLocalInput(active?.plannedEnd ?? null));
-  const [spotId, setSpotId] = useState("");
+  // 駐車場の画面で空き区画へドラッグしたときは、その区画を選んだ状態で開く。
+  const [spotId, setSpotId] = useState(initialSpotId ?? "");
   // 車検の日程はずれることがあるため、登録済みの予定は開始予定・戻り予定・備考を直せる。
   const [editing, setEditing] = useState<{ id: string; start: string; end: string; note: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -140,7 +141,7 @@ export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, current
   </div>;
 }
 
-// 駐車場の画面から、登録済みの予定どおり車検・整備に出す。予定は予約を止めるためのもので、実際に出たことはこの操作で記録する。
+// 駐車場の画面から、登録済みの予定どおり車検に出庫する（故障は整備を始める）。予定は予約を止めるためのもので、実際に出たことはこの操作で記録する。
 export function SendOutDialog({ vehicle, maintenance, data, mutate, currentEmployeeId, onClose }: { vehicle: Vehicle; maintenance: VehicleMaintenance; data: DashboardData; mutate: Mutate; currentEmployeeId: string | null; onClose: () => void }) {
   const employees = activeEmployeesOf(data);
   const [actorId, setActorId] = useState(() => initialActor(employees, currentEmployeeId));
@@ -152,12 +153,12 @@ export function SendOutDialog({ vehicle, maintenance, data, mutate, currentEmplo
   const nowEndMax = addDays(now, MAINTENANCE_MAX_DAYS);
   const canStartNow = vehicle.status === "AVAILABLE";
   const ready = !!actorId && canStartNow && inRange(end, now, nowEndMax);
-  const actionLabel = offSite ? "車検に出す" : "整備中にする";
+  const actionLabel = offSite ? "出庫する" : "整備中にする";
   const submit = async () => {
     if (submitting || !ready) return;
     setSubmitting(true);
     try {
-      if (await mutate({ action: "startMaintenance", vehicleId: vehicle.id, version: vehicle.version, kind: maintenance.kind, note: maintenance.note, plannedEnd: fromLocalInput(end), maintenanceId: maintenance.id, actorEmployeeId: actorId }, `${vehicle.name}を${MAINTENANCE_KIND_SHORT_LABELS[maintenance.kind]}にしました`)) onClose();
+      if (await mutate({ action: "startMaintenance", vehicleId: vehicle.id, version: vehicle.version, kind: maintenance.kind, note: maintenance.note, plannedEnd: fromLocalInput(end), maintenanceId: maintenance.id, actorEmployeeId: actorId }, offSite ? `${vehicle.name}を車検に出庫しました` : `${vehicle.name}を${MAINTENANCE_KIND_SHORT_LABELS[maintenance.kind]}にしました`)) onClose();
     } finally { setSubmitting(false); }
   };
   return <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm" onKeyDown={(event) => { if (event.key === "Escape" && !submitting) onClose(); }}>
@@ -166,9 +167,9 @@ export function SendOutDialog({ vehicle, maintenance, data, mutate, currentEmplo
       <div className="flex items-center gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-full bg-amber-50 text-amber-700"><Wrench className="size-5" /></span><div><h2 id="send-out-title" className="text-lg font-black">{vehicle.name}を{actionLabel}</h2><p className="text-xs text-slate-500">{vehicle.plateNumber} ・ {vehicle.code}</p></div></div>
       <fieldset disabled={submitting} className="mt-5 space-y-4">
         <div className="rounded-2xl bg-amber-50 p-4 text-sm"><p className="font-black text-amber-900">{MAINTENANCE_KIND_LABELS[maintenance.kind]}</p><p className="mt-1 text-xs font-bold text-amber-800">予定 {periodText(maintenance)}</p>{maintenance.note ? <p className="mt-1 text-xs text-amber-900">{maintenance.note}</p> : null}<p className="mt-2 text-xs text-amber-800">{offSite ? `${spot ? `${formatSpotLabel(spot)}を空けます。` : ""}戻るまで、ほかの車を停められます。` : "区画に置いたまま、使えない状態にします。"}</p></div>
-        <ActorSelect label={offSite ? "出す人" : "操作する人"} employees={employees} value={actorId} onChange={setActorId} />
+        <ActorSelect label={offSite ? "出庫する人" : "操作する人"} employees={employees} value={actorId} onChange={setActorId} />
         <label className="block"><span className="mb-1 block text-xs font-bold text-slate-600">戻り予定（未定なら空欄）</span><input type="datetime-local" className={field} min={now} max={nowEndMax} value={end} onChange={(event) => setEnd(event.target.value)} /><span className="mt-1 block text-[11px] text-slate-500">日程がずれたときは、ここで直せます</span></label>
-        {!canStartNow ? <p className="text-xs font-bold text-amber-700">利用中の車両は、返却してから出せます。</p> : null}
+        {!canStartNow ? <p className="text-xs font-bold text-amber-700">利用中の車両は、返却してから出庫できます。</p> : null}
         <Button className="w-full bg-amber-600 hover:bg-amber-700" disabled={!ready} onClick={() => void submit()}><Wrench className="size-4" />{submitting ? "処理中…" : actionLabel}</Button>
       </fieldset>
     </div>
