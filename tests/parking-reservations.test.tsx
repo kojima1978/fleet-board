@@ -6,7 +6,7 @@ import type { Employee, ParkingSpot, Trip, Vehicle } from "../lib/types";
 
 const start = Date.parse("2026-10-27T05:00:00Z"); // 14:00 JST
 const employee: Employee = { id: "e1", code: "E001", name: "予約テスト社員", email: "", department: "総務", nfcUid: "", qrCode: "", active: true, version: 1 };
-const vehicle: Vehicle = { id: "v1", code: "C001", name: "予約テスト車両", plateNumber: "テスト001", nfcUid: "", qrCode: "", hasEtc: false, hasNavigation: false, hasWinterTires: false, isKei: false, fuelLevel: 4, color: "#2563eb", status: "AVAILABLE", parkingSpotId: "s1", active: true, version: 1 };
+const vehicle: Vehicle = { id: "v1", code: "C001", name: "予約テスト車両", plateNumber: "テスト001", nfcUid: "", qrCode: "", hasEtc: false, hasNavigation: false, hasWinterTires: false, isKei: false, fuelCard: "", fuelLevel: 4, color: "#2563eb", status: "AVAILABLE", parkingSpotId: "s1", active: true, version: 1 };
 const spot: ParkingSpot = { id: "s1", code: "A01", x: 0, y: 0, width: 10, height: 10, orientation: "vertical", enabled: true, version: 1, vehicle, role: "REGULAR", dedicatedVehicleId: null, dedicatedVehicleName: null, label: null };
 const trip: Trip = { id: "r1", employeeId: employee.id, vehicleId: vehicle.id, plannedStart: new Date(start).toISOString(), plannedEnd: new Date(start + 60 * 60_000).toISOString(), actualStart: null, actualEnd: null, status: "RESERVED", purpose: null, returnSpotCode: null, returnFuelLevel: null, version: 1, employee, vehicle };
 const get = (now: number, trips = [trip], vehicles = [vehicle], spots = [spot]) => getParkingReservations(trips, vehicles, spots, now);

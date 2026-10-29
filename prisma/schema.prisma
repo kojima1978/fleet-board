@@ -126,6 +126,8 @@ model Vehicle {
   hasWinterTires Boolean      @default(false)
   // 軽自動車。配置図では車アイコンを小さくし「軽」マークを付ける。
   isKei         Boolean       @default(false)
+  // ガソリンカードの管理名（例：出光 末尾1234）。カード番号そのものは保存しない。
+  fuelCard      String        @default("")
   fuelLevel     Int?
   active        Boolean       @default(true)
   status        VehicleStatus @default(AVAILABLE)

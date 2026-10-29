@@ -1,0 +1,2 @@
+ALTER TABLE "Vehicle"
+ADD COLUMN "fuelCard" TEXT NOT NULL DEFAULT '';

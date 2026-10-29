@@ -7,7 +7,7 @@ import type { NfcBridgeStatus } from "../lib/use-nfc-bridge";
 import type { Employee, Vehicle, Trip } from "../lib/types";
 
 const employee: Employee = { id: "e1", code: "E001", name: "手動選択テスト", department: "総務", email: "", nfcUid: "", qrCode: "", active: true, version: 1 };
-const vehicle: Vehicle = { id: "v1", code: "C001", name: "出庫テスト車", plateNumber: "テスト001", nfcUid: "", qrCode: "", hasEtc: false, hasNavigation: false, hasWinterTires: false, isKei: false, fuelLevel: null, color: "#2563eb", status: "AVAILABLE", parkingSpotId: "s1", active: true, version: 1 };
+const vehicle: Vehicle = { id: "v1", code: "C001", name: "出庫テスト車", plateNumber: "テスト001", nfcUid: "", qrCode: "", hasEtc: false, hasNavigation: false, hasWinterTires: false, isKei: false, fuelCard: "", fuelLevel: null, color: "#2563eb", status: "AVAILABLE", parkingSpotId: "s1", active: true, version: 1 };
 const noop = () => {};
 function render(mode: DeviceMode, status: NfcBridgeStatus, selected: Employee | null = null) {
   return renderToStaticMarkup(<StartDialog kiosk={isKioskDevice(mode, status)} employees={[employee]} vehicles={[vehicle]} trips={[]} initialEmployee={selected} initialVehicleId={vehicle.id} submitting={false} onClose={noop} onSubmit={noop} />);

@@ -44,7 +44,10 @@ const emptyVehicle = {
   hasNavigation: false,
   hasWinterTires: false,
   isKei: false,
+  fuelCard: "",
 };
+// ガソリンカードは管理名だけを保存する。APIの上限と合わせる。
+const FUEL_CARD_MAX = 40;
 const field = "min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500";
 const NFC_SCAN_TIMEOUT_MS = 15_000;
 const DEFAULT_PAGE_SIZE = 30;
@@ -55,7 +58,8 @@ const nfcUidLabel = (uid: string) => uid || "NFC未登録";
 const employeeGrid = "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 md:grid-cols-[84px_minmax(0,12rem)_minmax(0,8rem)_minmax(0,12rem)_auto] md:gap-4 xl:grid-cols-[88px_minmax(0,10rem)_minmax(0,14rem)_minmax(0,8rem)_minmax(0,12rem)_auto]";
 // 車両は列が多いため、広い画面でだけ表形式にする。狭い画面では状態と駐車位置を車両名の下に出す。
 // 広い画面でも一覧を横へ広げすぎず、状態列だけを残り幅に応じて伸縮させる。
-const vehicleGrid = "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-4 xl:grid-cols-[104px_minmax(0,10rem)_minmax(0,9rem)_minmax(0,8rem)_minmax(12rem,1fr)_auto] xl:gap-4";
+// 操作ボタンの幅は行ごとに違うため、伸び縮みは操作の手前の列に任せ、ほかの列の位置を全行でそろえる。
+const vehicleGrid = "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-4 xl:grid-cols-[88px_9.5rem_7rem_7.5rem_6.5rem_minmax(0,1fr)_auto] xl:gap-3";
 
 export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "vehicle"; data: DashboardData; mutate: Mutate }) {
   const [query, setQuery] = useState("");
@@ -164,7 +168,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
   const vehicles = useMemo(
     () =>
       data.vehicles.filter((vehicle) => {
-        const matchesQuery = !normalizedQuery || [vehicle.code, vehicle.name, vehicle.plateNumber, vehicle.nfcUid].some((value) => value.toLowerCase().includes(normalizedQuery));
+        const matchesQuery = !normalizedQuery || [vehicle.code, vehicle.name, vehicle.plateNumber, vehicle.fuelCard, vehicle.nfcUid].some((value) => value.toLowerCase().includes(normalizedQuery));
         const matchesStatus = status === "all" || (status === "active" && vehicle.active) || (status === "inactive" && !vehicle.active) || (status === "inUse" && vehicle.active && vehicle.status === "IN_USE") || (status === "maintenance" && vehicle.active && vehicle.status === "MAINTENANCE");
         return matchesQuery && matchesStatus && matchesNfc(nfc, vehicle.nfcUid);
       }),
@@ -214,6 +218,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
             hasNavigation: editingVehicle.hasNavigation,
             hasWinterTires: editingVehicle.hasWinterTires,
             isKei: editingVehicle.isKei,
+            fuelCard: editingVehicle.fuelCard,
           }
         : emptyVehicle,
     );
@@ -352,6 +357,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
       hasNavigation: vehicle.hasNavigation,
       hasWinterTires: vehicle.hasWinterTires,
       isKei: vehicle.isKei,
+      fuelCard: vehicle.fuelCard,
     });
     setDrawerOpen(true);
   };
@@ -403,6 +409,8 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
         if (kind === "vehicle" && "hasNavigation" in row && typeof (row as ImportRow).hasNavigation !== "boolean") throw new Error(`${index + 1}件目のhasNavigationはtrueまたはfalseで指定してください`);
         if (kind === "vehicle" && "hasWinterTires" in row && typeof (row as ImportRow).hasWinterTires !== "boolean") throw new Error(`${index + 1}件目のhasWinterTiresはtrueまたはfalseで指定してください`);
         if (kind === "vehicle" && "isKei" in row && typeof (row as ImportRow).isKei !== "boolean") throw new Error(`${index + 1}件目のisKeiはtrueまたはfalseで指定してください`);
+        const fuelCard = (row as ImportRow).fuelCard;
+        if (kind === "vehicle" && fuelCard != null && (typeof fuelCard !== "string" || fuelCard.trim().length > FUEL_CARD_MAX)) throw new Error(`${index + 1}件目のfuelCardは${FUEL_CARD_MAX}文字以内の文字列にしてください`);
       });
       setImportRows(
         (rows as ImportRow[]).map((row) => ({
@@ -438,6 +446,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
               hasNavigation: true,
               hasWinterTires: true,
               isKei: false,
+              fuelCard: "出光 末尾1234",
             },
             {
               code: "C019",
@@ -499,6 +508,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
               hasNavigation: row.hasNavigation === true,
               hasWinterTires: row.hasWinterTires === true,
               isKei: row.isKei === true,
+              fuelCard: typeof row.fuelCard === "string" ? row.fuelCard.trim() : "",
               ...(importSpots[index] ? { spotId: importSpots[index] } : {}),
             };
       });
@@ -594,6 +604,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
             hasNavigation: vehicleForm.hasNavigation,
             hasWinterTires: vehicleForm.hasWinterTires,
             isKei: vehicleForm.isKei,
+            fuelCard: vehicleForm.fuelCard,
           }
         : {
             action: "createVehicle",
@@ -682,7 +693,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
 
   return (
     <>
-      <div className={cn("w-full space-y-5", kind === "employee" ? "max-w-[1080px]" : "max-w-[1120px]")}>
+      <div className={cn("w-full space-y-5", kind === "employee" ? "max-w-[1080px]" : "max-w-[1280px]")}>
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs text-slate-500 shadow-sm">
         <span>
           <b className="text-slate-800">FleetFlow {data.system.appVersion}</b> ・ {data.system.environment === "production" ? "本番環境" : "開発環境"}
@@ -695,7 +706,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
         <div className="flex flex-col gap-3 border-b border-slate-100 p-4">
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-            <input aria-label={`${kind === "employee" ? "社員" : "車両"}を検索`} className={cn(field, "pl-9")} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={kind === "employee" ? "社員番号・氏名・メール・部署・NFC UIDで検索" : "車両番号・車両名・ナンバー・NFC UIDで検索"} />
+            <input aria-label={`${kind === "employee" ? "社員" : "車両"}を検索`} className={cn(field, "pl-9")} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={kind === "employee" ? "社員番号・氏名・メール・部署・NFC UIDで検索" : "車両番号・車両名・ナンバー・ガソリンカード・NFC UIDで検索"} />
           </div>
           <div className="flex flex-wrap gap-2">
             <select aria-label="状態で絞り込み" className={cn(field, "w-auto min-w-28")} value={status} onChange={(event) => setStatus(event.target.value as StatusFilter)}>
@@ -874,6 +885,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                 <span>車両番号</span>
                 <span>車両名</span>
                 <span>ナンバー</span>
+                <span>ガソリンカード</span>
                 <span>NFC UID</span>
                 <span>状態・駐車位置</span>
                 <span>操作</span>
@@ -889,20 +901,21 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                       <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-xs font-bold text-slate-700">{vehicle.code}</span>
                     </span>
                     <div className="min-w-0">
-                      <div className="flex min-w-0 items-center gap-1.5">
-                        <p className="truncate text-sm font-black">{vehicle.name}</p>
-                        <EquipmentBadges vehicle={vehicle} className="hidden xl:flex" />
-                      </div>
+                      {/* 装備バッジは名前の下に置き、横に並べて車両名が切れないようにする。 */}
+                      <p className="truncate text-sm font-black" title={vehicle.name}>{vehicle.name}</p>
+                      <EquipmentBadges vehicle={vehicle} className="mt-1 hidden xl:flex" />
                       <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1 xl:hidden">
                         <VehicleStatusBadge vehicle={vehicle} offSite={activeMaintenanceOf(data, vehicle.id)?.kind === "OFF_SITE"} />
                         <VehicleLocation vehicle={vehicle} spots={data.spots} offSite={activeMaintenanceOf(data, vehicle.id)?.kind === "OFF_SITE"} />
                         <EquipmentBadges vehicle={vehicle} />
                       </div>
                       <p className="mt-0.5 truncate text-xs text-slate-400 xl:hidden">
-                        {vehicle.plateNumber} ・ <span className={vehicle.nfcUid ? undefined : "font-bold text-amber-600"}>{nfcUidLabel(vehicle.nfcUid)}</span>
+                        {vehicle.plateNumber}
+                        {vehicle.fuelCard ? ` ・ ${vehicle.fuelCard}` : ""} ・ <span className={vehicle.nfcUid ? undefined : "font-bold text-amber-600"}>{nfcUidLabel(vehicle.nfcUid)}</span>
                       </p>
                     </div>
                     <p className="hidden truncate text-xs font-bold text-slate-600 xl:block">{vehicle.plateNumber}</p>
+                    <p className={cn("hidden truncate text-xs xl:block", vehicle.fuelCard ? "text-slate-600" : "text-slate-300")} title={vehicle.fuelCard || undefined}>{vehicle.fuelCard || "未登録"}</p>
                     <p className="hidden min-w-0 xl:block">
                       {!vehicle.active ? (
                         <span className="block truncate text-[11px] text-slate-400">
@@ -1251,7 +1264,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                 <fieldset disabled={submitting} className="flex min-h-0 min-w-0 flex-1 flex-col border-0 p-0">
                   <div className="space-y-5">
                     <section className="rounded-2xl border border-slate-200 bg-white p-4">
-                      <div><h3 className="text-sm font-black">基本情報</h3><p className="mt-1 text-xs text-slate-500">車両を識別する番号・名称・ナンバーを管理します。</p></div>
+                      <div><h3 className="text-sm font-black">基本情報</h3><p className="mt-1 text-xs text-slate-500">車両を識別する番号・名称・ナンバーと、使うガソリンカードを管理します。</p></div>
                       <div className="mt-4 space-y-4">
                     <Field label="車両番号">
                       <RecordCodeInput kind="vehicle" autoFocus={!editingVehicle} value={vehicleForm.code} onChange={(code) => setVehicleForm((current) => ({ ...current, code }))} placeholder="例：C018" />
@@ -1285,6 +1298,21 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                         }
                         placeholder="例：品川 500 あ 12-34"
                       />
+                    </Field>
+                    <Field label="ガソリンカード（任意）">
+                      <input
+                        className={field}
+                        maxLength={FUEL_CARD_MAX}
+                        value={vehicleForm.fuelCard}
+                        onChange={(event) =>
+                          setVehicleForm((current) => ({
+                            ...current,
+                            fuelCard: event.target.value,
+                          }))
+                        }
+                        placeholder="例：出光 末尾1234"
+                      />
+                      <p className="mt-1 text-xs text-slate-500">カード番号は入力せず、会社名と末尾4桁など見分けられる名前だけ登録します。</p>
                     </Field>
                     {!editingVehicle ? (
                       <Field label="駐車位置">

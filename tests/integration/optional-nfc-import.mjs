@@ -76,7 +76,7 @@ try {
   await postAdmin({
     action: "importVehicles",
     items: [
-      { code: vehicleCodes[0], name: "NFC後登録車両", plateNumber: plateNumbers[0], color: "#2563EB", hasEtc: true, hasNavigation: true, hasWinterTires: true, isKei: true },
+      { code: vehicleCodes[0], name: "NFC後登録車両", plateNumber: plateNumbers[0], color: "#2563EB", hasEtc: true, hasNavigation: true, hasWinterTires: true, isKei: true, fuelCard: " 出光 末尾1234 " },
       { code: vehicleCodes[1], name: "NFC同時登録車両", plateNumber: plateNumbers[1], nfcUid: vehicleUids[1], color: "#0891B2" },
     ],
   });
@@ -95,10 +95,12 @@ try {
   assert.equal(vehicleWithoutNfc?.hasNavigation, true);
   assert.equal(vehicleWithoutNfc?.hasWinterTires, true);
   assert.equal(vehicleWithoutNfc?.isKei, true);
+  assert.equal(vehicleWithoutNfc?.fuelCard, "出光 末尾1234", "ガソリンカード名は前後の空白を除いて保存する");
   assert.equal(vehicleWithNfc?.hasEtc, false);
   assert.equal(vehicleWithNfc?.hasNavigation, false);
   assert.equal(vehicleWithNfc?.hasWinterTires, false);
   assert.equal(vehicleWithNfc?.isKei, false);
+  assert.equal(vehicleWithNfc?.fuelCard, "", "ガソリンカードは省略できる");
 
   // NFCなしで取り込んだ社員も、カードを登録しないまま編集して保存できる。
   await postAdmin({ action: "updateEmployee", id: employeeWithoutNfc.id, version: employeeWithoutNfc.version, name: `${employeeWithoutNfc.name}改`, department: employeeWithoutNfc.department, nfcUid: "" });
@@ -118,6 +120,7 @@ try {
   assert.equal(data.vehicles.find((item) => item.code === vehicleCodes[0])?.hasNavigation, true);
   assert.equal(data.vehicles.find((item) => item.code === vehicleCodes[0])?.hasWinterTires, true);
   assert.equal(data.vehicles.find((item) => item.code === vehicleCodes[0])?.isKei, true, "軽自動車を指定せずに編集しても保持する");
+  assert.equal(data.vehicles.find((item) => item.code === vehicleCodes[0])?.fuelCard, "出光 末尾1234", "ガソリンカードを指定せずに編集しても保持する");
 
   // 社員番号を変更でき、有効な他の社員と同じ番号には変更できない。
   const renamed = data.employees.find((item) => item.code === employeeCodes[0]);
