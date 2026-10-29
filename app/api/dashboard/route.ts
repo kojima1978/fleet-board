@@ -179,8 +179,8 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("scheduleMaintenance"), vehicleId: idSchema, kind: z.enum(MAINTENANCE_KINDS), note: maintenanceNoteSchema, plannedStart: z.string().datetime(), plannedEnd: z.string().datetime() }),
   z.object({ action: z.literal("updateMaintenance"), maintenanceId: idSchema, version: z.number().int().nonnegative(), note: maintenanceNoteSchema, plannedStart: z.string().datetime().optional(), plannedEnd: z.string().datetime().nullable().optional() }),
   z.object({ action: z.literal("cancelMaintenance"), maintenanceId: idSchema, version: z.number().int().nonnegative() }),
-  // spotIdを省くと、今の区画のままにする。車検・修理で外出した車両は区画を空けているため、駐車位置は未設定になる。
-  z.object({ action: z.literal("endMaintenance"), vehicleId: idSchema, version: z.number().int().nonnegative(), spotId: idSchema.optional(), fromSettings: z.boolean().optional(), ...actorSchema }),
+  // 車検・修理から戻すときは、通常返却と同じく区画とガソリン残量を同じトランザクションで登録できる。
+  z.object({ action: z.literal("endMaintenance"), vehicleId: idSchema, version: z.number().int().nonnegative(), spotId: idSchema.optional(), fuelLevel: z.number().int().min(0).max(FUEL_LEVEL_MAX).nullable().optional(), fromSettings: z.boolean().optional(), ...actorSchema }),
   z.object({ action: z.literal("importEmployees"), items: z.array(employeeImportItemSchema).min(1).max(500) }),
   z.object({ action: z.literal("importVehicles"), items: z.array(vehicleImportItemSchema).min(1).max(500) }),
   z.object({ action: z.literal("start"), employeeId: idSchema, vehicleId: idSchema, minutes: z.number().int().min(15).max(10_080), ...actorSchema }),
@@ -736,7 +736,7 @@ export async function POST(request: Request) {
       await prisma.$transaction(async (tx) => {
         if (input.spotId) await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-spot:${input.spotId}`}))::text AS spot_lock`;
         await lockVehicle(tx, input.vehicleId);
-        const vehicle = await tx.vehicle.findUniqueOrThrow({ where: { id: input.vehicleId }, select: { name: true, status: true, parkingSpotId: true, parkingSpot: { select: { code: true } } } });
+        const vehicle = await tx.vehicle.findUniqueOrThrow({ where: { id: input.vehicleId }, select: { name: true, status: true, fuelLevel: true, parkingSpotId: true, parkingSpot: { select: { code: true } } } });
         if (vehicle.status !== "MAINTENANCE") throw new Error("この車両は整備中ではありません");
         // 整備記録を作る前から整備中だった車両は記録がないため、車両の状態だけを戻す。
         const active = await tx.vehicleMaintenance.findFirst({ where: { vehicleId: input.vehicleId, status: "ACTIVE" }, orderBy: { plannedStart: "desc" } });
@@ -750,12 +750,13 @@ export async function POST(request: Request) {
           spotId = target.id;
           spotCode = target.code;
         }
-        const updated = await tx.vehicle.updateMany({ where: { id: input.vehicleId, version: input.version, status: "MAINTENANCE" }, data: { status: "AVAILABLE", parkingSpotId: spotId, version: { increment: 1 } } });
+        const updated = await tx.vehicle.updateMany({ where: { id: input.vehicleId, version: input.version, status: "MAINTENANCE" }, data: { status: "AVAILABLE", parkingSpotId: spotId, ...(input.fuelLevel === null || input.fuelLevel === undefined ? {} : { fuelLevel: input.fuelLevel }), version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
         if (active) await tx.vehicleMaintenance.update({ where: { id: active.id }, data: { status: "COMPLETED", actualEnd: new Date(), returnSpotCode: spotCode, version: { increment: 1 } } });
         const offSite = active?.kind === "OFF_SITE";
         const moved = spotId !== vehicle.parkingSpotId && spotCode ? `（区画${spotCode}へ移動）` : "";
-        await tx.auditLog.create({ data: { operationId, ...actor, action: offSite ? "車検・修理から戻り" : "車両整備解除", targetType: "Vehicle", targetId: input.vehicleId, description: offSite ? `${vehicle.name}が戻り、${spotCode ? `区画${spotCode}へ駐車` : "駐車位置は未設定"}` : `${vehicle.name}を利用可能に変更${moved}` } });
+        const fuel = input.fuelLevel === null || input.fuelLevel === undefined ? "" : `（残量 ${formatFuelLevel(input.fuelLevel)}）`;
+        await tx.auditLog.create({ data: { operationId, ...actor, action: offSite ? "車検・修理から戻り" : "車両整備解除", targetType: "Vehicle", targetId: input.vehicleId, description: offSite ? `${vehicle.name}が戻り、${spotCode ? `区画${spotCode}へ駐車` : "駐車位置は未設定"}${fuel}` : `${vehicle.name}を利用可能に変更${moved}` } });
       });
     }
     if (input.action === "importEmployees") {

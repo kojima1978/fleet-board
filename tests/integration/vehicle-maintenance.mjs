@@ -61,11 +61,11 @@ try {
   expect(await post({ action: "updateMaintenance", maintenanceId: record.id, version: record.version, note: "車検", plannedEnd: at(4) }), 400, "戻り予定を予約に重ねられない");
   expect(await post({ action: "updateMaintenance", maintenanceId: record.id, version: record.version, note: "車検・タイヤ交換", plannedEnd: at(2.5) }), 200, "戻り予定と備考を変更する");
 
-  // 戻ったときは、区画の指定がなければ駐車位置は未設定になる。
-  expect(await post({ action: "endMaintenance", vehicleId: ids.vehicles[0], version: (await vehicle(0)).version, fromSettings: true }), 200, "車検から戻す");
+  // 戻ったときは、通常返却と同じ操作で区画とガソリン残量を一括登録する。
+  expect(await post({ action: "endMaintenance", vehicleId: ids.vehicles[0], version: (await vehicle(0)).version, spotId: ids.spots[0], fuelLevel: 1, fromSettings: true }), 200, "車検から区画へ戻す");
   car = await vehicle(0);
   [record] = await maintenances(0);
-  assert.deepEqual([car.status, car.parkingSpotId, record.status, record.returnSpotCode, record.note], ["AVAILABLE", null, "COMPLETED", null, "車検・タイヤ交換"]);
+  assert.deepEqual([car.status, car.parkingSpotId, car.fuelLevel, record.status, record.returnSpotCode, record.note], ["AVAILABLE", ids.spots[0], 1, "COMPLETED", spotCodes[0], "車検・タイヤ交換"]);
   assert.ok(record.actualEnd, "戻った日時を記録する");
 
   // 整備予定は予約と重ねられず、予約や延長も整備予定と重ねられない。
@@ -102,7 +102,7 @@ try {
   expect(await post({ action: "endMaintenance", vehicleId: ids.vehicles[1], version: (await vehicle(1)).version, actorEmployeeId: ids.employee }), 200, "元の区画で整備を解除する");
   assert.equal((await lastActor()).actorEmployeeId, ids.employee, "駐車場の画面から戻した社員を履歴に残す");
   assert.deepEqual([(await vehicle(1)).status, (await vehicle(1)).parkingSpotId], ["AVAILABLE", ids.spots[1]]);
-  console.log("Vehicle maintenance passed: off-site spot release, return date reservations, return to original or chosen spot, actor recording, schedules blocking reservations and extensions, cancel and early start");
+  console.log("Vehicle maintenance passed: off-site spot release, return date reservations, atomic spot/fuel return, actor recording, schedules blocking reservations and extensions, cancel and early start");
 } finally {
   await client.query('DELETE FROM "AuditLog" WHERE "operationId"=ANY($1::text[])', [operationIds]);
   await client.query('DELETE FROM "Trip" WHERE "vehicleId"=ANY($1::text[]) OR "employeeId"=$2', [ids.vehicles, ids.employee]);
