@@ -6,7 +6,7 @@ import type { DashboardData, Employee, Vehicle, VehicleMaintenance } from "@/lib
 import { formatMaintenanceTime, MAINTENANCE_KIND_LABELS, MAINTENANCE_KIND_SHORT_LABELS,MAINTENANCE_MAX_DAYS, MAINTENANCE_NOTE_MAX, MAINTENANCE_SCHEDULE_DAYS_AHEAD, type MaintenanceKind } from "@/lib/maintenance";
 import { canUseSpot, formatSpotLabel, isCustomerSpot } from "@/lib/parking-spots";
 import { CustomerSpotNotice } from "./customer-spot-notice";
-import { Button, cn } from "./ui";
+import { Button, cn, DialogActions } from "./ui";
 
 type Mutate = (body: object, success: string) => Promise<boolean>;
 
@@ -64,6 +64,8 @@ export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, current
   const chosenSpot = data.spots.find((spot) => spot.id === (spotId || vehicle.parkingSpotId));
   // 車検の日程はずれることがあるため、登録済みの予定は開始予定・戻り予定・備考を直せる。
   const [editing, setEditing] = useState<{ id: string; start: string; end: string; note: string } | null>(null);
+  // 予定の取り消しは元に戻せないため、確認してから行う。
+  const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // 駐車場の画面では、開始・戻ったを押した社員を履歴に残す。設定画面からの操作は「設定画面」として残す。
   const employees = activeEmployeesOf(data);
@@ -114,14 +116,13 @@ export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, current
           <legend className="px-1 text-xs font-black text-slate-600">内容を変更</legend>
           <label className="block"><span className="mb-1 block text-xs font-bold text-slate-600">戻り予定（未定なら空欄）</span><input type="datetime-local" className={field} min={now} max={nowEndMax} value={end} onChange={(event) => setEnd(event.target.value)} /><span className="mt-1 block text-[11px] text-slate-500">今から{MAINTENANCE_MAX_DAYS}日以内</span></label>
           <label className="block"><span className="mb-1 block text-xs font-bold text-slate-600">備考（任意）</span><input className={field} maxLength={MAINTENANCE_NOTE_MAX} value={note} onChange={(event) => setNote(event.target.value)} placeholder="例：〇〇整備工場、タイヤ交換" /></label>
-          <Button variant="ghost" className="w-full" disabled={!edited} onClick={() => run({ action: "updateMaintenance", maintenanceId: active.id, version: active.version, note, plannedEnd: fromLocalInput(end) }, `${vehicle.name}の整備内容を変更しました`)}>変更を保存</Button>
+          <div className="flex justify-end"><Button variant="ghost" className="min-h-10 px-4" disabled={!edited} onClick={() => run({ action: "updateMaintenance", maintenanceId: active.id, version: active.version, note, plannedEnd: fromLocalInput(end) }, `${vehicle.name}の整備内容を変更しました`)}>変更を保存</Button></div>
         </fieldset> : null}
         <div className="space-y-2 rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4">
           <p className="text-xs font-black text-emerald-800">{active?.kind === "OFF_SITE" ? "戻った車両を停める区画" : "整備後の駐車位置"}</p>
           <ReturnSpotSelect vehicle={vehicle} data={data} value={spotId} onChange={setSpotId} disabled={submitting} />
           {chosenSpot && isCustomerSpot(chosenSpot) ? <CustomerSpotNotice spots={data.spots} vehicle={vehicle} /> : null}
           {fromSettings ? null : <ActorSelect label={active?.kind === "OFF_SITE" ? "戻した人" : "解除した人"} employees={employees} value={actorId} onChange={setActorId} />}
-          <Button className="w-full" disabled={submitting || !actorReady} onClick={finish}><CarFront className="size-4" />{submitting ? "処理中…" : active?.kind === "OFF_SITE" ? "戻った" : "整備を解除"}</Button>
         </div>
       </div> : <fieldset disabled={submitting} className="mt-5 space-y-4">
         <div role="radiogroup" aria-label="整備の種類" className="grid gap-2">{KIND_ORDER.map((item) => <label key={item} className={cn("flex cursor-pointer gap-3 rounded-2xl border p-3", kind === item ? "border-amber-300 bg-amber-50" : "border-slate-200")}><input type="radio" name="maintenance-kind" className="mt-1 size-4 accent-amber-600" checked={kind === item} onChange={() => setKind(item)} /><span><span className="block text-sm font-black">{MAINTENANCE_KIND_LABELS[item]}</span><span className="block text-xs text-slate-500">{KIND_HINTS[item]}</span></span></label>)}</div>
@@ -130,7 +131,6 @@ export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, current
         {timing === "later" ? <label className="block"><span className="mb-1 block text-xs font-bold text-slate-600">開始予定</span><input required type="datetime-local" className={field} min={now} max={startMax} value={start} onChange={(event) => setStart(event.target.value)} /><span className="mt-1 block text-[11px] text-slate-500">1年先まで登録できます</span></label> : null}
         <label className="block"><span className="mb-1 block text-xs font-bold text-slate-600">{timing === "now" ? "戻り予定（任意）" : "戻り予定"}</span><input required={timing === "later"} type="datetime-local" className={field} min={timing === "now" ? now : laterEndMin} max={timing === "now" ? nowEndMax : laterEndMax} value={end} onChange={(event) => setEnd(event.target.value)} />{timing === "now" ? <span className="mt-1 block text-[11px] text-slate-500">今から{MAINTENANCE_MAX_DAYS}日以内。決まっていれば、その後の時間を予約できます</span> : <span className="mt-1 block text-[11px] text-slate-500">開始から{MAINTENANCE_MAX_DAYS}日以内。この期間は予約できなくなります</span>}</label>
         <label className="block"><span className="mb-1 block text-xs font-bold text-slate-600">備考（任意）</span><input className={field} maxLength={MAINTENANCE_NOTE_MAX} value={note} onChange={(event) => setNote(event.target.value)} placeholder="例：〇〇整備工場、タイヤ交換" /></label>
-        <Button className="w-full" disabled={!newReady} onClick={() => void submitNew()}>{submitting ? "処理中…" : timing === "now" ? `${MAINTENANCE_KIND_SHORT_LABELS[kind]}にする` : "予定を登録"}</Button>
       </fieldset>}
 
       {scheduled.length ? <div className="mt-5 space-y-2"><p className="flex items-center gap-1.5 text-xs font-black text-slate-600"><CalendarClock className="size-3.5" />登録済みの整備予定</p>{scheduled.map((item) => editing?.id === item.id ? <fieldset key={item.id} disabled={submitting} className="space-y-3 rounded-xl border border-amber-300 bg-amber-50/40 p-3">
@@ -138,8 +138,9 @@ export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, current
         <label className="block"><span className="mb-1 block text-xs font-bold text-slate-600">開始予定</span><input type="datetime-local" className={field} min={now} max={startMax} value={editing.start} onChange={(event) => setEditing({ ...editing, start: event.target.value })} /></label>
         <label className="block"><span className="mb-1 block text-xs font-bold text-slate-600">戻り予定</span><input type="datetime-local" className={field} min={editing.start} max={addDays(editing.start > now ? editing.start : now, MAINTENANCE_MAX_DAYS)} value={editing.end} onChange={(event) => setEditing({ ...editing, end: event.target.value })} /><span className="mt-1 block text-[11px] text-slate-500">開始から{MAINTENANCE_MAX_DAYS}日以内。この期間は予約できなくなります</span></label>
         <label className="block"><span className="mb-1 block text-xs font-bold text-slate-600">備考（任意）</span><input className={field} maxLength={MAINTENANCE_NOTE_MAX} value={editing.note} onChange={(event) => setEditing({ ...editing, note: event.target.value })} placeholder="例：〇〇整備工場、タイヤ交換" /></label>
-        <div className="grid grid-cols-2 gap-2"><Button variant="ghost" onClick={() => setEditing(null)}>やめる</Button><Button disabled={!editReady} onClick={() => void saveEdit()}>{submitting ? "処理中…" : "変更を保存"}</Button></div>
-      </fieldset> : <div key={item.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 p-3"><div className="mr-auto min-w-0"><p className="text-sm font-bold">{periodText(item)}</p><p className="text-xs text-slate-500">{MAINTENANCE_KIND_SHORT_LABELS[item.kind]}{item.note ? ` ・ ${item.note}` : ""}</p></div><button type="button" disabled={submitting} onClick={() => setEditing({ id: item.id, start: toLocalInput(item.plannedStart), end: toLocalInput(item.plannedEnd), note: item.note ?? "" })} className="min-h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40">変更</button><button type="button" disabled={submitting || !canStartNow || !actorReady} onClick={() => void startScheduled(item)} className="min-h-9 rounded-lg border border-amber-200 px-3 text-xs font-bold text-amber-700 hover:bg-amber-50 disabled:opacity-40">開始</button><button type="button" disabled={submitting} onClick={() => void run({ action: "cancelMaintenance", maintenanceId: item.id, version: item.version }, "整備予定を取り消しました")} className="min-h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40">取消</button></div>)}</div> : null}
+        <div className="grid grid-cols-2 gap-2"><Button variant="ghost" onClick={() => setEditing(null)}>キャンセル</Button><Button disabled={!editReady} onClick={() => void saveEdit()}>{submitting ? "処理中…" : "変更を保存"}</Button></div>
+      </fieldset> : <div key={item.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 p-3"><div className="mr-auto min-w-0"><p className="text-sm font-bold">{periodText(item)}</p><p className="text-xs text-slate-500">{MAINTENANCE_KIND_SHORT_LABELS[item.kind]}{item.note ? ` ・ ${item.note}` : ""}</p></div>{confirmCancelId === item.id ? <div role="alert" className="flex w-full flex-wrap items-center gap-2 rounded-lg bg-rose-50 p-2"><p className="mr-auto text-xs font-bold text-rose-800">この予定を取り消しますか？</p><Button variant="ghost" className="min-h-9 px-3 text-xs" disabled={submitting} onClick={() => setConfirmCancelId(null)}>戻る</Button><Button variant="danger" className="min-h-9 px-3 text-xs" disabled={submitting} onClick={() => void run({ action: "cancelMaintenance", maintenanceId: item.id, version: item.version }, "整備予定を取り消しました")}>取り消す</Button></div> : <><button type="button" disabled={submitting || !canStartNow || !actorReady} onClick={() => void startScheduled(item)} className="min-h-9 rounded-lg border border-amber-200 px-3 text-xs font-bold text-amber-700 hover:bg-amber-50 disabled:opacity-40">開始</button><button type="button" disabled={submitting} onClick={() => setEditing({ id: item.id, start: toLocalInput(item.plannedStart), end: toLocalInput(item.plannedEnd), note: item.note ?? "" })} className="min-h-9 rounded-lg border border-slate-200 px-3 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40">変更</button><button type="button" disabled={submitting} onClick={() => setConfirmCancelId(item.id)} className="min-h-9 rounded-lg px-2 text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-40">取消</button></>}</div>)}</div> : null}
+      <div className="sticky -bottom-6 z-10 -mx-6 mt-5 border-t border-slate-200 bg-white/95 px-6 pb-1 pt-3 backdrop-blur">{inMaintenance ? <DialogActions cancelDisabled={submitting} onCancel={onClose}><Button className="min-h-12" disabled={submitting || !actorReady} onClick={finish}><CarFront className="size-4" />{submitting ? "処理中…" : active?.kind === "OFF_SITE" ? "戻った" : "整備を解除"}</Button></DialogActions> : <DialogActions cancelDisabled={submitting} onCancel={onClose}><Button className="min-h-12" disabled={submitting || !newReady} onClick={() => void submitNew()}>{submitting ? "処理中…" : timing === "now" ? `${MAINTENANCE_KIND_SHORT_LABELS[kind]}にする` : "予定を登録"}</Button></DialogActions>}</div>
     </div>
   </div>;
 }
@@ -173,8 +174,8 @@ export function SendOutDialog({ vehicle, maintenance, data, mutate, currentEmplo
         <ActorSelect label={offSite ? "出庫する人" : "操作する人"} employees={employees} value={actorId} onChange={setActorId} />
         <label className="block"><span className="mb-1 block text-xs font-bold text-slate-600">戻り予定（未定なら空欄）</span><input type="datetime-local" className={field} min={now} max={nowEndMax} value={end} onChange={(event) => setEnd(event.target.value)} /><span className="mt-1 block text-[11px] text-slate-500">日程がずれたときは、ここで直せます</span></label>
         {!canStartNow ? <p className="text-xs font-bold text-amber-700">利用中の車両は、返却してから出庫できます。</p> : null}
-        <Button className="w-full bg-amber-600 hover:bg-amber-700" disabled={!ready} onClick={() => void submit()}><Wrench className="size-4" />{submitting ? "処理中…" : actionLabel}</Button>
       </fieldset>
+      <div className="sticky -bottom-6 z-10 -mx-6 mt-5 border-t border-slate-200 bg-white/95 px-6 pb-1 pt-3 backdrop-blur"><DialogActions cancelDisabled={submitting} onCancel={onClose}><Button className="min-h-12" disabled={submitting || !ready} onClick={() => void submit()}><Wrench className="size-4" />{submitting ? "処理中…" : actionLabel}</Button></DialogActions></div>
     </div>
   </div>;
 }
