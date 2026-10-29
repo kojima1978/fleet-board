@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
+import { findEmployees } from "../components/employee-picker";
 import { StartDialog } from "../components/fleet-dashboard";
 import { isKioskDevice, type DeviceMode } from "../lib/device-mode";
 import type { NfcBridgeStatus } from "../lib/use-nfc-bridge";
@@ -14,7 +15,7 @@ function render(mode: DeviceMode, status: NfcBridgeStatus, selected: Employee | 
 
 for (const status of ["idle", "connecting", "offline", "no-reader", "ready"] as const) {
   const html = render("personal", status);
-  assert.match(html, /社員を選択してください/);
+  assert.match(html, /社員番号または氏名を入力/);
   assert.match(html, /先に利用者を選んでください/);
   assert.doesNotMatch(html, /社員証をかざす|社員QRを読み取|先に社員証|NFC UIDを手入力|読取を再試行/);
 }
@@ -41,3 +42,12 @@ assert.match(reserve, /車両を予約/);
 assert.match(reserve, /この内容で予約/);
 assert.doesNotMatch(reserve, /予約した車両を利用開始|この内容で利用開始|>時刻指定<|>今すぐ</, "予約入口で現在の予約を利用開始しない");
 console.log("Departure guidance tests passed: personal/auto-personal manual selection, selected user reuse and kiosk scanner guidance");
+
+const manyEmployees = Array.from({length: 150}, (_, index) => ({ ...employee, id: `e${index + 1}`, code: `E${String(index + 1).padStart(3, "0")}`, name: `社員${index + 1}` }));
+assert.equal(findEmployees(manyEmployees, "１５０", true)[0]?.code, "E150", "100人を超える候補も全角番号から検索できる");
+assert.equal(findEmployees(manyEmployees, "001")[0]?.code, "E001");
+assert.equal(findEmployees(manyEmployees, "ｅ００１")[0]?.code, "E001");
+assert.equal(findEmployees([employee], "手動 選択 テスト")[0]?.id, employee.id);
+assert.equal(findEmployees([{...employee, active: false}], "001").length, 0);
+assert.equal(findEmployees(manyEmployees, "999", true).length, 0);
+console.log("Employee search passed: 150 people, full-width numbers/codes, names, inactive filtering and empty matches");
