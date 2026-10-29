@@ -65,8 +65,8 @@ function restorableNfcTag(assignments: LatestNfcAssignment[]) {
   return latest && !latest.cleared ? latest.nfcTag : undefined;
 }
 
-function withVehicleCode<T extends { id: string; name: string; qrToken: string; plateNumber: string; color: string; hasEtc: boolean; hasNavigation: boolean; fuelLevel: number | null; status: "AVAILABLE" | "RESERVED" | "IN_USE" | "MAINTENANCE"; parkingSpotId: string | null; active: boolean; version: number; vehicleNumber: { code: string }; nfcAssignments: LatestNfcAssignment[] }>(vehicle: T) {
-  return { id: vehicle.id, code: vehicle.vehicleNumber.code, name: vehicle.name, plateNumber: vehicle.plateNumber, nfcUid: restorableNfcTag(vehicle.nfcAssignments)?.uid ?? "", qrCode: qrPayload("vehicle", vehicle.qrToken), color: vehicle.color, hasEtc: vehicle.hasEtc, hasNavigation: vehicle.hasNavigation, fuelLevel: vehicle.fuelLevel, status: vehicle.status, parkingSpotId: vehicle.parkingSpotId, active: vehicle.active, version: vehicle.version };
+function withVehicleCode<T extends { id: string; name: string; qrToken: string; plateNumber: string; color: string; hasEtc: boolean; hasNavigation: boolean; hasWinterTires: boolean; fuelLevel: number | null; status: "AVAILABLE" | "RESERVED" | "IN_USE" | "MAINTENANCE"; parkingSpotId: string | null; active: boolean; version: number; vehicleNumber: { code: string }; nfcAssignments: LatestNfcAssignment[] }>(vehicle: T) {
+  return { id: vehicle.id, code: vehicle.vehicleNumber.code, name: vehicle.name, plateNumber: vehicle.plateNumber, nfcUid: restorableNfcTag(vehicle.nfcAssignments)?.uid ?? "", qrCode: qrPayload("vehicle", vehicle.qrToken), color: vehicle.color, hasEtc: vehicle.hasEtc, hasNavigation: vehicle.hasNavigation, hasWinterTires: vehicle.hasWinterTires, fuelLevel: vehicle.fuelLevel, status: vehicle.status, parkingSpotId: vehicle.parkingSpotId, active: vehicle.active, version: vehicle.version };
 }
 
 function withEmployeeCode<T extends { id: string; name: string; email: string | null; qrToken: string; active: boolean; version: number; employeeNumber: { code: string }; department: { name: string }; nfcAssignments: LatestNfcAssignment[] }>(employee: T) {
@@ -159,16 +159,16 @@ const spotCodeSchema = z.string().transform((value) => value.normalize("NFKC").t
 const departmentNameSchema = z.string().trim().min(1).max(50).transform((value) => value.replace(/\s+/g, " "));
 const actorSchema = { actorName: z.string().trim().max(50).optional(), actorEmployeeId: idSchema.optional() };
 const employeeImportItemSchema = z.object({ code: recordCodeSchema, name: z.string().trim().min(1).max(50), email: optionalEmailSchema, department: departmentNameSchema, nfcUid: optionalNfcUidSchema });
-const vehicleImportItemSchema = z.object({ code: recordCodeSchema, name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#2563eb"), hasEtc: z.boolean().default(false), hasNavigation: z.boolean().default(false), spotId: idSchema.optional() });
+const vehicleImportItemSchema = z.object({ code: recordCodeSchema, name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default("#2563eb"), hasEtc: z.boolean().default(false), hasNavigation: z.boolean().default(false), hasWinterTires: z.boolean().default(false), spotId: idSchema.optional() });
 const maintenanceNoteSchema = z.string().trim().max(MAINTENANCE_NOTE_MAX).nullable().optional().transform((value) => value || null);
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("createEmployee"), code: recordCodeSchema, name: z.string().trim().min(1).max(50), email: optionalEmailSchema, department: departmentNameSchema, nfcUid: optionalNfcUidSchema }),
-  z.object({ action: z.literal("createVehicle"), code: recordCodeSchema, name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, spotId: idSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().default(false), hasNavigation: z.boolean().default(false) }),
+  z.object({ action: z.literal("createVehicle"), code: recordCodeSchema, name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, spotId: idSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().default(false), hasNavigation: z.boolean().default(false), hasWinterTires: z.boolean().default(false) }),
   z.object({ action: z.literal("updateEmployee"), id: idSchema, version: z.number().int().nonnegative(), code: recordCodeSchema.optional(), name: z.string().trim().min(1).max(50), email: optionalEmailSchema, department: departmentNameSchema, nfcUid: optionalNfcUidSchema }),
   z.object({ action: z.literal("updateEmployeeNfc"), id: idSchema, version: z.number().int().nonnegative(), nfcUid: optionalNfcUidSchema }),
   z.object({ action: z.literal("rotateEmployeeQr"), id: idSchema, version: z.number().int().nonnegative() }),
   z.object({ action: z.literal("rotateVehicleQr"), id: idSchema, version: z.number().int().nonnegative() }),
-  z.object({ action: z.literal("updateVehicle"), id: idSchema, version: z.number().int().nonnegative(), code: recordCodeSchema.optional(), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().optional(), hasNavigation: z.boolean().optional() }),
+  z.object({ action: z.literal("updateVehicle"), id: idSchema, version: z.number().int().nonnegative(), code: recordCodeSchema.optional(), name: z.string().trim().min(1).max(50), plateNumber: z.string().trim().min(1).max(30), nfcUid: optionalNfcUidSchema, color: z.string().regex(/^#[0-9a-fA-F]{6}$/), hasEtc: z.boolean().optional(), hasNavigation: z.boolean().optional(), hasWinterTires: z.boolean().optional() }),
   z.object({ action: z.literal("updateVehicleNfc"), id: idSchema, version: z.number().int().nonnegative(), nfcUid: optionalNfcUidSchema }),
   z.object({ action: z.literal("setEmployeeActive"), id: idSchema, version: z.number().int().nonnegative(), active: z.boolean() }),
   z.object({ action: z.literal("setVehicleActive"), id: idSchema, version: z.number().int().nonnegative(), active: z.boolean() }),
@@ -414,7 +414,7 @@ export async function POST(request: Request) {
         const vehicleNumber = await tx.vehicleNumber.upsert({ where: { code: input.code }, update: {}, create: { code: input.code } });
         const assigned = await tx.vehicle.findFirst({ where: { vehicleNumberId: vehicleNumber.id, active: true }, select: { name: true } });
         if (assigned) throw new Error(`車両番号${input.code}は「${assigned.name}」で使用中です。旧車両の利用を停止してから登録してください`);
-        const vehicle = await tx.vehicle.create({ data: { vehicleNumberId: vehicleNumber.id, name: input.name, qrToken: createQrToken(), plateNumber: input.plateNumber, color: input.color, hasEtc: input.hasEtc, hasNavigation: input.hasNavigation, parkingSpotId: input.spotId } });
+        const vehicle = await tx.vehicle.create({ data: { vehicleNumberId: vehicleNumber.id, name: input.name, qrToken: createQrToken(), plateNumber: input.plateNumber, color: input.color, hasEtc: input.hasEtc, hasNavigation: input.hasNavigation, hasWinterTires: input.hasWinterTires, parkingSpotId: input.spotId } });
         if (input.nfcUid) {
           const nfcTag = await tx.nfcTag.upsert({ where: { uid: input.nfcUid }, update: {}, create: { uid: input.nfcUid } });
           await tx.nfcAssignment.create({ data: { vehicleId: vehicle.id, nfcTagId: nfcTag.id } });
@@ -550,7 +550,7 @@ export async function POST(request: Request) {
           }
           vehicleNumberId = vehicleNumber.id;
         }
-        const updated = await tx.vehicle.updateMany({ where: { id: input.id, version: input.version }, data: { vehicleNumberId, name: input.name, plateNumber: input.plateNumber, color: input.color, ...(input.hasEtc === undefined ? {} : { hasEtc: input.hasEtc }), ...(input.hasNavigation === undefined ? {} : { hasNavigation: input.hasNavigation }), version: { increment: 1 } } });
+        const updated = await tx.vehicle.updateMany({ where: { id: input.id, version: input.version }, data: { vehicleNumberId, name: input.name, plateNumber: input.plateNumber, color: input.color, ...(input.hasEtc === undefined ? {} : { hasEtc: input.hasEtc }), ...(input.hasNavigation === undefined ? {} : { hasNavigation: input.hasNavigation }), ...(input.hasWinterTires === undefined ? {} : { hasWinterTires: input.hasWinterTires }), version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
         // 付け替え前の番号は、ほかの車両が使っていなければ消して残さない。
         if (codeChanged) await tx.vehicleNumber.deleteMany({ where: { id: vehicle.vehicleNumberId, vehicles: { none: {} } } });
@@ -843,7 +843,7 @@ export async function POST(request: Request) {
             const nfcOwner = existingNfc?.employee?.name ?? existingNfc?.vehicle?.name;
             if (nfcOwner) throw new Error(`NFC UID ${item.nfcUid}は「${nfcOwner}」で使用中です`);
           }
-          const vehicle = await tx.vehicle.create({ data: { vehicleNumberId: vehicleNumber.id, name: item.name, qrToken: createQrToken(), plateNumber: item.plateNumber, color: item.color, hasEtc: item.hasEtc, hasNavigation: item.hasNavigation, parkingSpotId: item.spotId } });
+          const vehicle = await tx.vehicle.create({ data: { vehicleNumberId: vehicleNumber.id, name: item.name, qrToken: createQrToken(), plateNumber: item.plateNumber, color: item.color, hasEtc: item.hasEtc, hasNavigation: item.hasNavigation, hasWinterTires: item.hasWinterTires, parkingSpotId: item.spotId } });
           if (item.nfcUid) {
             const nfcTag = await tx.nfcTag.upsert({ where: { uid: item.nfcUid }, update: {}, create: { uid: item.nfcUid } });
             await tx.nfcAssignment.create({ data: { vehicleId: vehicle.id, nfcTagId: nfcTag.id } });

@@ -42,6 +42,7 @@ const emptyVehicle = {
   color: "#2563eb",
   hasEtc: false,
   hasNavigation: false,
+  hasWinterTires: false,
 };
 const field = "min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500";
 const NFC_SCAN_TIMEOUT_MS = 15_000;
@@ -210,6 +211,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
             color: editingVehicle.color,
             hasEtc: editingVehicle.hasEtc,
             hasNavigation: editingVehicle.hasNavigation,
+            hasWinterTires: editingVehicle.hasWinterTires,
           }
         : emptyVehicle,
     );
@@ -346,6 +348,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
       color: vehicle.color,
       hasEtc: vehicle.hasEtc,
       hasNavigation: vehicle.hasNavigation,
+      hasWinterTires: vehicle.hasWinterTires,
     });
     setDrawerOpen(true);
   };
@@ -395,6 +398,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
         if (kind === "vehicle" && "color" in row && (typeof (row as ImportRow).color !== "string" || !/^#[0-9a-fA-F]{6}$/.test((row as ImportRow).color as string))) throw new Error(`${index + 1}件目の表示色は #2563EB の形式で入力してください`);
         if (kind === "vehicle" && "hasEtc" in row && typeof (row as ImportRow).hasEtc !== "boolean") throw new Error(`${index + 1}件目のhasEtcはtrueまたはfalseで指定してください`);
         if (kind === "vehicle" && "hasNavigation" in row && typeof (row as ImportRow).hasNavigation !== "boolean") throw new Error(`${index + 1}件目のhasNavigationはtrueまたはfalseで指定してください`);
+        if (kind === "vehicle" && "hasWinterTires" in row && typeof (row as ImportRow).hasWinterTires !== "boolean") throw new Error(`${index + 1}件目のhasWinterTiresはtrueまたはfalseで指定してください`);
       });
       setImportRows(
         (rows as ImportRow[]).map((row) => ({
@@ -428,6 +432,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
               color: "#2563EB",
               hasEtc: true,
               hasNavigation: true,
+              hasWinterTires: true,
             },
             {
               code: "C019",
@@ -436,6 +441,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
               color: "#0891B2",
               hasEtc: false,
               hasNavigation: true,
+              hasWinterTires: false,
             },
           ];
     const blob = new Blob([JSON.stringify(example, null, 2)], {
@@ -485,6 +491,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
               color: typeof row.color === "string" ? row.color : "#2563eb",
               hasEtc: row.hasEtc === true,
               hasNavigation: row.hasNavigation === true,
+              hasWinterTires: row.hasWinterTires === true,
               ...(importSpots[index] ? { spotId: importSpots[index] } : {}),
             };
       });
@@ -578,6 +585,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
             color: vehicleForm.color,
             hasEtc: vehicleForm.hasEtc,
             hasNavigation: vehicleForm.hasNavigation,
+            hasWinterTires: vehicleForm.hasWinterTires,
           }
         : {
             action: "createVehicle",
@@ -1296,7 +1304,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                       <div><h3 className="text-sm font-black">装備・表示</h3><p className="mt-1 text-xs text-slate-500">利用者が車両を選ぶときに表示する情報です。</p></div>
                       <div className="mt-4 space-y-4">
                     <Field label="車両装備">
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid gap-2 sm:grid-cols-3">
                         <EquipmentToggle
                           checked={vehicleForm.hasEtc}
                           label="ETC付"
@@ -1314,6 +1322,16 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                             setVehicleForm((current) => ({
                               ...current,
                               hasNavigation: checked,
+                            }))
+                          }
+                        />
+                        <EquipmentToggle
+                          checked={vehicleForm.hasWinterTires}
+                          label="スタッドレス装着中"
+                          onChange={(checked) =>
+                            setVehicleForm((current) => ({
+                              ...current,
+                              hasWinterTires: checked,
                             }))
                           }
                         />
@@ -1890,12 +1908,13 @@ function VehicleStatusBadge({ vehicle, offSite, className }: { vehicle: Pick<Veh
   return <span className={cn("inline-block w-fit shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold", !vehicle.active ? "bg-slate-200 text-slate-600" : vehicle.status === "AVAILABLE" ? "bg-emerald-50 text-emerald-700" : vehicle.status === "MAINTENANCE" ? "bg-amber-100 text-amber-800" : "bg-blue-50 text-blue-700", className)}>{label}</span>;
 }
 
-function EquipmentBadges({ vehicle, className }: { vehicle: Pick<Vehicle, "hasEtc" | "hasNavigation">; className?: string }) {
-  if (!vehicle.hasEtc && !vehicle.hasNavigation) return null;
+function EquipmentBadges({ vehicle, className }: { vehicle: Pick<Vehicle, "hasEtc" | "hasNavigation" | "hasWinterTires">; className?: string }) {
+  if (!vehicle.hasEtc && !vehicle.hasNavigation && !vehicle.hasWinterTires) return null;
   return (
-    <span className={cn("flex shrink-0 gap-1", className)} aria-label={`装備：${[vehicle.hasEtc ? "ETC" : "", vehicle.hasNavigation ? "ナビ" : ""].filter(Boolean).join("、")}`}>
+    <span className={cn("flex shrink-0 gap-1", className)} aria-label={`装備：${[vehicle.hasEtc ? "ETC" : "", vehicle.hasNavigation ? "ナビ" : "", vehicle.hasWinterTires ? "冬タイヤ" : ""].filter(Boolean).join("、")}`}>
       {vehicle.hasEtc ? <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[9px] font-black text-sky-700">ETC</span> : null}
       {vehicle.hasNavigation ? <span className="rounded bg-violet-50 px-1.5 py-0.5 text-[9px] font-black text-violet-700">ナビ</span> : null}
+      {vehicle.hasWinterTires ? <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-black text-slate-700">冬タイヤ</span> : null}
     </span>
   );
 }

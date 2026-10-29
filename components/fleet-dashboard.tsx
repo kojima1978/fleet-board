@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { AlertTriangle, CalendarClock, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Fuel, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Move, Nfc, Pencil, Play, Plus, Printer, QrCode, RefreshCw, UserRound, Utensils, Wrench, X } from "lucide-react";
+import { AlertTriangle, CalendarClock, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Fuel, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Move, Nfc, Pencil, Play, Plus, Printer, QrCode, RefreshCw, Snowflake, UserRound, Utensils, Wrench, X } from "lucide-react";
 import type { DashboardData, Employee, ParkingSpot, Trip, Vehicle, VehicleMaintenance } from "@/lib/types";
 import { normalizeNfcUid } from "@/lib/nfc";
 import { createOperationId } from "@/lib/operation-id";
@@ -94,6 +94,10 @@ export const parkingSpotClass = (spot: ParkingSpot, offSite = false) => {
 const tokyoDayStart = (value = new Date()) => {
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(value);
   return new Date(`${day}T00:00:00+09:00`);
+};
+export const isWinterTireSeason = (value = new Date()) => {
+  const month = Number(new Intl.DateTimeFormat("en", { timeZone: "Asia/Tokyo", month: "numeric" }).format(value));
+  return month >= 11 || month <= 4;
 };
 
 export function FleetDashboard({ view }: { view: DashboardView }) {
@@ -514,7 +518,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
               <OperationalAlerts data={data} compact />
               {undoReturn ? <span title={`間違えた場合は、あと${undoSecondsLeft}秒のうちに取り消せます`} className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-bold border-amber-300 bg-amber-50 text-amber-950">{undoReturn.vehicleName}を返却しました<button type="button" disabled={pendingAction} onClick={undoLastReturn} className="ml-0.5 rounded-full border border-amber-300 bg-white px-2 py-0.5 text-amber-900 hover:bg-amber-100 disabled:opacity-60">取り消す<span className="tabular-nums text-amber-700">（{undoSecondsLeft}秒）</span></button><button type="button" aria-label="返却取消の案内を閉じる" onClick={() => setUndoReturn(null)} className="grid size-5 place-items-center rounded-full text-amber-700 hover:bg-amber-100"><X className="size-3.5" /></button></span> : null}
             </div>
-            <div aria-hidden className="hidden flex-1 basis-0 md:block" />
+            <div className="flex flex-1 basis-full justify-end md:basis-0">{isWinterTireSeason() && activeVehicles.some((vehicle) => vehicle.hasWinterTires) ? <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-bold text-slate-600" title="雪マークはスタッドレスタイヤ装着中の車両です"><Snowflake className="size-3.5" />雪マーク：スタッドレスタイヤ</span> : null}</div>
           </div>
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_240px]">
             <ParkingMap selectedVehicleId={parkingVehicleId} setSelectedVehicleId={setParkingVehicleId} data={data} trips={activeTrips} changedVehicleIds={changedVehicleIds} mutate={mutate} openStart={openStart} openReserve={openReserve} openReturn={openParkingReturn} openFuel={openFuel} openEdit={openEdit} openEnd={openEnd} actorName={employee?.name ?? "共用端末"} currentEmployeeId={employee?.id ?? null} returnRequest={mapReturnRequest} />
@@ -895,11 +899,12 @@ function Timeline({ data, openStart, openEdit, highlightTripId, timelineDate, ti
   </div></>;
 }
 
-function VehicleEquipmentBadges({ vehicle, compact = false }: { vehicle: Pick<Vehicle, "hasEtc" | "hasNavigation">; compact?: boolean }) {
-  if (!vehicle.hasEtc && !vehicle.hasNavigation) return null;
-  return <span className={cn("flex items-center gap-1", compact ? "mt-0.5 justify-center" : "mt-1.5")} aria-label={`装備：${[vehicle.hasEtc ? "ETC" : "", vehicle.hasNavigation ? "ナビ" : ""].filter(Boolean).join("、")}`}>
+function VehicleEquipmentBadges({ vehicle, compact = false }: { vehicle: Pick<Vehicle, "hasEtc" | "hasNavigation" | "hasWinterTires">; compact?: boolean }) {
+  if (!vehicle.hasEtc && !vehicle.hasNavigation && (!vehicle.hasWinterTires || compact)) return null;
+  return <span className={cn("flex items-center gap-1", compact ? "mt-0.5 justify-center" : "mt-1.5")} aria-label={`装備：${[vehicle.hasEtc ? "ETC" : "", vehicle.hasNavigation ? "ナビ" : "", !compact && vehicle.hasWinterTires ? "冬タイヤ" : ""].filter(Boolean).join("、")}`}>
     {vehicle.hasEtc ? <span className={cn("rounded bg-sky-100 font-black text-sky-700", compact ? "px-1 text-[6px] leading-[9px] @2xl:text-[7px]" : "px-1.5 py-0.5 text-[10px]")}>ETC</span> : null}
     {vehicle.hasNavigation ? <span className={cn("rounded bg-violet-100 font-black text-violet-700", compact ? "px-1 text-[6px] leading-[9px] @2xl:text-[7px]" : "px-1.5 py-0.5 text-[10px]")}>ナビ</span> : null}
+    {!compact && vehicle.hasWinterTires ? <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-black text-slate-700">冬タイヤ</span> : null}
   </span>;
 }
 
@@ -1316,9 +1321,13 @@ const vehicleTileContent = (vehicle: Vehicle, horizontal: boolean, offSite = fal
   const code = <span className="inline-block rounded-full border border-slate-300 bg-white/80 px-1 text-[8px] font-black leading-tight tracking-[0.08em] text-slate-700 @2xl:px-1.5 @2xl:text-[10px]">{vehicle.code}</span>;
   const plate = formatPlateShort(vehicle.plateNumber);
   const extra = vehicle.status === "MAINTENANCE" ? <small className="mt-0.5 block whitespace-nowrap text-[7px] font-black text-amber-800">{offSite ? "車検で不在" : "整備中"}</small> : <VehicleEquipmentBadges vehicle={vehicle} compact />;
-  if (horizontal) return <span className="flex w-full max-w-full items-center gap-1 px-1 text-left @4xl:w-auto @4xl:gap-1.5 @4xl:px-1.5"><span className="flex shrink-0 flex-col items-center"><CarFront className="size-4 @4xl:size-6" style={{ color: vehicle.color }} />{extra}</span><span className="min-w-0 text-[8px] leading-none">{code}<b className="block truncate text-[8px] leading-tight @2xl:text-[10px] @4xl:mt-0.5 @4xl:text-[11px]">{vehicle.name}</b><small className="block whitespace-nowrap text-[7px] font-bold leading-none text-slate-500 @2xl:text-[8px] @4xl:text-[9px]">{plate}</small></span></span>;
-  return <><span className="flex items-center justify-center gap-1 @4xl:flex-col @4xl:gap-0.5"><CarFront className="size-3.5 shrink-0 @2xl:size-4 @4xl:size-5" style={{ color: vehicle.color }} />{code}</span><b className="mt-0.5 block max-w-full truncate px-1 text-[8px] leading-tight @2xl:text-[10px]">{vehicle.name}</b><small className="mt-0.5 block whitespace-nowrap text-[7px] font-bold leading-none text-slate-500 @2xl:text-[8px]">{plate}</small>{extra}</>;
+  if (horizontal) return <span className="flex w-full max-w-full items-center gap-1 px-1 text-left @4xl:w-auto @4xl:gap-1.5 @4xl:px-1.5"><span className="flex shrink-0 flex-col items-center"><VehicleMapIcon vehicle={vehicle} className="size-4 @4xl:size-6" />{extra}</span><span className="min-w-0 text-[8px] leading-none">{code}<b className="block truncate text-[8px] leading-tight @2xl:text-[10px] @4xl:mt-0.5 @4xl:text-[11px]">{vehicle.name}</b><small className="block whitespace-nowrap text-[7px] font-bold leading-none text-slate-500 @2xl:text-[8px] @4xl:text-[9px]">{plate}</small></span></span>;
+  return <><span className="flex items-center justify-center gap-1 @4xl:flex-col @4xl:gap-0.5"><VehicleMapIcon vehicle={vehicle} className="size-3.5 @2xl:size-4 @4xl:size-5" />{code}</span><b className="mt-0.5 block max-w-full truncate px-1 text-[8px] leading-tight @2xl:text-[10px]">{vehicle.name}</b><small className="mt-0.5 block whitespace-nowrap text-[7px] font-bold leading-none text-slate-500 @2xl:text-[8px]">{plate}</small>{extra}</>;
 };
+
+export function VehicleMapIcon({ vehicle, className }: { vehicle: Pick<Vehicle, "color" | "hasWinterTires">; className: string }) {
+  return <span className="relative inline-grid shrink-0 place-items-center"><CarFront className={className} style={{ color: vehicle.color }} />{vehicle.hasWinterTires ? <span aria-label="スタッドレスタイヤ装着中" title="スタッドレスタイヤ装着中" className="absolute -right-1.5 -top-1.5 grid size-3 place-items-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-sm @4xl:size-3.5"><Snowflake aria-hidden className="size-2 @4xl:size-2.5" /></span> : null}</span>;
+}
 const fuelFillHeight = (level: number) => `${Math.max(6, level * 25)}%`;
 // 残量が変わった車両だけ、少しの間タイルの液面を波打たせる。初回表示では揺らさない。
 function useFuelChangeWave(spots: ParkingSpot[]) {

@@ -23,9 +23,12 @@ assert.deepEqual(validated.result.counts, originalCounts);
 
 const legacyBackup = structuredClone(backup);
 for (const item of legacyBackup.data.employees) delete item.qrToken;
-for (const item of legacyBackup.data.vehicles) delete item.qrToken;
+for (const item of legacyBackup.data.vehicles) {
+  delete item.qrToken;
+  delete item.hasWinterTires;
+}
 const legacyValidated = await post({ mode: "validate", backup: legacyBackup });
-assert.equal(legacyValidated.response.status, 200, "QR識別子がない旧バックアップも検査できる");
+assert.equal(legacyValidated.response.status, 200, "QR識別子と冬タイヤ項目がない旧バックアップも検査できる");
 
 const crossOrigin = await fetch(`${appUrl}/api/admin/data`, { method: "POST", headers: { "Content-Type": "application/json", Origin: "http://evil.example" }, body: JSON.stringify({ mode: "validate", backup }) });
 assert.equal(crossOrigin.status, 403, "別Originからの復元を拒否する");

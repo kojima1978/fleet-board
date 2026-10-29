@@ -1,0 +1,2 @@
+ALTER TABLE "Vehicle"
+ADD COLUMN "hasWinterTires" BOOLEAN NOT NULL DEFAULT false;

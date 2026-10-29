@@ -76,7 +76,7 @@ try {
   await postAdmin({
     action: "importVehicles",
     items: [
-      { code: vehicleCodes[0], name: "NFC後登録車両", plateNumber: plateNumbers[0], color: "#2563EB", hasEtc: true, hasNavigation: true },
+      { code: vehicleCodes[0], name: "NFC後登録車両", plateNumber: plateNumbers[0], color: "#2563EB", hasEtc: true, hasNavigation: true, hasWinterTires: true },
       { code: vehicleCodes[1], name: "NFC同時登録車両", plateNumber: plateNumbers[1], nfcUid: vehicleUids[1], color: "#0891B2" },
     ],
   });
@@ -93,8 +93,10 @@ try {
   assert.equal(vehicleWithNfc?.nfcUid, vehicleUids[1]);
   assert.equal(vehicleWithoutNfc?.hasEtc, true);
   assert.equal(vehicleWithoutNfc?.hasNavigation, true);
+  assert.equal(vehicleWithoutNfc?.hasWinterTires, true);
   assert.equal(vehicleWithNfc?.hasEtc, false);
   assert.equal(vehicleWithNfc?.hasNavigation, false);
+  assert.equal(vehicleWithNfc?.hasWinterTires, false);
 
   // NFCなしで取り込んだ社員も、カードを登録しないまま編集して保存できる。
   await postAdmin({ action: "updateEmployee", id: employeeWithoutNfc.id, version: employeeWithoutNfc.version, name: `${employeeWithoutNfc.name}改`, department: employeeWithoutNfc.department, nfcUid: "" });
@@ -112,6 +114,7 @@ try {
   assert.equal(data.vehicles.find((item) => item.code === vehicleCodes[0])?.nfcUid, vehicleUids[0]);
   assert.equal(data.vehicles.find((item) => item.code === vehicleCodes[0])?.hasEtc, true);
   assert.equal(data.vehicles.find((item) => item.code === vehicleCodes[0])?.hasNavigation, true);
+  assert.equal(data.vehicles.find((item) => item.code === vehicleCodes[0])?.hasWinterTires, true);
 
   // 社員番号を変更でき、有効な他の社員と同じ番号には変更できない。
   const renamed = data.employees.find((item) => item.code === employeeCodes[0]);
