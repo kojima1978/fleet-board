@@ -680,6 +680,37 @@ function TripExtend({ trip, reservations, mutate, actorName, buttonClassName, co
     confirm: <Button variant="ghost" className={cn("gap-1 text-xs", confirmClassName)} disabled={busy || !selected} title={selected ? `返却予定を${formatDateTime(new Date(selected.end))}にする` : "先に延長する時間を選んでください"} onClick={() => void confirm()}><Clock3 className="size-3.5" />{busy ? "延長中…" : "延長する"}</Button>,
   });
 }
+
+function ActiveTripPopover({ trip, reservations, mutate, actorName, onReturn, onClose }: { trip: Trip; reservations: Trip[]; mutate: Mutate; actorName: string; onReturn: () => void; onClose: () => void }) {
+  const overdue = new Date(trip.plannedEnd).getTime() < Date.now();
+  return <div role="region" aria-label={`${trip.vehicle.name}の利用状況`} className="absolute inset-x-2 bottom-2 z-30 mx-auto w-auto max-w-2xl rounded-2xl border border-slate-300 bg-white p-3 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.55)] ring-1 ring-white/80">
+    <div className="flex min-w-0 items-center gap-3 pr-9">
+      <span className="grid size-11 shrink-0 place-items-center rounded-xl border border-slate-200 bg-slate-50"><CarFront className="size-5" style={{ color: trip.vehicle.color }} /></span>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5"><VehicleCodeBadge code={trip.vehicle.code} /><b className="truncate text-sm text-slate-900">{trip.vehicle.name}</b><span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-700">利用中</span></div>
+        <p className="mt-0.5 truncate text-[11px] font-bold text-slate-500">利用者：{trip.employee.name}<span aria-hidden="true"> ・ </span>{trip.vehicle.plateNumber}</p>
+      </div>
+      <Button className="min-h-11 shrink-0 gap-1.5 px-4 text-sm" onClick={onReturn}><LogOut className="size-4" />返却する</Button>
+    </div>
+    <TripExtend key={trip.id} trip={trip} reservations={reservations} mutate={mutate} actorName={actorName} buttonClassName="min-h-10 text-xs" confirmClassName="min-h-10 shrink-0 gap-1.5 px-4 text-xs">
+      {({ options, preview, confirm }) => <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/80 p-2.5">
+        <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-[10px] font-bold text-slate-500">返却予定</span>
+          <strong className={cn("text-sm font-black tabular-nums text-slate-800", overdue && "text-rose-700")}>{formatDateTime(trip.plannedEnd)}</strong>
+          {overdue ? <span className="rounded-full border border-rose-200 bg-white px-2 py-0.5 text-[10px] font-black text-rose-700">予定を超過</span> : null}
+          <span className="ml-auto text-[10px] text-slate-400">延長する時間を選択</span>
+        </div>
+        {options}
+        <div className="mt-2 flex min-h-10 items-center justify-between gap-3 border-t border-slate-200 pt-2">
+          <div className="min-w-0 flex-1 text-left">{preview}</div>
+          {confirm}
+        </div>
+      </div>}
+    </TripExtend>
+    <button type="button" aria-label="利用状況を閉じる" onClick={onClose} className="absolute right-2 top-2 grid size-8 place-items-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"><X className="size-4" /></button>
+  </div>;
+}
+
 function Legend({ color, label }: { color: string; label: string }) { return <span className="flex items-center gap-1.5"><i className={cn("size-2 rounded-full", color)} />{label}</span>; }
 function VehicleCodeBadge({ code }: { code: string }) { return <span className="shrink-0 rounded-md border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[9px] font-black tracking-wide text-slate-600">{code}</span>; }
 function Empty({ label }: { label: string }) { return <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-400">{label}</div>; }
@@ -706,14 +737,16 @@ type OffSiteEntry = { maintenance: VehicleMaintenance; vehicle: Vehicle; spotCod
 // 車検・修理で外出中の車両は「まもなく利用予定」の下に同じ形で並べ、タップで「戻った」の画面を開く（空き区画へドラッグも可）。
 // 「後で設定」で登録した車など位置未設定の車両も並べ、タップで置く区画を選ぶ（空き区画へドラッグも可）。
 // 位置未設定でも利用開始はできるため、その場で利用開始もできる。
-function ActiveVehicleSidebar({ trips, reservationPanel, maintenancePanel, mineEmployeeId, offSite, unplaced, selectedTripId, returningTripId, returningOffSiteId, placingVehicleId, onSelect, onSelectOffSite, onPlace, onStart, onDragStart, onDragOffSiteStart, onDragEnd }: { trips: Trip[]; reservationPanel: ReactNode; maintenancePanel: ReactNode; mineEmployeeId: string | null; offSite: OffSiteEntry[]; unplaced: Vehicle[]; selectedTripId: string | null; returningTripId: string | null; returningOffSiteId: string | null; placingVehicleId: string | null; onSelect: (trip: Trip) => void; onSelectOffSite: (vehicle: Vehicle) => void; onPlace: (vehicle: Vehicle) => void; onStart: (vehicle: Vehicle) => void; onDragStart: (trip: Trip) => void; onDragOffSiteStart: (vehicle: Vehicle) => void; onDragEnd: () => void }) {
+function ActiveVehicleSidebar({ trips, reservationPanel, maintenancePanel, maintenancePlannedCount, maintenanceNeedsAttention, mineEmployeeId, offSite, unplaced, selectedTripId, returningTripId, returningOffSiteId, placingVehicleId, onSelect, onSelectOffSite, onPlace, onStart, onDragStart, onDragOffSiteStart, onDragEnd }: { trips: Trip[]; reservationPanel: ReactNode; maintenancePanel: ReactNode; maintenancePlannedCount: number; maintenanceNeedsAttention: boolean; mineEmployeeId: string | null; offSite: OffSiteEntry[]; unplaced: Vehicle[]; selectedTripId: string | null; returningTripId: string | null; returningOffSiteId: string | null; placingVehicleId: string | null; onSelect: (trip: Trip) => void; onSelectOffSite: (vehicle: Vehicle) => void; onPlace: (vehicle: Vehicle) => void; onStart: (vehicle: Vehicle) => void; onDragStart: (trip: Trip) => void; onDragOffSiteStart: (vehicle: Vehicle) => void; onDragEnd: () => void }) {
+  const [showAll, setShowAll] = useState(false);
+  const [maintenanceOpen, setMaintenanceOpen] = useState(maintenanceNeedsAttention);
   const now = Date.now();
   // 選んでいる利用者の車両を一番上に出し、あとはタイムラインの「利用中」と同じく返却予定が近い順（超過は上）に並べる。
   const isMine = (trip: Trip) => mineEmployeeId !== null && trip.employeeId === mineEmployeeId;
   const inUse = [...trips].sort((a, b) => Number(isMine(b)) - Number(isMine(a)) || a.plannedEnd.localeCompare(b.plannedEnd));
-  return <Card className="overflow-hidden lg:relative">
+  return <><Card className="overflow-hidden lg:relative">
     <div className="flex flex-col lg:absolute lg:inset-0">
-      <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2"><h3 className="text-xs font-black">利用中の車両</h3><span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-black text-blue-700">{trips.length}台</span></div>
+      <div className="flex items-center gap-1.5 border-b border-slate-100 px-3 py-2"><h3 className="mr-auto whitespace-nowrap text-xs font-black">利用中の車両</h3>{trips.length > 6 ? <button type="button" onClick={() => setShowAll(true)} className="inline-flex min-h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-lg px-1.5 text-[10px] font-black text-slate-600 transition hover:bg-slate-100 hover:text-slate-900" title="利用中の車両を大きな一覧で表示"><LayoutGrid className="size-3.5" />拡大</button> : null}<span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-black text-blue-700">{trips.length}台</span></div>
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       {trips.length === 0 ? <p className="px-3 py-6 text-center text-xs text-slate-400">現在利用中の車両はありません</p> : <ul className="divide-y divide-slate-100">{inUse.map((trip) => {
         const overdue = new Date(trip.plannedEnd).getTime() < now;
@@ -733,7 +766,7 @@ function ActiveVehicleSidebar({ trips, reservationPanel, maintenancePanel, mineE
         </button><button type="button" title={`${vehicle.name}の利用を開始`} aria-label={`${vehicle.name}の利用を開始`} onClick={() => onStart(vehicle)} className="grid size-8 shrink-0 place-items-center rounded-lg text-blue-600 hover:bg-blue-50"><Play className="size-4 fill-current" /></button></li>;
       })}</ul></section> : null}
       {reservationPanel}
-      {offSite.length ? <section aria-label="車検"><div className="flex items-center justify-between border-y border-slate-100 px-3 py-2"><h3 className="flex items-center gap-1.5 text-xs font-black text-slate-800"><Wrench className="size-3.5 text-amber-600" />車検</h3><span className="text-[10px] font-bold text-slate-400">外出中 ・ {offSite.length}台</span></div><ul className="divide-y divide-slate-100">{offSite.map(({ maintenance, vehicle, spotCode }) => {
+      {offSite.length + maintenancePlannedCount > 0 ? <section aria-label="車検・整備"><button type="button" aria-expanded={maintenanceOpen} onClick={() => setMaintenanceOpen((open) => !open)} className={cn("flex min-h-10 w-full items-center gap-2 border-y border-slate-100 px-3 py-2 text-left transition hover:bg-slate-50", maintenanceNeedsAttention && "bg-amber-50/50")}><Wrench className={cn("size-3.5 shrink-0 text-slate-500", maintenanceNeedsAttention && "text-amber-700")} /><span className="mr-auto text-xs font-black text-slate-800">車検・整備</span>{offSite.length ? <span className="whitespace-nowrap text-[10px] font-bold text-slate-500">外出中 {offSite.length}</span> : null}{maintenancePlannedCount ? <span className="whitespace-nowrap text-[10px] font-bold text-slate-500">予定 {maintenancePlannedCount}</span> : null}{maintenanceOpen ? <ChevronUp className="size-3.5 shrink-0 text-slate-400" /> : <ChevronDown className="size-3.5 shrink-0 text-slate-400" />}</button>{maintenanceOpen ? <div>{offSite.length ? <section aria-label="車検で外出中"><div className="border-b border-slate-100 bg-slate-50/70 px-3 py-1.5 text-[10px] font-black text-slate-500">現在外出中</div><ul className="divide-y divide-slate-100">{offSite.map(({ maintenance, vehicle, spotCode }) => {
         const overdue = !!maintenance.plannedEnd && new Date(maintenance.plannedEnd).getTime() < now;
         // 利用中の車両と同じ形。タップで「戻った」の画面を開き、空き区画へドラッグするとその区画を選んで開く。
         return <li key={maintenance.id}><button type="button" draggable data-off-site-vehicle-id={vehicle.id} title={`${vehicle.name}が戻ったら登録（空き区画へドラッグすると、その区画に戻す）`} onClick={() => onSelectOffSite(vehicle)} onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", vehicle.name); onDragOffSiteStart(vehicle); }} onDragEnd={onDragEnd} className={cn("flex w-full cursor-grab items-center gap-2 px-3 py-2 text-left transition hover:bg-slate-50 active:cursor-grabbing", overdue && "bg-rose-50/70", vehicle.id === returningOffSiteId && "bg-blue-50 ring-2 ring-inset ring-blue-300")}>
@@ -741,11 +774,25 @@ function ActiveVehicleSidebar({ trips, reservationPanel, maintenancePanel, mineE
           <div className="min-w-0 flex-1"><p className="flex min-w-0 items-center gap-1.5 text-xs font-black"><VehicleCodeBadge code={vehicle.code} /><span className="truncate">{vehicle.name}</span></p><p className="truncate text-[10px] text-slate-500"><span className={cn(overdue && "font-black text-rose-700")}>{maintenance.plannedEnd ? `${formatMaintenanceTime(maintenance.plannedEnd)}${overdue ? " 予定超過" : " 戻り予定"}` : "戻り予定 未定"}</span>{spotCode ? ` ・ ${spotCode}確保` : ""}{maintenance.note ? ` ・ ${maintenance.note}` : ""}</p></div>
           <GripVertical aria-hidden className="size-4 shrink-0 text-slate-300" />
         </button></li>;
-      })}</ul></section> : null}
-      {maintenancePanel}
+      })}</ul></section> : null}{maintenancePanel}</div> : null}</section> : null}
       </div>
     </div>
-  </Card>;
+  </Card>{showAll ? <ActiveVehiclesDialog trips={inUse} mineEmployeeId={mineEmployeeId} onSelect={(trip) => { setShowAll(false); onSelect(trip); }} onClose={() => setShowAll(false)} /> : null}</>;
+}
+
+function ActiveVehiclesDialog({ trips, mineEmployeeId, onSelect, onClose }: { trips: Trip[]; mineEmployeeId: string | null; onSelect: (trip: Trip) => void; onClose: () => void }) {
+  const now = Date.now();
+  return <DialogShell wide title="利用中の車両" subtitle={`${trips.length}台を返却予定が近い順に表示しています。車両を選ぶと、返却や予定延長ができます。`} onClose={onClose}>
+    <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{trips.map((trip) => {
+      const overdue = new Date(trip.plannedEnd).getTime() < now;
+      const mine = mineEmployeeId !== null && trip.employeeId === mineEmployeeId;
+      return <li key={trip.id}><button type="button" onClick={() => onSelect(trip)} className={cn("flex min-h-[76px] w-full items-center gap-2.5 rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:border-blue-300 hover:bg-blue-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500", overdue && "border-rose-200 bg-rose-50/50", mine && "border-blue-300")}>
+        <span className="grid size-9 shrink-0 place-items-center rounded-lg border border-slate-200 bg-slate-50"><CarFront className="size-4" style={{ color: trip.vehicle.color }} /></span>
+        <span className="min-w-0 flex-1"><span className="flex min-w-0 items-center gap-1.5"><VehicleCodeBadge code={trip.vehicle.code} /><b className="truncate text-xs text-slate-900">{trip.vehicle.name}</b>{mine ? <span className="shrink-0 rounded bg-blue-600 px-1 py-0.5 text-[8px] font-black text-white">あなた</span> : null}</span><span className="mt-1 block truncate text-[10px] text-slate-500">{trip.employee.name} ・ <span className={cn("tabular-nums", overdue && "font-black text-rose-700")}>{formatTime(trip.plannedEnd)}{overdue ? " 超過" : "まで"}</span></span></span>
+        <ChevronRight className="size-4 shrink-0 text-slate-300" />
+      </button></li>;
+    })}</ul>
+  </DialogShell>;
 }
 
 // これからの予約を日付ごとに1件1行で並べる。利用中は右の「利用中」、完了は履歴で見る。
@@ -1038,6 +1085,8 @@ function ParkingMap({ selectedVehicleId, setSelectedVehicleId, data, trips, chan
   const sendOutVehicle = sendOutMaintenance ? data.vehicles.find((vehicle) => vehicle.id === sendOutMaintenance.vehicleId) ?? null : null;
   const selectedSendOut = selectedVehicle?.status === "AVAILABLE" ? data.maintenances.filter((item) => item.vehicleId === selectedVehicle.id && canSendOutMaintenance(item, reservationNow)).sort((a, b) => a.plannedStart.localeCompare(b.plannedStart))[0] ?? null : null;
   const offSiteEntries = offSiteMaintenances.flatMap((item) => { const vehicle = data.vehicles.find((candidate) => candidate.id === item.vehicleId); const spot = data.spots.find((candidate) => candidate.vehicle?.id === item.vehicleId); return vehicle ? [{ maintenance: item, vehicle, spotCode: spot?.code ?? null }] : []; });
+  const upcomingMaintenances = getUpcomingMaintenances(data.maintenances, reservationNow);
+  const maintenanceNeedsAttention = offSiteEntries.some(({ maintenance }) => !!maintenance.plannedEnd && Date.parse(maintenance.plannedEnd) < reservationNow) || upcomingMaintenances.some((maintenance) => canSendOutMaintenance(maintenance, reservationNow));
   // タイムラインの「駐車場で返却」から来たときは、その車の返却先選びから始める。
   useEffect(() => {
     const tripId = new URLSearchParams(window.location.search).get("returnTrip");
@@ -1092,13 +1141,13 @@ function ParkingMap({ selectedVehicleId, setSelectedVehicleId, data, trips, chan
           </div>
           <button type="button" aria-label="車両詳細を閉じる" onClick={() => setSelectedVehicleId(null)} className="absolute -right-2.5 -top-2.5 grid size-8 place-items-center rounded-full border border-slate-300 bg-white text-slate-500 shadow-lg hover:bg-slate-100 hover:text-slate-800"><X className="size-4" /></button>
         </div> : null}
-        {selectedTrip ? <div role="region" aria-label={`${selectedTrip.vehicle.name}の利用状況`} className="absolute inset-x-2 bottom-2 z-30 mx-auto flex max-w-xl flex-col gap-2.5 rounded-2xl border border-slate-300 bg-white p-3 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.55)] ring-1 ring-white/80"><TripExtend key={selectedTrip.id} trip={selectedTrip} reservations={data.nextReservations} mutate={mutate} actorName={actorName} buttonClassName="min-h-9 text-xs" confirmClassName="min-h-10 w-[5.5rem] shrink-0 gap-1 px-0 text-xs">{({ options, preview, confirm }) => <><div className="flex min-w-0 items-center gap-2.5"><span className="grid size-10 shrink-0 place-items-center rounded-xl border border-slate-200 bg-slate-100"><CarFront className="size-5" style={{ color: selectedTrip.vehicle.color }} /></span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-1.5"><b className="text-sm">{selectedTrip.vehicle.name}</b><span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-700">利用中</span></div><p className="text-[10px] font-bold text-slate-500">{selectedTrip.employee.name} ・ <span className={cn(new Date(selectedTrip.plannedEnd).getTime() < Date.now() && "text-rose-700")}>{formatDateTime(selectedTrip.plannedEnd)}{new Date(selectedTrip.plannedEnd).getTime() < Date.now() ? " 超過" : " 返却予定"}</span></p></div><div role="group" aria-label="利用中の車両の操作" className="flex shrink-0 items-center gap-1.5">{confirm}<Button className="min-h-10 w-[5.5rem] shrink-0 gap-1 px-0 text-xs" onClick={() => startReturn(selectedTrip)}><LogOut className="size-3.5" />返却する</Button></div></div><div className="flex items-center gap-3 border-t border-slate-100 pt-2.5"><div className="min-w-0 flex-1">{options}</div><div className="w-44 shrink-0 text-right">{preview}</div></div></>}</TripExtend><button type="button" aria-label="利用状況を閉じる" onClick={() => setSelectedTripId(null)} className="absolute -right-2.5 -top-2.5 grid size-8 place-items-center rounded-full border border-slate-300 bg-white text-slate-500 shadow-lg hover:bg-slate-100 hover:text-slate-800"><X className="size-4" /></button></div> : null}
+        {selectedTrip ? <ActiveTripPopover trip={selectedTrip} reservations={data.nextReservations} mutate={mutate} actorName={actorName} onReturn={() => startReturn(selectedTrip)} onClose={() => setSelectedTripId(null)} /> : null}
       </div>
       {returningTrip ? <div role="status" className="mx-auto mt-2 flex max-w-md items-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 p-2"><LogOut className="size-4 shrink-0 text-blue-600" /><p className="mr-auto text-xs font-bold"><b>{returningTrip.vehicle.name}</b>{returnableCount > 0 ? <>を返却する区画をタップ（点滅中の空き{returnableCount}区画・ドラッグも可）</> : "を返却できる空き区画がありません"}</p><Button variant="ghost" className="min-h-8 shrink-0 whitespace-nowrap px-3 text-xs" onClick={() => setReturningTripId(null)}>やめる</Button></div> : null}
       {movingVehicle ? <div role="status" className="mx-auto mt-2 flex max-w-md items-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 p-2"><Move className="size-4 shrink-0 text-blue-600" /><p className="mr-auto text-xs font-bold"><b>{movingVehicle.name}</b>{movingVehicle.parkingSpotId ? "の移動先" : "を置く区画"}をタップ（ドラッグも可）</p><Button variant="ghost" className="min-h-8 shrink-0 whitespace-nowrap px-3 text-xs" onClick={() => setMovingVehicleId(null)}>やめる</Button></div> : null}
     </div>
   </Card>
-  <ActiveVehicleSidebar trips={trips} reservationPanel={<ParkingReservations reservations={parkingReservations} onEdit={openEdit} />} maintenancePanel={<UpcomingMaintenances items={getUpcomingMaintenances(data.maintenances, reservationNow)} vehicles={data.vehicles} spots={data.spots} now={reservationNow} onOpen={(vehicle) => { setMaintenanceSpotId(undefined); setMaintenanceVehicleId(vehicle.id); }} />} mineEmployeeId={currentEmployeeId} offSite={offSiteEntries} unplaced={unplacedVehicles} selectedTripId={selectedTripId} returningTripId={returningTripId} returningOffSiteId={returningOffSiteId} placingVehicleId={movingVehicle && !movingVehicle.parkingSpotId ? movingVehicle.id : null} onSelect={selectTrip} onSelectOffSite={(vehicle) => { setSelectedTripId(null); setMaintenanceSpotId(undefined); setMaintenanceVehicleId(vehicle.id); }} onPlace={(vehicle) => { if (movingVehicleId === vehicle.id) setMovingVehicleId(null); else startMove(vehicle); }} onStart={(vehicle) => { setMovingVehicleId(null); openStart(vehicle); }} onDragStart={startReturn} onDragOffSiteStart={(vehicle) => { setSelectedVehicleId(null); setSelectedTripId(null); setMovingVehicleId(null); setReturningTripId(null); setReturningOffSiteId(vehicle.id); }} onDragEnd={() => { setReturningTripId(null); setReturningOffSiteId(null); }} />
+  <ActiveVehicleSidebar trips={trips} reservationPanel={<ParkingReservations reservations={parkingReservations} onEdit={openEdit} />} maintenancePanel={<UpcomingMaintenances items={upcomingMaintenances} vehicles={data.vehicles} spots={data.spots} now={reservationNow} onOpen={(vehicle) => { setMaintenanceSpotId(undefined); setMaintenanceVehicleId(vehicle.id); }} />} maintenancePlannedCount={upcomingMaintenances.length} maintenanceNeedsAttention={maintenanceNeedsAttention} mineEmployeeId={currentEmployeeId} offSite={offSiteEntries} unplaced={unplacedVehicles} selectedTripId={selectedTripId} returningTripId={returningTripId} returningOffSiteId={returningOffSiteId} placingVehicleId={movingVehicle && !movingVehicle.parkingSpotId ? movingVehicle.id : null} onSelect={selectTrip} onSelectOffSite={(vehicle) => { setSelectedTripId(null); setMaintenanceSpotId(undefined); setMaintenanceVehicleId(vehicle.id); }} onPlace={(vehicle) => { if (movingVehicleId === vehicle.id) setMovingVehicleId(null); else startMove(vehicle); }} onStart={(vehicle) => { setMovingVehicleId(null); openStart(vehicle); }} onDragStart={startReturn} onDragOffSiteStart={(vehicle) => { setSelectedVehicleId(null); setSelectedTripId(null); setMovingVehicleId(null); setReturningTripId(null); setReturningOffSiteId(vehicle.id); }} onDragEnd={() => { setReturningTripId(null); setReturningOffSiteId(null); }} />
   {maintenanceVehicle ? <MaintenanceDialog key={`${maintenanceVehicle.id}:${maintenanceSpotId ?? ""}`} vehicle={maintenanceVehicle} data={data} mutate={mutate} currentEmployeeId={currentEmployeeId} initialSpotId={maintenanceSpotId} onClose={() => { setMaintenanceVehicleId(null); setMaintenanceSpotId(undefined); }} /> : null}
   {customerMoveSpot && movingVehicle && canDropOn(customerMoveSpot) ? <DialogShell title={`${formatSpotLabel(customerMoveSpot)}に置きますか？`} subtitle={`${movingVehicle.name}をお客様用の区画に置こうとしています`} onClose={() => setCustomerMoveSpotId(null)}><div className="space-y-4">
     <CustomerSpotNotice spots={data.spots} vehicle={movingVehicle} />
