@@ -6,7 +6,7 @@ export type Employee = { id: string; code: string; name: string; email: string; 
 export type Department = { id: string; name: string; active: boolean; version: number; employeeCount: number };
 export type Vehicle = {
   id: string; code: string; name: string; plateNumber: string; nfcUid: string; qrCode: string;
-  hasEtc: boolean; hasNavigation: boolean; hasWinterTires: boolean; fuelLevel: number | null;
+  hasEtc: boolean; hasNavigation: boolean; hasWinterTires: boolean; isKei: boolean; fuelLevel: number | null;
   color: string; status: "AVAILABLE" | "RESERVED" | "IN_USE" | "MAINTENANCE";
   parkingSpotId: string | null; active: boolean; version: number;
 };

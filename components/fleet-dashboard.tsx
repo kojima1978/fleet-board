@@ -1325,8 +1325,9 @@ const vehicleTileContent = (vehicle: Vehicle, horizontal: boolean, offSite = fal
   return <><span className="flex items-center justify-center gap-1 @4xl:flex-col @4xl:gap-0.5"><VehicleMapIcon vehicle={vehicle} className="size-3.5 @2xl:size-4 @4xl:size-5" />{code}</span><b className="mt-0.5 block max-w-full truncate px-1 text-[8px] leading-tight @2xl:text-[10px]">{vehicle.name}</b><small className="mt-0.5 block whitespace-nowrap text-[7px] font-bold leading-none text-slate-500 @2xl:text-[8px]">{plate}</small>{extra}</>;
 };
 
-export function VehicleMapIcon({ vehicle, className }: { vehicle: Pick<Vehicle, "color" | "hasWinterTires">; className: string }) {
-  return <span className="relative inline-grid shrink-0 place-items-center"><CarFront className={className} style={{ color: vehicle.color }} />{vehicle.hasWinterTires ? <span aria-label="スタッドレスタイヤ装着中" title="スタッドレスタイヤ装着中" className="absolute -right-1.5 -top-1.5 grid size-3 place-items-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-sm @4xl:size-3.5"><Snowflake aria-hidden className="size-2 @4xl:size-2.5" /></span> : null}</span>;
+// 軽自動車は枠の大きさを変えずに車を8割に縮め、右下に「軽」マークを付ける。
+export function VehicleMapIcon({ vehicle, className }: { vehicle: Pick<Vehicle, "color" | "hasWinterTires" | "isKei">; className: string }) {
+  return <span className="relative inline-grid shrink-0 place-items-center"><CarFront className={cn(className, vehicle.isKei && "scale-80")} style={{ color: vehicle.color }} />{vehicle.isKei ? <span aria-label="軽自動車" title="軽自動車" className="absolute -bottom-1 -right-1.5 grid size-3 place-items-center rounded-sm bg-yellow-300 text-[7px] font-black leading-none text-yellow-950 @4xl:size-3.5 @4xl:text-[8px]">軽</span> : null}{vehicle.hasWinterTires ? <span aria-label="スタッドレスタイヤ装着中" title="スタッドレスタイヤ装着中" className="absolute -right-1.5 -top-1.5 grid size-3 place-items-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-sm @4xl:size-3.5"><Snowflake aria-hidden className="size-2 @4xl:size-2.5" /></span> : null}</span>;
 }
 const fuelFillHeight = (level: number) => `${Math.max(6, level * 25)}%`;
 // 残量が変わった車両だけ、少しの間タイルの液面を波打たせる。初回表示では揺らさない。

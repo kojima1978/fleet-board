@@ -43,6 +43,7 @@ const emptyVehicle = {
   hasEtc: false,
   hasNavigation: false,
   hasWinterTires: false,
+  isKei: false,
 };
 const field = "min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500";
 const NFC_SCAN_TIMEOUT_MS = 15_000;
@@ -212,6 +213,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
             hasEtc: editingVehicle.hasEtc,
             hasNavigation: editingVehicle.hasNavigation,
             hasWinterTires: editingVehicle.hasWinterTires,
+            isKei: editingVehicle.isKei,
           }
         : emptyVehicle,
     );
@@ -349,6 +351,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
       hasEtc: vehicle.hasEtc,
       hasNavigation: vehicle.hasNavigation,
       hasWinterTires: vehicle.hasWinterTires,
+      isKei: vehicle.isKei,
     });
     setDrawerOpen(true);
   };
@@ -399,6 +402,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
         if (kind === "vehicle" && "hasEtc" in row && typeof (row as ImportRow).hasEtc !== "boolean") throw new Error(`${index + 1}件目のhasEtcはtrueまたはfalseで指定してください`);
         if (kind === "vehicle" && "hasNavigation" in row && typeof (row as ImportRow).hasNavigation !== "boolean") throw new Error(`${index + 1}件目のhasNavigationはtrueまたはfalseで指定してください`);
         if (kind === "vehicle" && "hasWinterTires" in row && typeof (row as ImportRow).hasWinterTires !== "boolean") throw new Error(`${index + 1}件目のhasWinterTiresはtrueまたはfalseで指定してください`);
+        if (kind === "vehicle" && "isKei" in row && typeof (row as ImportRow).isKei !== "boolean") throw new Error(`${index + 1}件目のisKeiはtrueまたはfalseで指定してください`);
       });
       setImportRows(
         (rows as ImportRow[]).map((row) => ({
@@ -433,6 +437,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
               hasEtc: true,
               hasNavigation: true,
               hasWinterTires: true,
+              isKei: false,
             },
             {
               code: "C019",
@@ -442,6 +447,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
               hasEtc: false,
               hasNavigation: true,
               hasWinterTires: false,
+              isKei: true,
             },
           ];
     const blob = new Blob([JSON.stringify(example, null, 2)], {
@@ -492,6 +498,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
               hasEtc: row.hasEtc === true,
               hasNavigation: row.hasNavigation === true,
               hasWinterTires: row.hasWinterTires === true,
+              isKei: row.isKei === true,
               ...(importSpots[index] ? { spotId: importSpots[index] } : {}),
             };
       });
@@ -586,6 +593,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
             hasEtc: vehicleForm.hasEtc,
             hasNavigation: vehicleForm.hasNavigation,
             hasWinterTires: vehicleForm.hasWinterTires,
+            isKei: vehicleForm.isKei,
           }
         : {
             action: "createVehicle",
@@ -1337,6 +1345,20 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                         />
                       </div>
                     </Field>
+                    <Field label="車種">
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <EquipmentToggle
+                          checked={vehicleForm.isKei}
+                          label="軽自動車"
+                          onChange={(checked) =>
+                            setVehicleForm((current) => ({
+                              ...current,
+                              isKei: checked,
+                            }))
+                          }
+                        />
+                      </div>
+                    </Field>
                     <Field label="表示色">
                       <span className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 px-3">
                         <input
@@ -1909,10 +1931,11 @@ function VehicleStatusBadge({ vehicle, offSite, className }: { vehicle: Pick<Veh
   return <span className={cn("inline-block w-fit shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold", !vehicle.active ? "bg-slate-200 text-slate-600" : vehicle.status === "AVAILABLE" ? "bg-emerald-50 text-emerald-700" : vehicle.status === "MAINTENANCE" ? "bg-amber-100 text-amber-800" : "bg-blue-50 text-blue-700", className)}>{label}</span>;
 }
 
-function EquipmentBadges({ vehicle, className }: { vehicle: Pick<Vehicle, "hasEtc" | "hasNavigation" | "hasWinterTires">; className?: string }) {
-  if (!vehicle.hasEtc && !vehicle.hasNavigation && !vehicle.hasWinterTires) return null;
+function EquipmentBadges({ vehicle, className }: { vehicle: Pick<Vehicle, "hasEtc" | "hasNavigation" | "hasWinterTires" | "isKei">; className?: string }) {
+  if (!vehicle.hasEtc && !vehicle.hasNavigation && !vehicle.hasWinterTires && !vehicle.isKei) return null;
   return (
-    <span className={cn("flex shrink-0 gap-1", className)} aria-label={`装備：${[vehicle.hasEtc ? "ETC" : "", vehicle.hasNavigation ? "ナビ" : "", vehicle.hasWinterTires ? "冬タイヤ" : ""].filter(Boolean).join("、")}`}>
+    <span className={cn("flex shrink-0 gap-1", className)} aria-label={`装備：${[vehicle.isKei ? "軽自動車" : "", vehicle.hasEtc ? "ETC" : "", vehicle.hasNavigation ? "ナビ" : "", vehicle.hasWinterTires ? "冬タイヤ" : ""].filter(Boolean).join("、")}`}>
+      {vehicle.isKei ? <span className="rounded bg-yellow-100 px-1.5 py-0.5 text-[9px] font-black text-yellow-800">軽</span> : null}
       {vehicle.hasEtc ? <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[9px] font-black text-sky-700">ETC</span> : null}
       {vehicle.hasNavigation ? <span className="rounded bg-violet-50 px-1.5 py-0.5 text-[9px] font-black text-violet-700">ナビ</span> : null}
       {vehicle.hasWinterTires ? <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-black text-slate-700">冬タイヤ</span> : null}

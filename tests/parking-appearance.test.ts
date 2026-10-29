@@ -5,7 +5,7 @@ import { isWinterTireSeason, parkingSpotClass, VehicleMapIcon } from "../compone
 import type { ParkingSpot, Vehicle } from "../lib/types";
 
 const spot: ParkingSpot = { id: "s1", code: "01", x: 0, y: 0, width: 5, height: 5, orientation: "vertical", enabled: true, version: 1, vehicle: null, role: "REGULAR", dedicatedVehicleId: null, dedicatedVehicleName: null, label: null };
-const vehicle: Vehicle = { id: "v1", code: "C001", name: "テスト車", plateNumber: "テスト001", nfcUid: "", qrCode: "", hasEtc: false, hasNavigation: false, hasWinterTires: false, fuelLevel: null, color: "#2563eb", status: "AVAILABLE", parkingSpotId: spot.id, active: true, version: 1 };
+const vehicle: Vehicle = { id: "v1", code: "C001", name: "テスト車", plateNumber: "テスト001", nfcUid: "", qrCode: "", hasEtc: false, hasNavigation: false, hasWinterTires: false, isKei: false, fuelLevel: null, color: "#2563eb", status: "AVAILABLE", parkingSpotId: spot.id, active: true, version: 1 };
 assert.equal(parkingSpotClass(spot), "border-slate-300 bg-white/70");
 assert.equal(parkingSpotClass({ ...spot, role: "TEMPORARY" }), "border-[3px] border-dashed border-slate-300/70 bg-slate-50/50");
 assert.equal(parkingSpotClass({ ...spot, vehicle }), "border-blue-400 bg-blue-50", "駐車中の車両は変更しない");
@@ -16,8 +16,12 @@ assert.equal(isWinterTireSeason(new Date("2026-10-31T14:59:59Z")), false, "東�
 assert.equal(isWinterTireSeason(new Date("2026-10-31T15:00:00Z")), true, "東京時間の11月から冬タイヤ凡例を出す");
 assert.equal(isWinterTireSeason(new Date("2027-04-30T14:59:59Z")), true, "東京時間の4月末までは冬タイヤ凡例を出す");
 assert.equal(isWinterTireSeason(new Date("2027-04-30T15:00:00Z")), false, "東京時間の5月から冬タイヤ凡例を出さない");
-const winterIcon = renderToStaticMarkup(createElement(VehicleMapIcon, { vehicle: { color: "#2563eb", hasWinterTires: true }, className: "size-4" }));
+const winterIcon = renderToStaticMarkup(createElement(VehicleMapIcon, { vehicle: { color: "#2563eb", hasWinterTires: true, isKei: false }, className: "size-4" }));
 assert.match(winterIcon, /スタッドレスタイヤ装着中/, "装着車の車アイコンへ雪マークの説明を付ける");
-const normalIcon = renderToStaticMarkup(createElement(VehicleMapIcon, { vehicle: { color: "#2563eb", hasWinterTires: false }, className: "size-4" }));
+const normalIcon = renderToStaticMarkup(createElement(VehicleMapIcon, { vehicle: { color: "#2563eb", hasWinterTires: false, isKei: false }, className: "size-4" }));
 assert.doesNotMatch(normalIcon, /スタッドレスタイヤ装着中/, "未装着車には雪マークを付けない");
+assert.doesNotMatch(normalIcon, /軽自動車|scale-80/, "普通車は縮めず軽マークも付けない");
+const keiIcon = renderToStaticMarkup(createElement(VehicleMapIcon, { vehicle: { color: "#2563eb", hasWinterTires: false, isKei: true }, className: "size-4" }));
+assert.match(keiIcon, /scale-80/, "軽自動車の車アイコンを縮める");
+assert.match(keiIcon, /aria-label="軽自動車"/, "軽自動車に軽マークを付ける");
 console.log("Parking appearance tests passed: empty background only, unchanged borders/occupied/maintenance/off-site");

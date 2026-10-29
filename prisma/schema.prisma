@@ -124,6 +124,8 @@ model Vehicle {
   hasEtc        Boolean       @default(false)
   hasNavigation Boolean       @default(false)
   hasWinterTires Boolean      @default(false)
+  // 軽自動車。配置図では車アイコンを小さくし「軽」マークを付ける。
+  isKei         Boolean       @default(false)
   fuelLevel     Int?
   active        Boolean       @default(true)
   status        VehicleStatus @default(AVAILABLE)
