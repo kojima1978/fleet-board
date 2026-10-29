@@ -2,7 +2,7 @@ export const MAINTENANCE_KINDS = ["ON_SITE", "OFF_SITE"] as const;
 export type MaintenanceKind = (typeof MAINTENANCE_KINDS)[number];
 
 // ON_SITEは駐車場内に置いたまま使えない状態、OFF_SITEは車検場や工場へ出ていて駐車場にいない状態。
-export const MAINTENANCE_KIND_LABELS: Record<MaintenanceKind, string> = { ON_SITE: "故障・点検（駐車場内）", OFF_SITE: "車検・修理で外出" };
+export const MAINTENANCE_KIND_LABELS: Record<MaintenanceKind, string> = { ON_SITE: "故障（駐車場内）", OFF_SITE: "車検・修理で外出" };
 export const MAINTENANCE_KIND_SHORT_LABELS: Record<MaintenanceKind, string> = { ON_SITE: "整備中", OFF_SITE: "車検で外出" };
 
 export const MAINTENANCE_NOTE_MAX = 200;
