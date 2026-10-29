@@ -899,7 +899,7 @@ export async function POST(request: Request) {
       await prisma.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-employee:${input.employeeId}`}))::text AS employee_lock, pg_advisory_xact_lock(hashtext(${`fleet-vehicle:${input.vehicleId}`}))::text AS vehicle_lock`;
         const [vehicle, employee] = await Promise.all([tx.vehicle.findUniqueOrThrow({ where: { id: input.vehicleId } }), tx.employee.findUniqueOrThrow({ where: { id: input.employeeId } })]);
-        if (!vehicle.active || (vehicle.status !== "AVAILABLE" && vehicle.status !== "MAINTENANCE")) throw new Error("この車両は現在予約できません");
+        if (!vehicle.active || (vehicle.status !== "AVAILABLE" && vehicle.status !== "MAINTENANCE" && vehicle.status !== "IN_USE")) throw new Error("この車両は現在予約できません");
         if (!employee.active) throw new Error("この社員は現在予約できません");
         await assertNoMaintenanceOverlap(tx, vehicle.id, plannedStart, plannedEnd);
         // 整備中の車両は、戻り予定が決まっていればその後だけ予約できる。重なりは上で確認済み。

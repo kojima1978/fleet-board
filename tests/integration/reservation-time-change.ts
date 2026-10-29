@@ -38,6 +38,15 @@ async function main() {
     await prisma.vehicleMaintenance.create({ data: { vehicleId: vehicle.id, kind: "ON_SITE", status: "SCHEDULED", plannedStart: at(420), plannedEnd: at(480) } });
     assert.equal((await post({ ...updatedBody, plannedStart: at(450).toISOString(), plannedEnd: at(510).toISOString() })).status, 400, "maintenance overlap rejected");
     assert.deepEqual(await prisma.trip.findUniqueOrThrow({ where: { id: reserved.id } }), changed, "failed saves leave both dates unchanged");
+    await prisma.vehicle.update({ where: { id: vehicle.id }, data: { status: "IN_USE" } });
+    await prisma.trip.create({ data: { employeeId: employee.id, vehicleId: vehicle.id, plannedStart: at(-60), plannedEnd: at(60), actualStart: at(-60), status: "IN_USE" } });
+    const reserve = { action: "reserve", employeeId: employee.id, vehicleId: vehicle.id, minutes: 60, actorEmployeeId: employee.id };
+    assert.equal((await post({ ...reserve, plannedStart: at(30).toISOString() })).status, 400, "current use blocks overlapping reservation");
+    assert.equal((await post({ ...reserve, plannedStart: at(60).toISOString() })).status, 200, "reserve after estimated return while vehicle is in use");
+    const future = await prisma.trip.findFirstOrThrow({ where: { vehicleId: vehicle.id, plannedStart: at(60) } });
+    assert.equal(future.status, "RESERVED");
+    assert.equal(future.actualStart, null);
+    assert.equal((await prisma.vehicle.findUniqueOrThrow({ where: { id: vehicle.id } })).status, "IN_USE", "reservation does not change current use");
     console.log("Reservation time change passed: atomic period save, audit, replay, stale version, time limits and overlaps");
   } finally { await prisma.$disconnect(); }
 }
