@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
-import { FuelLevelLabel } from "../components/fleet-dashboard";
-import { FUEL_LEVEL_LABELS } from "../lib/fuel-level";
+import { FuelLevelLabel, FuelReminder } from "../components/fleet-dashboard";
+import { FUEL_LEVEL_LABELS, needsReturnFuelReminder, needsStartFuelReminder } from "../lib/fuel-level";
 
 FUEL_LEVEL_LABELS.forEach((label, level) => {
   const compact = renderToStaticMarkup(<FuelLevelLabel level={level} compact />);
@@ -10,4 +10,25 @@ FUEL_LEVEL_LABELS.forEach((label, level) => {
   assert.equal(detail, `<span class="whitespace-nowrap">ガソリン残量 ${label}</span>`);
   assert.doesNotMatch(compact, /<br/);
 });
+
+for (const level of [0, 1, 2]) assert.equal(needsStartFuelReminder(level), true, `${FUEL_LEVEL_LABELS[level]}は利用開始時の給油案内の対象`);
+for (const level of [3, 4]) assert.equal(needsStartFuelReminder(level), false, `${FUEL_LEVEL_LABELS[level]}は利用開始時の給油案内の対象外`);
+for (const level of [0, 1]) assert.equal(needsReturnFuelReminder(level), true, `${FUEL_LEVEL_LABELS[level]}は返却時の給油案内の対象`);
+for (const level of [2, 3, 4]) assert.equal(needsReturnFuelReminder(level), false, `${FUEL_LEVEL_LABELS[level]}は返却時の給油案内の対象外`);
+assert.equal(needsStartFuelReminder(null), false, "残量未登録では利用開始時の給油案内を断定しない");
+assert.equal(needsReturnFuelReminder(null), false, "残量未登録では返却時の給油案内を断定しない");
+
+const startReminder = renderToStaticMarkup(<FuelReminder context="start" />);
+assert.match(startReminder, /ガソリン残量が1\/2以下です/);
+assert.match(startReminder, /可能であれば、利用中の給油をお願いします。/);
+assert.doesNotMatch(startReminder, /次回から/);
+assert.doesNotMatch(startReminder, /fuel-reminder-attention/, "確認画面では給油案内を静止表示にする");
+const attentionReminder = renderToStaticMarkup(<FuelReminder context="start" attention />);
+assert.match(attentionReminder, /fuel-reminder-attention/, "詳細入力画面を開いた直後だけ給油案内を短く強調する");
+const returnReminder = renderToStaticMarkup(<FuelReminder context="return" attention />);
+assert.match(returnReminder, /ガソリン残量が1\/2未満です/);
+assert.doesNotMatch(returnReminder, /1\/2以下/);
+assert.match(returnReminder, /次回から、可能な範囲で給油してから返却をお願いします。/);
+assert.doesNotMatch(returnReminder, /利用中の給油/);
+assert.match(returnReminder, /fuel-reminder-attention/, "返却時も給油案内を短く強調する");
 console.log("Fuel label tests passed: compact/detail labels, all five levels and no-wrap fractions");

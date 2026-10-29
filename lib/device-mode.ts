@@ -71,7 +71,7 @@ const userTimeout = createDeviceSetting<UserTimeoutMinutes>(
 export const useUserTimeoutMinutes = userTimeout.useValue;
 export const setUserTimeoutMinutes = userTimeout.set;
 
-// NFCを読み取ったときの効果音。静かな場所に置く端末では切れるようにする。
+// NFC読取の効果音と返却時の音声案内。静かな場所に置く端末では切れるようにする。
 const nfcSound = createDeviceSetting<boolean>(
   "fleetflow.nfcSound",
   (value) => value !== "off",

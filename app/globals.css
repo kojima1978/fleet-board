@@ -13,6 +13,17 @@ button { -webkit-tap-highlight-color: transparent; }
 @keyframes toast-life { 0% { opacity: 0; transform: translate(-50%, 12px); } 8%, 85% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; transform: translate(-50%, 8px); } }
 [role="status"].fixed { animation: toast-life 3.4s ease both; }
 
+/* 利用開始・返却時の給油案内を表示直後に5回強調し、その後は静止する。 */
+@keyframes fuel-reminder-attention {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.62; transform: scale(1.025); }
+}
+.fuel-reminder-attention {
+  transform-origin: left center;
+  animation: fuel-reminder-attention 900ms ease-in-out 5;
+}
+@media (prefers-reduced-motion: reduce) { .fuel-reminder-attention { animation: none; } }
+
 /* 残量が変わったときだけ、液面の上端を波形のマスクで切り抜いて横へ流し、1.8秒で波の高さを0へ戻す。 */
 @keyframes fuel-wave {
   0% { mask-position: 0 0, 0 4px; mask-size: 16px 4px, 100% 100%; }
