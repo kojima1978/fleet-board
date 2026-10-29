@@ -177,7 +177,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("scheduleMaintenance"), vehicleId: idSchema, kind: z.enum(MAINTENANCE_KINDS), note: maintenanceNoteSchema, plannedStart: z.string().datetime(), plannedEnd: z.string().datetime() }),
   z.object({ action: z.literal("updateMaintenance"), maintenanceId: idSchema, version: z.number().int().nonnegative(), note: maintenanceNoteSchema, plannedStart: z.string().datetime().optional(), plannedEnd: z.string().datetime().nullable().optional() }),
   z.object({ action: z.literal("cancelMaintenance"), maintenanceId: idSchema, version: z.number().int().nonnegative() }),
-  // spotIdを省くと、整備前の区画（車検で外出中も確保していた区画）に戻す。
+  // spotIdを省くと、今の区画のままにする。車検・修理で外出した車両は区画を空けているため、駐車位置は未設定になる。
   z.object({ action: z.literal("endMaintenance"), vehicleId: idSchema, version: z.number().int().nonnegative(), spotId: idSchema.optional(), fromSettings: z.boolean().optional(), ...actorSchema }),
   z.object({ action: z.literal("importEmployees"), items: z.array(employeeImportItemSchema).min(1).max(500) }),
   z.object({ action: z.literal("importVehicles"), items: z.array(vehicleImportItemSchema).min(1).max(500) }),
@@ -663,8 +663,9 @@ export async function POST(request: Request) {
         if (!vehicle.active) throw new Error("無効な車両は整備中にできません");
         if (vehicle.status === "MAINTENANCE") throw new Error("この車両はすでに整備中です");
         if (vehicle.status !== "AVAILABLE") throw new Error("利用中の車両は整備中にできません。返却してから変更してください");
-        // 故障はすぐ記録できるよう、今すぐの開始は予約と重なっても止めない。車検で外出しても区画は外さず確保する。
-        const updated = await tx.vehicle.updateMany({ where: { id: input.vehicleId, version: input.version, status: "AVAILABLE" }, data: { status: "MAINTENANCE", version: { increment: 1 } } });
+        // 故障はすぐ記録できるよう、今すぐの開始は予約と重なっても止めない。車検・修理で外出するときは、ほかの車を停められるよう区画を空ける。
+        const offSite = input.kind === "OFF_SITE";
+        const updated = await tx.vehicle.updateMany({ where: { id: input.vehicleId, version: input.version, status: "AVAILABLE" }, data: { status: "MAINTENANCE", ...(offSite ? { parkingSpotId: null } : {}), version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
         const data = { kind: input.kind, note: input.note, status: "ACTIVE" as const, plannedStart: now, plannedEnd, actualStart: now };
         if (input.maintenanceId) {
@@ -673,7 +674,7 @@ export async function POST(request: Request) {
         } else {
           await tx.vehicleMaintenance.create({ data: { vehicleId: input.vehicleId, ...data } });
         }
-        const kept = input.kind === "OFF_SITE" && vehicle.parkingSpot ? `。区画${vehicle.parkingSpot.code}は確保` : "";
+        const kept = offSite && vehicle.parkingSpot ? `。区画${vehicle.parkingSpot.code}を空けた` : "";
         await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "車両整備開始", targetType: "Vehicle", targetId: input.vehicleId, description: `${vehicle.name}を${MAINTENANCE_KIND_SHORT_LABELS[input.kind]}に変更${plannedEnd ? `（戻り予定 ${formatMaintenanceTime(plannedEnd)}）` : ""}${kept}` } });
       });
     }

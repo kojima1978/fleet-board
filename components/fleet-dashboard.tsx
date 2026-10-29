@@ -83,7 +83,7 @@ const formatPlateShort = (value: string) => {
 };
 export const parkingSpotClass = (spot: ParkingSpot, offSite = false) => {
   const holding = spot.role === "HOLDING";
-  // 車検などで外出中の車両は区画にいないため、破線で「戻るまで確保」を示す。
+  // 以前の仕様で区画を持ったまま外出した車両は区画にいないため、破線で示す。
   if (offSite) return "border-[3px] border-dashed border-amber-400 bg-amber-50/70";
   // 一時区画も駐車中は通常区画と同じ実線にし、破線は空き区画と実在しない仮置きだけに残す。
   if (spot.vehicle?.status === "MAINTENANCE") return cn("border-slate-400 bg-slate-100", holding && "border-[3px] border-dashed");
@@ -418,7 +418,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   const activeVehicles = data.vehicles.filter((vehicle) => vehicle.active);
   const setupIncomplete = activeEmployees.length === 0 || activeVehicles.length === 0;
   const available = activeVehicles.filter((vehicle) => vehicle.status === "AVAILABLE");
-  // 車検などで外出中の車両は区画を確保しているだけなので、駐車中に数えない。
+  // 以前の仕様で区画を持ったまま外出中の車両は、駐車中に数えない。
   const offSiteVehicleIds = new Set(data.maintenances.filter((item) => item.status === "ACTIVE" && item.kind === "OFF_SITE").map((item) => item.vehicleId));
   const parkedCount = data.spots.reduce((count, spot) => count + (spot.vehicle && !offSiteVehicleIds.has(spot.vehicle.id) ? 1 : 0), 0);
   const confirmedTrip = startContext ? data.trips.find((trip) => trip.vehicleId === startContext.vehicleId && trip.employeeId === startContext.employeeId && trip.status === "IN_USE") : undefined;
@@ -983,7 +983,7 @@ function ParkingMap({ selectedVehicleId, setSelectedVehicleId, data, trips, chan
     // eslint-disable-next-line react-hooks/exhaustive-deps -- かざすたびに1回だけ始める。
   }, [returnRequest?.nonce]);
   const pickingVehicle = movingVehicle ?? returningTrip?.vehicle ?? null;
-  // 車検・修理で外出中の車両。区画は確保したまま、右の一覧にも出す。
+  // 車検・修理で外出中の車両。区画は空けているので、右の一覧に出す。
   const offSiteMaintenances = data.maintenances.filter((item) => item.status === "ACTIVE" && item.kind === "OFF_SITE");
   const offSiteVehicleIds = new Set(offSiteMaintenances.map((item) => item.vehicleId));
   const selectedMaintenance = selectedVehicle?.status === "MAINTENANCE" ? activeMaintenanceOf(data, selectedVehicle.id) : null;

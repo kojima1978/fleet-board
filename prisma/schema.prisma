@@ -23,7 +23,7 @@ enum ParkingSpotRole {
   HOLDING
 }
 
-// 整備の種類。ON_SITEは故障・点検で駐車場内に置いたまま、OFF_SITEは車検・修理で外出し元の区画を確保しておく。
+// 整備の種類。ON_SITEは故障・点検で駐車場内に置いたまま、OFF_SITEは車検・修理で外出し、ほかの車を停められるよう区画を空ける。
 enum MaintenanceKind {
   ON_SITE
   OFF_SITE

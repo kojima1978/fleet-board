@@ -21,7 +21,7 @@ export type Trip = {
   purpose: string | null; returnSpotCode: string | null; returnFuelLevel: number | null; version: number;
   employee: Employee; vehicle: Vehicle;
 };
-// 整備の記録。ACTIVEのOFF_SITEは車検・修理で外出中で、車両のparkingSpotIdは元の区画を確保したまま。plannedEndは戻り予定。
+// 整備の記録。ACTIVEのOFF_SITEは車検・修理で外出中で、車両のparkingSpotIdは空ける（以前の仕様で外出した車両は区画を持ったまま）。plannedEndは戻り予定。
 export type VehicleMaintenance = {
   id: string; vehicleId: string; kind: MaintenanceKind; status: "SCHEDULED" | "ACTIVE" | "COMPLETED" | "CANCELLED";
   note: string | null; plannedStart: string; plannedEnd: string | null; actualStart: string | null; actualEnd: string | null;

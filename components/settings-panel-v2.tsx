@@ -1585,6 +1585,7 @@ function VehicleLocation({ vehicle, spots, offSite }: { vehicle: Vehicle; spots:
       </span>
     );
   if (vehicle.status === "IN_USE") return <span className="text-xs font-bold text-slate-500">出庫中</span>;
+  if (offSite) return <span className="text-xs font-bold text-slate-500">外出中</span>;
   if (!vehicle.active) return null;
   if (vehicle.status !== "AVAILABLE") return <span className="text-xs font-bold text-amber-700">位置未設定</span>;
   return (
@@ -1600,9 +1601,9 @@ function RowActions({ active, name, maintenance, maintenanceScheduled, maintenan
   return (
     <div className="flex justify-end gap-2">
       {onMaintenance ? (
-        <button type="button" disabled={maintenanceDisabled} onClick={onMaintenance} className={cn("relative inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-35", maintenance ? "border-emerald-200 text-emerald-700 hover:bg-emerald-50" : "border-amber-200 text-amber-700 hover:bg-amber-50")} aria-label={`${name}の整備${maintenance ? "（戻す・解除）" : maintenanceScheduled ? "（予定あり）" : ""}`}>
+        <button type="button" disabled={maintenanceDisabled} onClick={onMaintenance} className={cn("relative inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-35", maintenance ? "border-emerald-200 text-emerald-700 hover:bg-emerald-50" : "border-amber-200 text-amber-700 hover:bg-amber-50")} aria-label={`${name}の車検・故障${maintenance ? "（戻す・解除）" : maintenanceScheduled ? "（予定あり）" : ""}`}>
           <Wrench className="size-3.5" />
-          <span className="hidden md:inline">{maintenance ? "戻す・解除" : "整備"}</span>
+          <span className="hidden md:inline">{maintenance ? "戻す・解除" : "車検・故障"}</span>
           {maintenanceScheduled ? <span aria-hidden="true" className="absolute -right-1 -top-1 size-2.5 rounded-full bg-amber-500 ring-2 ring-white" /> : null}
         </button>
       ) : null}

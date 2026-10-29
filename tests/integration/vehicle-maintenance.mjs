@@ -40,13 +40,14 @@ try {
     await client.query('INSERT INTO "Vehicle" (id,"vehicleNumberId",name,"plateNumber",color,"qrToken",active,status,"parkingSpotId",version,"createdAt","updatedAt") VALUES ($1,$2,$3,$4,\'#2563eb\',$5,true,\'AVAILABLE\',$6,1,$7,$7)', [id, ids.numbers[i], `整備テスト車${i}`, `MT-${suffix}-${i}`, `MAINV_${suffix}_${i}`, ids.spots[i], now]);
   }
 
-  // 車検で外出しても元の区画は確保され、他の車両は入れない。
+  // 車検で外出すると区画を空け、他の車両を停められる。
   expect(await post({ action: "startMaintenance", vehicleId: ids.vehicles[0], version: (await vehicle(0)).version, kind: "OFF_SITE", note: "車検", plannedEnd: at(2) }), 200, "車検で外出を開始する");
   let car = await vehicle(0);
-  assert.deepEqual([car.status, car.parkingSpotId], ["MAINTENANCE", ids.spots[0]], "車検で外出中も区画を確保する");
+  assert.deepEqual([car.status, car.parkingSpotId], ["MAINTENANCE", null], "車検で外出すると区画を空ける");
   let [record] = await maintenances(0);
   assert.deepEqual([record.kind, record.status, record.note], ["OFF_SITE", "ACTIVE", "車検"]);
-  expect(await post({ action: "moveVehicle", vehicleId: ids.vehicles[1], version: (await vehicle(1)).version, spotId: ids.spots[0], actorName: "自動テスト" }), 400, "確保中の区画へ他の車両を移動できない");
+  expect(await post({ action: "moveVehicle", vehicleId: ids.vehicles[1], version: (await vehicle(1)).version, spotId: ids.spots[0], actorName: "自動テスト" }), 200, "空いた区画へ他の車両を移動できる");
+  expect(await post({ action: "moveVehicle", vehicleId: ids.vehicles[1], version: (await vehicle(1)).version, spotId: ids.spots[1], actorName: "自動テスト" }), 200, "他の車両を元の区画へ戻す");
   expect(await post({ action: "startMaintenance", vehicleId: ids.vehicles[0], version: car.version, kind: "ON_SITE" }), 400, "整備中の車両は重ねて開始できない");
   const dashboard = await (await fetch(`${appUrl}/api/dashboard`)).json();
   assert.ok(dashboard.maintenances.some((item) => item.id === record.id && item.status === "ACTIVE"), "画面用のデータに整備中の記録を返す");
@@ -57,11 +58,11 @@ try {
   expect(await post({ action: "updateMaintenance", maintenanceId: record.id, version: record.version, note: "車検", plannedEnd: at(4) }), 400, "戻り予定を予約に重ねられない");
   expect(await post({ action: "updateMaintenance", maintenanceId: record.id, version: record.version, note: "車検・タイヤ交換", plannedEnd: at(2.5) }), 200, "戻り予定と備考を変更する");
 
-  // 戻ったときは、指定がなければ元の区画へ戻す。
+  // 戻ったときは、区画の指定がなければ駐車位置は未設定になる。
   expect(await post({ action: "endMaintenance", vehicleId: ids.vehicles[0], version: (await vehicle(0)).version, fromSettings: true }), 200, "車検から戻す");
   car = await vehicle(0);
   [record] = await maintenances(0);
-  assert.deepEqual([car.status, car.parkingSpotId, record.status, record.returnSpotCode, record.note], ["AVAILABLE", ids.spots[0], "COMPLETED", spotCodes[0], "車検・タイヤ交換"]);
+  assert.deepEqual([car.status, car.parkingSpotId, record.status, record.returnSpotCode, record.note], ["AVAILABLE", null, "COMPLETED", null, "車検・タイヤ交換"]);
   assert.ok(record.actualEnd, "戻った日時を記録する");
 
   // 整備予定は予約と重ねられず、予約や延長も整備予定と重ねられない。
@@ -96,7 +97,7 @@ try {
   expect(await post({ action: "endMaintenance", vehicleId: ids.vehicles[1], version: (await vehicle(1)).version, spotId: ids.spots[2], fromSettings: true }), 400, "使用中の区画へは戻せない");
   expect(await post({ action: "endMaintenance", vehicleId: ids.vehicles[1], version: (await vehicle(1)).version, fromSettings: true }), 200, "元の区画で整備を解除する");
   assert.deepEqual([(await vehicle(1)).status, (await vehicle(1)).parkingSpotId], ["AVAILABLE", ids.spots[1]]);
-  console.log("Vehicle maintenance passed: off-site spot hold, return date reservations, return to original or chosen spot, schedules blocking reservations and extensions, cancel and early start");
+  console.log("Vehicle maintenance passed: off-site spot release, return date reservations, return to original or chosen spot, schedules blocking reservations and extensions, cancel and early start");
 } finally {
   await client.query('DELETE FROM "AuditLog" WHERE "operationId"=ANY($1::text[])', [operationIds]);
   await client.query('DELETE FROM "Trip" WHERE "vehicleId"=ANY($1::text[]) OR "employeeId"=$2', [ids.vehicles, ids.employee]);
