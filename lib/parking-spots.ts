@@ -5,7 +5,7 @@ export const SPOT_ROLE_LABELS: Record<ParkingSpotRole, string> = { REGULAR: "通
 export const SPOT_ROLE_DESCRIPTIONS: Record<ParkingSpotRole, string> = {
   REGULAR: "社用車の通常の駐車位置",
   TEMPORARY: "通常区画ではないが、一時的な返却先として使える",
-  CUSTOMER: "お客様用だが、社用車も返却できる",
+  CUSTOMER: "お客様用。社用車はできるだけ止めない",
   DEDICATED: "指定した1台だけが駐車できる",
   HOLDING: "実在しない区画。駐車場所を確定できない場合だけ使う",
 };
@@ -33,3 +33,10 @@ export const isDashedSpot = (spot: Pick<SpotRoleInfo, "role">) => spot.role === 
 // 専用区画には指定した車両だけを置ける。
 export const canUseSpot = (vehicle: { id: string }, spot: Pick<SpotRoleInfo, "role" | "dedicatedVehicleId">) =>
   spot.role !== "DEDICATED" || spot.dedicatedVehicleId === vehicle.id;
+
+// お客様用の区画。社用車も止められるが、できるだけ止めないよう案内する。
+export const isCustomerSpot = (spot: Pick<SpotRoleInfo, "role">) => spot.role === "CUSTOMER";
+
+// お客様用の区画の代わりに案内する、空いている通常区画（その車の専用区画を含む）。
+export const freeRegularSpots = <T extends Pick<SpotRoleInfo, "code" | "role" | "dedicatedVehicleId"> & { enabled: boolean; vehicle?: unknown }>(spots: T[], vehicle: { id: string } | null) =>
+  spots.filter((spot) => spot.enabled && !spot.vehicle && (spot.role === "REGULAR" || (spot.role === "DEDICATED" && !!vehicle && spot.dedicatedVehicleId === vehicle.id)));

@@ -4,7 +4,8 @@ import { useState } from "react";
 import { CalendarClock, CarFront, Wrench, X } from "lucide-react";
 import type { DashboardData, Employee, Vehicle, VehicleMaintenance } from "@/lib/types";
 import { formatMaintenanceTime, MAINTENANCE_KIND_LABELS, MAINTENANCE_KIND_SHORT_LABELS,MAINTENANCE_MAX_DAYS, MAINTENANCE_NOTE_MAX, MAINTENANCE_SCHEDULE_DAYS_AHEAD, type MaintenanceKind } from "@/lib/maintenance";
-import { canUseSpot, formatSpotLabel } from "@/lib/parking-spots";
+import { canUseSpot, formatSpotLabel, isCustomerSpot } from "@/lib/parking-spots";
+import { CustomerSpotNotice } from "./customer-spot-notice";
 import { Button, cn } from "./ui";
 
 type Mutate = (body: object, success: string) => Promise<boolean>;
@@ -60,6 +61,7 @@ export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, current
   const [end, setEnd] = useState(toLocalInput(active?.plannedEnd ?? null));
   // 駐車場の画面で空き区画へドラッグしたときは、その区画を選んだ状態で開く。
   const [spotId, setSpotId] = useState(initialSpotId ?? "");
+  const chosenSpot = data.spots.find((spot) => spot.id === (spotId || vehicle.parkingSpotId));
   // 車検の日程はずれることがあるため、登録済みの予定は開始予定・戻り予定・備考を直せる。
   const [editing, setEditing] = useState<{ id: string; start: string; end: string; note: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -117,6 +119,7 @@ export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, current
         <div className="space-y-2 rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4">
           <p className="text-xs font-black text-emerald-800">{active?.kind === "OFF_SITE" ? "戻った車両を停める区画" : "整備後の駐車位置"}</p>
           <ReturnSpotSelect vehicle={vehicle} data={data} value={spotId} onChange={setSpotId} disabled={submitting} />
+          {chosenSpot && isCustomerSpot(chosenSpot) ? <CustomerSpotNotice spots={data.spots} vehicle={vehicle} /> : null}
           {fromSettings ? null : <ActorSelect label={active?.kind === "OFF_SITE" ? "戻した人" : "解除した人"} employees={employees} value={actorId} onChange={setActorId} />}
           <Button className="w-full" disabled={submitting || !actorReady} onClick={finish}><CarFront className="size-4" />{submitting ? "処理中…" : active?.kind === "OFF_SITE" ? "戻った" : "整備を解除"}</Button>
         </div>

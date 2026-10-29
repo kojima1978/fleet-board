@@ -4,7 +4,8 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import Link from "next/link";
 import { CarFront, Check, Download, FileJson, Mail, MapPin, Nfc, Pencil, Plus, Power, QrCode, RotateCcw, Search, Send, Upload, UserRound, Wrench, X } from "lucide-react";
 import type { DashboardData, Employee, ParkingSpot, Vehicle } from "@/lib/types";
-import { canUseSpot, formatSpotLabel } from "@/lib/parking-spots";
+import { canUseSpot, formatSpotLabel, isCustomerSpot } from "@/lib/parking-spots";
+import { CustomerSpotNotice } from "./customer-spot-notice";
 import { normalizeNfcUid, sameNfcUid } from "@/lib/nfc";
 import { isRecordCode, normalizeRecordCode, RECORD_CODE_EXAMPLES, recordCodeMessage, sanitizeRecordCodeInput } from "@/lib/record-codes";
 import { nfcBridgeStatusText, useNfcBridge } from "@/lib/use-nfc-bridge";
@@ -1331,6 +1332,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                           <option value="">駐車区画を選択してください</option>
                           <ParkingSpotOptions spots={data.spots} />
                         </select>
+                        {data.spots.some((spot) => spot.id === vehicleForm.spotId && isCustomerSpot(spot)) ? <div className="mt-2"><CustomerSpotNotice spots={data.spots} vehicle={null} /></div> : null}
                         <p className="mt-1 text-xs text-slate-500">登録と同時に配置図へ表示します。場所が決まっていない場合は仮置き区画を選び、決まったら配置図の「位置変更」で移動してください。</p>
                       </Field>
                     ) : null}
