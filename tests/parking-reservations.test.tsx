@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 import { getParkingReservations } from "../lib/parking-reservations";
-import { ParkingReservationBadge, ParkingReservations } from "../components/parking-reservations";
-import type { Employee, ParkingSpot, Trip, Vehicle } from "../lib/types";
+import { ParkingReservationBadge, ParkingReservations, UpcomingMaintenances } from "../components/parking-reservations";
+import { canSendOutMaintenance, getUpcomingMaintenances } from "../lib/maintenance";
+import type { Employee, ParkingSpot, Trip, Vehicle, VehicleMaintenance } from "../lib/types";
 
 const start = Date.parse("2026-10-27T05:00:00Z"); // 14:00 JST
 const employee: Employee = { id: "e1", code: "E001", name: "予約テスト社員", email: "", department: "総務", nfcUid: "", qrCode: "", active: true, version: 1 };
@@ -54,4 +55,26 @@ assert.match(html(start, [{ ...trip, status: "CANCELLED" }]), /30分以内に開
 const badge = renderToStaticMarkup(<ParkingReservationBadge reservation={get(start)[0]} />);
 assert.match(badge, /開始待ち 14:00/);
 assert.match(badge, /予約テスト社員/);
+const day = 24 * 60 * 60_000;
+const maintenance = (id: string, offset: number, status: VehicleMaintenance["status"] = "SCHEDULED"): VehicleMaintenance => ({ id, vehicleId: vehicle.id, kind: "OFF_SITE", status, note: null, plannedStart: new Date(start + offset).toISOString(), plannedEnd: new Date(start + offset + day).toISOString(), actualStart: null, actualEnd: null, returnSpotCode: null, version: 1 });
+const maintenances = [maintenance("m3", 3 * day), maintenance("m1", -day), maintenance("m8", 7 * day + 1), maintenance("ma", day, "ACTIVE"), maintenance("mc", 2 * day, "CANCELLED"), maintenance("m7", 7 * day)];
+assert.deepEqual(getUpcomingMaintenances(maintenances, start).map((item) => item.id), ["m1", "m3", "m7"], "7日以内の未開始の予定だけを開始予定の近い順に出す（開始予定を過ぎた未開始も含める）");
+assert.equal(renderToStaticMarkup(<UpcomingMaintenances items={[]} vehicles={[vehicle]} now={start} onOpen={() => {}} onSendOut={() => {}} />), "", "予定がなければ欄ごと出さない");
+const upcomingHtml = renderToStaticMarkup(<UpcomingMaintenances items={[maintenance("u1", 0), maintenance("u2", day), maintenance("u3", 2 * day), maintenance("u4", 3 * day)]} vehicles={[vehicle]} now={start} onOpen={() => {}} onSendOut={() => {}} />);
+assert.match(upcomingHtml, /車検・整備の予定/);
+assert.match(upcomingHtml, /C001　予約テスト車両/);
+assert.match(upcomingHtml, /車検で外出/);
+assert.equal(upcomingHtml.match(/の車検・整備の予定を確認/g)?.length, 3, "最大3件まで表示");
+assert.match(upcomingHtml, /ほか1件/);
+const jst = (value: string) => Date.parse(`${value}+09:00`);
+assert.equal(canSendOutMaintenance({ status: "SCHEDULED", plannedStart: new Date(jst("2026-10-27T23:59:00")).toISOString() }, start), true, "今日中に始まる予定は出せる");
+assert.equal(canSendOutMaintenance({ status: "SCHEDULED", plannedStart: new Date(jst("2026-10-28T00:00:00")).toISOString() }, start), false, "明日以降の予定はまだ出せない");
+assert.equal(canSendOutMaintenance({ status: "SCHEDULED", plannedStart: new Date(start - 3 * day).toISOString() }, start), true, "開始予定を過ぎた予定も出せる");
+assert.equal(canSendOutMaintenance({ status: "ACTIVE", plannedStart: new Date(start).toISOString() }, start), false, "始まった整備には出さない");
+assert.equal(canSendOutMaintenance({ status: "SCHEDULED", plannedStart: new Date(jst("2026-10-28T08:00:00")).toISOString() }, jst("2026-10-28T00:30:00")), true, "日付が変わったら東京時間の今日で判断する");
+assert.equal(upcomingHtml.match(/>出す</g)?.length, 1, "今日の予定だけに「出す」を付ける");
+const onSiteHtml = renderToStaticMarkup(<UpcomingMaintenances items={[{ ...maintenance("o1", 0), kind: "ON_SITE" }]} vehicles={[vehicle]} now={start} onOpen={() => {}} onSendOut={() => {}} />);
+assert.match(onSiteHtml, />開始</, "駐車場内の故障は「開始」");
+const inUseHtml = renderToStaticMarkup(<UpcomingMaintenances items={[maintenance("i1", 0)]} vehicles={[{ ...vehicle, status: "IN_USE" }]} now={start} onOpen={() => {}} onSendOut={() => {}} />);
+assert.doesNotMatch(inUseHtml, />出す</, "利用中の車両には「出す」を付けない");
 console.log("Parking reservation tests passed: 30-minute/start/expiry boundaries, cancellation/start, sorting, no mutations, current position, in-use/maintenance and rendered UI");

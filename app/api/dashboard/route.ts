@@ -175,7 +175,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("setEmployeeActive"), id: idSchema, version: z.number().int().nonnegative(), active: z.boolean() }),
   z.object({ action: z.literal("setVehicleActive"), id: idSchema, version: z.number().int().nonnegative(), active: z.boolean() }),
   // maintenanceIdを渡すと、登録済みの整備予定を開始する。plannedEndは戻り予定で、nullなら未定。
-  z.object({ action: z.literal("startMaintenance"), vehicleId: idSchema, version: z.number().int().nonnegative(), kind: z.enum(MAINTENANCE_KINDS), note: maintenanceNoteSchema, plannedEnd: z.string().datetime().nullable().optional(), maintenanceId: idSchema.optional() }),
+  z.object({ action: z.literal("startMaintenance"), vehicleId: idSchema, version: z.number().int().nonnegative(), kind: z.enum(MAINTENANCE_KINDS), note: maintenanceNoteSchema, plannedEnd: z.string().datetime().nullable().optional(), maintenanceId: idSchema.optional(), fromSettings: z.boolean().optional(), ...actorSchema }),
   z.object({ action: z.literal("scheduleMaintenance"), vehicleId: idSchema, kind: z.enum(MAINTENANCE_KINDS), note: maintenanceNoteSchema, plannedStart: z.string().datetime(), plannedEnd: z.string().datetime() }),
   z.object({ action: z.literal("updateMaintenance"), maintenanceId: idSchema, version: z.number().int().nonnegative(), note: maintenanceNoteSchema, plannedStart: z.string().datetime().optional(), plannedEnd: z.string().datetime().nullable().optional() }),
   z.object({ action: z.literal("cancelMaintenance"), maintenanceId: idSchema, version: z.number().int().nonnegative() }),
@@ -677,7 +677,9 @@ export async function POST(request: Request) {
           await tx.vehicleMaintenance.create({ data: { vehicleId: input.vehicleId, ...data } });
         }
         const kept = offSite && vehicle.parkingSpot ? `。区画${vehicle.parkingSpot.code}を空けた` : "";
-        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "車両整備開始", targetType: "Vehicle", targetId: input.vehicleId, description: `${vehicle.name}を${MAINTENANCE_KIND_SHORT_LABELS[input.kind]}に変更${plannedEnd ? `（戻り予定 ${formatMaintenanceTime(plannedEnd)}）` : ""}${kept}` } });
+        // 駐車場の画面から出したときは、出した社員を履歴に残す。
+        const actor = input.fromSettings ? { actorEmployeeId: null, actorName: "設定画面" } : auditActor;
+        await tx.auditLog.create({ data: { operationId, ...actor, action: "車両整備開始", targetType: "Vehicle", targetId: input.vehicleId, description: `${vehicle.name}を${MAINTENANCE_KIND_SHORT_LABELS[input.kind]}に変更${plannedEnd ? `（戻り予定 ${formatMaintenanceTime(plannedEnd)}）` : ""}${kept}` } });
       });
     }
     if (input.action === "scheduleMaintenance") {

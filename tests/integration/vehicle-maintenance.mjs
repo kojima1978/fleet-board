@@ -24,6 +24,8 @@ async function post(body) {
 const vehicle = async (i) => (await client.query('SELECT * FROM "Vehicle" WHERE id=$1', [ids.vehicles[i]])).rows[0];
 const maintenances = async (i) => (await client.query('SELECT * FROM "VehicleMaintenance" WHERE "vehicleId"=$1 ORDER BY "createdAt"', [ids.vehicles[i]])).rows;
 const reserve = (i, startHours, minutes = 60) => post({ action: "reserve", employeeId: ids.employee, vehicleId: ids.vehicles[i], plannedStart: at(startHours), minutes, actorName: "自動テスト" });
+// 直前の操作の履歴に残った操作者。
+const lastActor = async () => (await client.query('SELECT "actorEmployeeId", "actorName" FROM "AuditLog" WHERE "operationId"=$1', [operationIds.at(-1)])).rows[0];
 const expect = (result, status, message) => assert.equal(result.status, status, `${message}: ${JSON.stringify(result.body)}`);
 
 await client.connect();
@@ -41,7 +43,8 @@ try {
   }
 
   // 車検で外出すると区画を空け、他の車両を停められる。
-  expect(await post({ action: "startMaintenance", vehicleId: ids.vehicles[0], version: (await vehicle(0)).version, kind: "OFF_SITE", note: "車検", plannedEnd: at(2) }), 200, "車検で外出を開始する");
+  expect(await post({ action: "startMaintenance", vehicleId: ids.vehicles[0], version: (await vehicle(0)).version, kind: "OFF_SITE", note: "車検", plannedEnd: at(2), actorEmployeeId: ids.employee }), 200, "車検で外出を開始する");
+  assert.equal((await lastActor()).actorEmployeeId, ids.employee, "駐車場の画面から出した社員を履歴に残す");
   let car = await vehicle(0);
   assert.deepEqual([car.status, car.parkingSpotId], ["MAINTENANCE", null], "車検で外出すると区画を空ける");
   let [record] = await maintenances(0);
@@ -84,7 +87,8 @@ try {
   // 予定を開始すると同じ記録が整備中になり、戻るときは別の区画も選べる。
   expect(await post({ action: "scheduleMaintenance", vehicleId: ids.vehicles[0], kind: "OFF_SITE", plannedStart: at(70), plannedEnd: at(80) }), 200, "2件目の整備予定を登録する");
   scheduled = (await maintenances(0)).find((item) => item.status === "SCHEDULED");
-  expect(await post({ action: "startMaintenance", vehicleId: ids.vehicles[0], version: (await vehicle(0)).version, kind: "ON_SITE", maintenanceId: scheduled.id }), 200, "整備予定を前倒しで開始する");
+  expect(await post({ action: "startMaintenance", vehicleId: ids.vehicles[0], version: (await vehicle(0)).version, kind: "ON_SITE", maintenanceId: scheduled.id, fromSettings: true }), 200, "整備予定を前倒しで開始する");
+  assert.deepEqual(await lastActor(), { actorEmployeeId: null, actorName: "設定画面" }, "設定画面から開始したときは設定画面として残す");
   const startedRecord = (await maintenances(0)).find((item) => item.id === scheduled.id);
   assert.deepEqual([startedRecord.status, startedRecord.kind, startedRecord.plannedEnd], ["ACTIVE", "ON_SITE", null]);
   expect(await post({ action: "endMaintenance", vehicleId: ids.vehicles[0], version: (await vehicle(0)).version, spotId: ids.spots[2], fromSettings: true }), 200, "別の区画へ戻す");
@@ -95,9 +99,10 @@ try {
   expect(await post({ action: "startMaintenance", vehicleId: ids.vehicles[1], version: (await vehicle(1)).version, kind: "ON_SITE", note: "エンジン警告灯" }), 200, "故障で整備中にする");
   expect(await reserve(1, 3), 400, "戻り予定が未定なら予約できない");
   expect(await post({ action: "endMaintenance", vehicleId: ids.vehicles[1], version: (await vehicle(1)).version, spotId: ids.spots[2], fromSettings: true }), 400, "使用中の区画へは戻せない");
-  expect(await post({ action: "endMaintenance", vehicleId: ids.vehicles[1], version: (await vehicle(1)).version, fromSettings: true }), 200, "元の区画で整備を解除する");
+  expect(await post({ action: "endMaintenance", vehicleId: ids.vehicles[1], version: (await vehicle(1)).version, actorEmployeeId: ids.employee }), 200, "元の区画で整備を解除する");
+  assert.equal((await lastActor()).actorEmployeeId, ids.employee, "駐車場の画面から戻した社員を履歴に残す");
   assert.deepEqual([(await vehicle(1)).status, (await vehicle(1)).parkingSpotId], ["AVAILABLE", ids.spots[1]]);
-  console.log("Vehicle maintenance passed: off-site spot release, return date reservations, return to original or chosen spot, schedules blocking reservations and extensions, cancel and early start");
+  console.log("Vehicle maintenance passed: off-site spot release, return date reservations, return to original or chosen spot, actor recording, schedules blocking reservations and extensions, cancel and early start");
 } finally {
   await client.query('DELETE FROM "AuditLog" WHERE "operationId"=ANY($1::text[])', [operationIds]);
   await client.query('DELETE FROM "Trip" WHERE "vehicleId"=ANY($1::text[]) OR "employeeId"=$2', [ids.vehicles, ids.employee]);

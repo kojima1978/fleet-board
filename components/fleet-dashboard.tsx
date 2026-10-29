@@ -9,7 +9,7 @@ import type { DashboardData, Employee, ParkingSpot, Trip, Vehicle, VehicleMainte
 import { normalizeNfcUid } from "@/lib/nfc";
 import { createOperationId } from "@/lib/operation-id";
 import { getParkingReservations, PARKING_RESERVATION_NOTICE_MINUTES } from "@/lib/parking-reservations";
-import { ParkingReservationBadge, ParkingReservations } from "./parking-reservations";
+import { ParkingReservationBadge, ParkingReservations, UpcomingMaintenances } from "./parking-reservations";
 import { resolveNfcUid } from "@/lib/resolve-nfc";
 import { resolveQrCode } from "@/lib/resolve-qr";
 import { canUseSpot, formatSpotLabel, isDashedSpot, spotRoleTag } from "@/lib/parking-spots";
@@ -21,7 +21,7 @@ import { playNfcSound } from "@/lib/nfc-sound";
 import { playFuelReturnVoice, stopFuelReturnVoice } from "@/lib/fuel-voice";
 import { clearSavedEmployee, forgetPersistentEmployee, readSavedEmployee, saveEmployee } from "@/lib/employee-session";
 import { isKioskDevice, readDeviceMode, useDeviceMode, useIdleTrafficEnabled, useUserTimeoutMinutes } from "@/lib/device-mode";
-import { formatMaintenanceTime, MAINTENANCE_KIND_SHORT_LABELS } from "@/lib/maintenance";
+import { canSendOutMaintenance, formatMaintenanceTime, getUpcomingMaintenances, MAINTENANCE_KIND_SHORT_LABELS } from "@/lib/maintenance";
 import { AllDayDateSelector } from "./all-day-date-selector";
 import { allDayDates, allDayStart } from "@/lib/all-day-reservation";
 import { EmployeePicker } from "./employee-picker";
@@ -49,6 +49,7 @@ const SystemStatusPanel = dynamic(() => import("./system-status-panel").then((mo
 const ScannerGuide = dynamic(() => import("./scanner-guide").then((module) => module.ScannerGuide), { loading: SettingsSectionLoading });
 // 操作時だけ必要なフォームを初期バンドルから外す。配置図とタイムラインの初回表示を軽くする。
 const MaintenanceDialog = dynamic(() => import("./maintenance-dialog").then((module) => module.MaintenanceDialog));
+const SendOutDialog = dynamic(() => import("./maintenance-dialog").then((module) => module.SendOutDialog));
 const ActualStartEditor = dynamic(() => import("./trip-start-editors").then((module) => module.ActualStartEditor));
 const ReservationTimeEditor = dynamic(() => import("./reservation-time-editor").then((module) => module.ReservationTimeEditor));
 const NfcBridgeHelp = dynamic(() => import("./nfc-bridge-help").then((module) => module.NfcBridgeHelp));
@@ -755,7 +756,7 @@ function TimelineList({ trips, openEdit, mode, onChange, timelineDate, timelineD
 function SettingsNavigation({ view }: { view: "settingsEmployees" | "settingsDepartments" | "settingsVehicles" | "settingsSpots" | "settingsData" | "settingsSystem" | "settingsScanner" | "settingsEmergency" }) {
   const itemClass = "whitespace-nowrap rounded-lg px-4 py-2 text-sm font-bold transition";
   const itemTone = (active: boolean) => active ? "bg-slate-900 text-white shadow-sm" : "text-slate-500 hover:bg-slate-50 hover:text-slate-700";
-  return <nav aria-label="設定メニュー" className="flex w-full max-w-[760px] justify-between overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm"><Link href="/settings/employees" className={cn(itemClass, itemTone(view === "settingsEmployees"))}>社員登録</Link><Link href="/settings/departments" className={cn(itemClass, itemTone(view === "settingsDepartments"))}>部署</Link><Link href="/settings/vehicles" className={cn(itemClass, itemTone(view === "settingsVehicles"))}>車両登録</Link><Link href="/settings/spots" className={cn(itemClass, itemTone(view === "settingsSpots"))}>駐車区画</Link><Link href="/settings/system" className={cn(itemClass, itemTone(view === "settingsSystem"))}>システム</Link><Link href="/settings/scanner" className={cn(itemClass, itemTone(view === "settingsScanner"))}>NFC・QR</Link><Link href="/settings/data" className={cn(itemClass, itemTone(view === "settingsData"))}>データ保存・復元</Link><Link href="/settings/emergency" className={cn(itemClass, itemTone(view === "settingsEmergency"))}>緊急時</Link></nav>;
+  return <nav aria-label="設定メニュー" className="flex w-full max-w-[760px] justify-between overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm"><Link href="/settings/vehicles" className={cn(itemClass, itemTone(view === "settingsVehicles"))}>車両登録</Link><Link href="/settings/employees" className={cn(itemClass, itemTone(view === "settingsEmployees"))}>社員登録</Link><Link href="/settings/departments" className={cn(itemClass, itemTone(view === "settingsDepartments"))}>部署</Link><Link href="/settings/spots" className={cn(itemClass, itemTone(view === "settingsSpots"))}>駐車区画</Link><Link href="/settings/system" className={cn(itemClass, itemTone(view === "settingsSystem"))}>システム</Link><Link href="/settings/scanner" className={cn(itemClass, itemTone(view === "settingsScanner"))}>NFC・QR</Link><Link href="/settings/data" className={cn(itemClass, itemTone(view === "settingsData"))}>データ保存・復元</Link><Link href="/settings/emergency" className={cn(itemClass, itemTone(view === "settingsEmergency"))}>緊急時</Link></nav>;
 }
 
 function EmergencyToolsPanel() {
@@ -989,6 +990,11 @@ function ParkingMap({ selectedVehicleId, setSelectedVehicleId, data, trips, chan
   const selectedMaintenance = selectedVehicle?.status === "MAINTENANCE" ? activeMaintenanceOf(data, selectedVehicle.id) : null;
   const [maintenanceVehicleId, setMaintenanceVehicleId] = useState<string | null>(null);
   const maintenanceVehicle = maintenanceVehicleId ? data.vehicles.find((vehicle) => vehicle.id === maintenanceVehicleId) ?? null : null;
+  // 予定どおり車検・整備に出す画面。予定と車両は最新のデータから引き直し、始まった予定なら閉じる。
+  const [sendOutId, setSendOutId] = useState<string | null>(null);
+  const sendOutMaintenance = sendOutId ? data.maintenances.find((item) => item.id === sendOutId && item.status === "SCHEDULED") ?? null : null;
+  const sendOutVehicle = sendOutMaintenance ? data.vehicles.find((vehicle) => vehicle.id === sendOutMaintenance.vehicleId) ?? null : null;
+  const selectedSendOut = selectedVehicle?.status === "AVAILABLE" ? data.maintenances.filter((item) => item.vehicleId === selectedVehicle.id && canSendOutMaintenance(item, reservationNow)).sort((a, b) => a.plannedStart.localeCompare(b.plannedStart))[0] ?? null : null;
   const offSiteEntries = offSiteMaintenances.flatMap((item) => { const vehicle = data.vehicles.find((candidate) => candidate.id === item.vehicleId); const spot = data.spots.find((candidate) => candidate.vehicle?.id === item.vehicleId); return vehicle ? [{ maintenance: item, vehicle, spotCode: spot?.code ?? null }] : []; });
   // タイムラインの「駐車場で返却」から来たときは、その車の返却先選びから始める。
   useEffect(() => {
@@ -1029,6 +1035,7 @@ function ParkingMap({ selectedVehicleId, setSelectedVehicleId, data, trips, chan
             </div>
           </div>
           <div role="group" aria-label="車両の操作" className="grid grid-cols-2 gap-2">
+            {selectedSendOut ? <Button className="col-span-2 min-h-11 whitespace-nowrap bg-amber-600 px-3 text-xs hover:bg-amber-700" onClick={() => { setSelectedVehicleId(null); setSendOutId(selectedSendOut.id); }}><Wrench className="size-3.5" />{selectedSendOut.kind === "OFF_SITE" ? "車検に出す" : "整備中にする"}（予定 {formatMaintenanceTime(selectedSendOut.plannedStart)}）</Button> : null}
             {selectedVehicle.status === "MAINTENANCE" ? <Button className="min-h-11 whitespace-nowrap bg-emerald-600 px-3 text-xs hover:bg-emerald-700" onClick={() => { setSelectedVehicleId(null); setMaintenanceVehicleId(selectedVehicle.id); }}><Wrench className="size-3.5" />{selectedMaintenance?.kind === "OFF_SITE" ? "戻った" : "整備解除"}</Button> : <>
               <Button className="min-h-11 min-w-0 flex-1 gap-1 whitespace-nowrap px-1 text-xs @lg:gap-2 @lg:px-2.5 @3xl:flex-none" disabled={selectedVehicle.status !== "AVAILABLE"} onClick={() => openStart(selectedVehicle)}><CarFront className="size-3.5 shrink-0" />今すぐ利用</Button>
               <Button variant="ghost" className="min-h-11 gap-2 border border-violet-200 bg-violet-50 px-2 text-xs text-violet-800 hover:bg-violet-100" onClick={() => openReserve(selectedVehicle)}><CalendarClock className="size-3.5 shrink-0" />予約する</Button>
@@ -1044,8 +1051,9 @@ function ParkingMap({ selectedVehicleId, setSelectedVehicleId, data, trips, chan
       {movingVehicle ? <div role="status" className="mx-auto mt-2 flex max-w-md items-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 p-2"><Move className="size-4 shrink-0 text-blue-600" /><p className="mr-auto text-xs font-bold"><b>{movingVehicle.name}</b>{movingVehicle.parkingSpotId ? "の移動先" : "を置く区画"}をタップ（ドラッグも可）</p><Button variant="ghost" className="min-h-8 shrink-0 whitespace-nowrap px-3 text-xs" onClick={() => setMovingVehicleId(null)}>やめる</Button></div> : null}
     </div>
   </Card>
-  <ActiveVehicleSidebar trips={trips} reservationPanel={<ParkingReservations reservations={parkingReservations} onStart={openStart} onEdit={openEdit} />} mineEmployeeId={currentEmployeeId} offSite={offSiteEntries} unplaced={unplacedVehicles} selectedTripId={selectedTripId} returningTripId={returningTripId} placingVehicleId={movingVehicle && !movingVehicle.parkingSpotId ? movingVehicle.id : null} onSelect={selectTrip} onSelectOffSite={(vehicle) => { setSelectedTripId(null); setMaintenanceVehicleId(vehicle.id); }} onPlace={(vehicle) => { if (movingVehicleId === vehicle.id) setMovingVehicleId(null); else startMove(vehicle); }} onStart={(vehicle) => { setMovingVehicleId(null); openStart(vehicle); }} onDragStart={startReturn} onDragEnd={() => setReturningTripId(null)} />
-  {maintenanceVehicle ? <MaintenanceDialog vehicle={maintenanceVehicle} data={data} mutate={mutate} onClose={() => setMaintenanceVehicleId(null)} /> : null}
+  <ActiveVehicleSidebar trips={trips} reservationPanel={<><ParkingReservations reservations={parkingReservations} onStart={openStart} onEdit={openEdit} /><UpcomingMaintenances items={getUpcomingMaintenances(data.maintenances, reservationNow)} vehicles={data.vehicles} now={reservationNow} onOpen={(vehicle) => setMaintenanceVehicleId(vehicle.id)} onSendOut={(maintenance) => setSendOutId(maintenance.id)} /></>} mineEmployeeId={currentEmployeeId} offSite={offSiteEntries} unplaced={unplacedVehicles} selectedTripId={selectedTripId} returningTripId={returningTripId} placingVehicleId={movingVehicle && !movingVehicle.parkingSpotId ? movingVehicle.id : null} onSelect={selectTrip} onSelectOffSite={(vehicle) => { setSelectedTripId(null); setMaintenanceVehicleId(vehicle.id); }} onPlace={(vehicle) => { if (movingVehicleId === vehicle.id) setMovingVehicleId(null); else startMove(vehicle); }} onStart={(vehicle) => { setMovingVehicleId(null); openStart(vehicle); }} onDragStart={startReturn} onDragEnd={() => setReturningTripId(null)} />
+  {maintenanceVehicle ? <MaintenanceDialog vehicle={maintenanceVehicle} data={data} mutate={mutate} currentEmployeeId={currentEmployeeId} onClose={() => setMaintenanceVehicleId(null)} /> : null}
+  {sendOutMaintenance && sendOutVehicle ? <SendOutDialog vehicle={sendOutVehicle} maintenance={sendOutMaintenance} data={data} mutate={mutate} currentEmployeeId={currentEmployeeId} onClose={() => setSendOutId(null)} /> : null}
   </>;
 }
 
