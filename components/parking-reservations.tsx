@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, ChevronRight, Play, Wrench } from "lucide-react";
+import { CalendarClock, ChevronRight, Wrench } from "lucide-react";
 import type { ParkingSpot, Trip, Vehicle, VehicleMaintenance } from "@/lib/types";
 import type { ParkingReservation } from "@/lib/parking-reservations";
 import { canSendOutMaintenance, formatMaintenanceBadge, formatMaintenanceStart, formatMaintenanceTime, UPCOMING_MAINTENANCE_LIMIT } from "@/lib/maintenance";
@@ -12,11 +12,11 @@ export function ParkingReservationBadge({ reservation }: { reservation: ParkingR
   return <span aria-label={`${reservation.waiting ? "開始待ち" : "予約"} ${time(reservation.trip.plannedStart)} ${reservation.trip.employee.name}`} className="pointer-events-none absolute -top-2 right-0 z-[2] whitespace-nowrap rounded border border-slate-300 bg-white px-1 py-0.5 text-[7px] font-black leading-tight text-slate-700 shadow-sm @2xl:text-[9px]">{reservation.waiting ? "開始待ち" : "予約"} {time(reservation.trip.plannedStart)}</span>;
 }
 
-export function ParkingReservations({ reservations, onStart, onEdit }: { reservations: ParkingReservation[]; onStart: (vehicle: Vehicle) => void; onEdit: (trip: Trip) => void }) {
+// 利用開始は配置図で車両を選んで行う。ここでは予約内容の確認だけにする。
+export function ParkingReservations({ reservations, onEdit }: { reservations: ParkingReservation[]; onEdit: (trip: Trip) => void }) {
   return <section aria-label="まもなく利用予定（30分以内）" className="mt-auto pt-8">
     <div className="flex items-center justify-between border-y border-slate-100 px-3 py-2"><h3 className="flex items-center gap-1.5 text-xs font-black text-slate-800"><CalendarClock className="size-3.5 text-slate-500" />まもなく利用予定</h3><span className="text-[10px] font-bold text-slate-400">30分以内 ・ {reservations.length}件</span></div>
     {reservations.length === 0 ? <p className="px-3 py-2.5 text-center text-[11px] text-slate-400">30分以内に開始する予約はありません</p> : <ul className="max-h-[168px] divide-y divide-slate-100 overflow-y-auto">{reservations.map(({ trip, vehicle, spotCode, waiting, inUse }) => {
-      const canStart = waiting && !inUse && vehicle.status === "AVAILABLE";
       const place = inUse ? "現在利用中" : vehicle.status === "MAINTENANCE" ? "整備中" : spotCode ? `区画 ${spotCode}` : "位置未設定";
       const state = inUse ? "次の予約あり" : waiting ? "開始待ち" : "開始予定";
       return <li key={trip.id} className="flex min-h-[52px] items-center gap-1 px-2 py-1.5">
@@ -25,15 +25,14 @@ export function ParkingReservations({ reservations, onStart, onEdit }: { reserva
           <span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate text-xs font-black">{vehicle.code}　{vehicle.name}</span><time className="shrink-0 text-[10px] font-black tabular-nums text-slate-700">{time(trip.plannedStart)}</time></span><span className="mt-0.5 flex items-center gap-1 text-[10px]"><span className="min-w-0 flex-1 truncate text-slate-500">{trip.employee.name} ・ {place}</span><span className="shrink-0 font-bold text-slate-600">{state}</span></span></span>
           <ChevronRight className="size-3.5 shrink-0 text-slate-300" />
         </button>
-        {canStart ? <button type="button" title="利用者を確認して利用開始へ進みます" onClick={() => onStart(vehicle)} className="inline-flex min-h-9 shrink-0 items-center justify-center gap-1 rounded-lg bg-blue-600 px-2 text-[10px] font-black text-white hover:bg-blue-700"><Play className="size-3" />利用開始</button> : null}
       </li>;
     })}</ul>}
   </section>;
 }
 
 // 前日になった車検・整備の予定。予定がなければ欄ごと出さない。タップでその車両の車検・故障の画面を開く。
-// 行の形と「出庫」ボタンは「まもなく利用予定」の予約と合わせる。今日の予定と開始予定を過ぎた予定は出庫待ちにする。
-export function UpcomingMaintenances({ items, vehicles, spots, now, onOpen, onSendOut }: { items: VehicleMaintenance[]; vehicles: Vehicle[]; spots: Pick<ParkingSpot, "id" | "code">[]; now: number; onOpen: (vehicle: Vehicle) => void; onSendOut: (maintenance: VehicleMaintenance) => void }) {
+// 行の形は「まもなく利用予定」の予約と合わせる。今日の予定と開始予定を過ぎた予定は出庫待ちにする。出庫は配置図で車両を選んで行う。
+export function UpcomingMaintenances({ items, vehicles, spots, now, onOpen }: { items: VehicleMaintenance[]; vehicles: Vehicle[]; spots: Pick<ParkingSpot, "id" | "code">[]; now: number; onOpen: (vehicle: Vehicle) => void }) {
   const rows = items.flatMap((maintenance) => { const vehicle = vehicles.find((candidate) => candidate.id === maintenance.vehicleId); return vehicle ? [{ maintenance, vehicle }] : []; });
   if (rows.length === 0) return null;
   const hidden = rows.length - UPCOMING_MAINTENANCE_LIMIT;
@@ -42,7 +41,6 @@ export function UpcomingMaintenances({ items, vehicles, spots, now, onOpen, onSe
     <ul className="divide-y divide-slate-100">{rows.slice(0, UPCOMING_MAINTENANCE_LIMIT).map(({ maintenance, vehicle }) => {
       const offSite = maintenance.kind === "OFF_SITE";
       const due = canSendOutMaintenance(maintenance, now);
-      const sendable = vehicle.active && vehicle.status === "AVAILABLE" && due;
       const spotCode = spots.find((spot) => spot.id === vehicle.parkingSpotId)?.code;
       const place = vehicle.status === "IN_USE" ? "現在利用中" : vehicle.status === "MAINTENANCE" ? "整備中" : spotCode ? `区画 ${spotCode}` : "位置未設定";
       const state = offSite ? (due ? "出庫待ち" : "出庫予定") : (due ? "開始待ち" : "開始予定");
@@ -52,7 +50,6 @@ export function UpcomingMaintenances({ items, vehicles, spots, now, onOpen, onSe
           <span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate text-xs font-black">{vehicle.code}　{vehicle.name}</span><time className="shrink-0 text-[10px] font-black tabular-nums text-slate-700">{formatMaintenanceStart(maintenance.plannedStart, now)}</time></span><span className="mt-0.5 flex items-center gap-1 text-[10px]"><span className="min-w-0 flex-1 truncate text-slate-500">{place} ・ 戻り {maintenance.plannedEnd ? formatMaintenanceTime(maintenance.plannedEnd) : "未定"}</span><span className={cn("shrink-0 font-bold text-slate-600", due && "text-amber-700")}>{state}</span></span></span>
           <ChevronRight className="size-3.5 shrink-0 text-slate-300" />
         </button>
-        {sendable ? <button type="button" title={offSite ? "出庫する人と戻り予定を確認して出庫します" : "操作する人を確認して整備を始めます"} onClick={() => onSendOut(maintenance)} className="inline-flex min-h-9 shrink-0 items-center justify-center gap-1 rounded-lg bg-amber-600 px-2 text-[10px] font-black text-white hover:bg-amber-700"><Wrench className="size-3" />{offSite ? "出庫" : "開始"}</button> : null}
       </li>;
     })}</ul>
     {hidden > 0 ? <p className="px-3 pb-2 text-[10px] font-bold text-slate-400">ほか{hidden}件は車両登録の「車検・故障」から確認できます</p> : null}
