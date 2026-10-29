@@ -214,7 +214,7 @@ docker compose up --build -d
 | `/` | 駐車場配置図（右側に車両番号付きの利用中車両を常時表示）、利用開始、返却、ガソリン残量、駐車位置の修正 |
 | `/timeline` | 車両タイムライン、予約、予定時間の変更 |
 | `/operations` | 車両利用履歴の検索・操作履歴の検索とCSV書き出し |
-| `/settings` | 社員設定（`/settings/employees`）へ移動 |
+| `/settings` | 車両登録（`/settings/vehicles`）へ移動 |
 | `/settings/employees` | 社員登録、JSON取込、NFC UID登録、社員QRの表示・保存 |
 | `/settings/departments` | 部署の追加・名前変更・利用停止・並び順の変更 |
 | `/settings/vehicles` | 車両登録、JSON取込、NFC UID登録、車両QRの表示・保存 |

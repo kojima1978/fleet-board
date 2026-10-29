@@ -41,7 +41,7 @@ export function Navigation({ view, className }: { view: AppView; className?: str
   const links: { id: "parking" | "timeline" | "settings" | "operations"; href: string; label: string; icon: ReactNode }[] = [
     { id: "parking", href: "/", label: "駐車場", icon: <LayoutGrid className="size-4" /> },
     { id: "timeline", href: "/timeline", label: "タイムライン", icon: <Clock3 className="size-4" /> },
-    { id: "settings", href: "/settings/employees", label: "設定", icon: <Settings className="size-4" /> },
+    { id: "settings", href: "/settings/vehicles", label: "設定", icon: <Settings className="size-4" /> },
     { id: "operations", href: "/operations", label: "履歴", icon: <Archive className="size-4" /> },
   ];
   return <nav aria-label="メインメニュー" className={cn("items-center justify-center gap-1", className)}>{links.map((link) => {

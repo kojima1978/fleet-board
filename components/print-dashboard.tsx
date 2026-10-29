@@ -47,7 +47,7 @@ export function PrintDashboard({ mode }: { mode: "parking" | "timeline" }) {
   const title = mode === "parking" ? "駐車場 配置図（緊急時記入用）" : "車両タイムライン（緊急時記入用）";
   return <main className="print-shell min-h-screen bg-slate-100 p-4 text-slate-950 sm:p-6">
     <div className="no-print mx-auto mb-4 flex max-w-[1200px] items-center justify-between gap-3">
-      <Link href="/settings/employees" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 shadow-sm"><ArrowLeft className="size-4" />設定へ戻る</Link>
+      <Link href="/settings/vehicles" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 shadow-sm"><ArrowLeft className="size-4" />設定へ戻る</Link>
       <button type="button" onClick={() => window.print()} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-bold text-white shadow-sm hover:bg-blue-700"><Printer className="size-4" />A4横で印刷</button>
     </div>
     <article className="print-sheet mx-auto max-w-[1200px] overflow-hidden rounded-2xl bg-white p-5 shadow-sm">
