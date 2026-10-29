@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { validateReservationStart } from "@/lib/trip-times";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -960,10 +961,10 @@ export async function POST(request: Request) {
     if (input.action === "moveTrip") {
       await prisma.$transaction(async (tx) => {
         const trip = await lockTripForTimeChange(tx, input.tripId);
-        if (trip.status !== "RESERVED") throw new Error("ドラッグで移動できるのは予約だけです");
+        if (trip.status !== "RESERVED") throw new Error("日時を変更できるのは予約だけです");
         const plannedStart = new Date(input.plannedStart);
         const plannedEnd = new Date(input.plannedEnd);
-        if (plannedEnd <= plannedStart) throw new Error("終了時刻は開始時刻より後にしてください");
+        validateReservationStart(plannedStart, plannedEnd, new Date());
         const conflict = await tx.trip.findFirst({ where: {
           id: { not: trip.id },
           OR: [
@@ -975,7 +976,7 @@ export async function POST(request: Request) {
         await assertNoMaintenanceOverlap(tx, trip.vehicleId, plannedStart, plannedEnd);
         const updated = await tx.trip.updateMany({ where: { id: trip.id, version: input.version, status: "RESERVED" }, data: { plannedStart, plannedEnd, version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
-        await tx.auditLog.create({ data: { operationId, ...auditActor, action: "利用時間修正", targetType: "Trip", targetId: trip.id, description: "タイムラインから時間を変更" } });
+        await tx.auditLog.create({ data: { operationId, ...auditActor, action: "利用時間修正", targetType: "Trip", targetId: trip.id, description: `予約日時変更：${trip.plannedStart.toISOString()}～${trip.plannedEnd.toISOString()} → ${plannedStart.toISOString()}～${plannedEnd.toISOString()}` } });
       });
     }
     if (input.action === "adjustTrip") {

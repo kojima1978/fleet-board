@@ -1,26 +1,11 @@
 "use client";
 import { useState } from "react";
-import { validateActualStart, validateReservationStart, type StartTimeRecord } from "@/lib/trip-times";
+import { validateActualStart, type StartTimeRecord } from "@/lib/trip-times";
 import { Button } from "./ui";
 
 const localInput = (value: string | Date) => { const date = new Date(value); return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16); };
 const display = (value: string) => new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", dateStyle: "short", timeStyle: "short" }).format(new Date(value));
 const inputClass = "mt-2 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900";
-
-export function ReservationStartEditor({ trip, busy, onSave }: { trip: Pick<StartTimeRecord, "plannedStart" | "plannedEnd">; busy: boolean; onSave: (value: string) => Promise<boolean> }) {
-  const [value, setValue] = useState(() => localInput(trip.plannedStart));
-  const [confirm, setConfirm] = useState(false);
-  const start = new Date(value);
-  let message = "";
-  try { validateReservationStart(start, new Date(trip.plannedEnd), new Date()); } catch (error) { message = (error as Error).message; }
-  const changed = Number.isFinite(start.getTime()) && value !== localInput(trip.plannedStart);
-  return <section className="rounded-2xl border border-slate-200 bg-white p-4">
-    <label className="text-xs font-bold text-slate-700">予約の開始日時<input aria-label="予約の開始日時" type="datetime-local" step={900} value={value} disabled={busy} onChange={(event) => { setValue(event.target.value); setConfirm(false); }} className={inputClass} /></label>
-    <p className="mt-2 text-xs text-slate-600">終了予定 {display(trip.plannedEnd)} は変更しません。利用時間は15分以上7日以内です。</p>
-    {changed && message ? <p role="alert" className="mt-2 text-xs font-bold text-rose-700">{message}</p> : null}
-    {confirm && changed && !message ? <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm"><p>変更前：{display(trip.plannedStart)}</p><p>変更後：{display(start.toISOString())}</p><Button disabled={busy} className="mt-3" onClick={() => void onSave(start.toISOString()).then((ok) => { if (!ok) setConfirm(false); })}>予約の開始日時を変更する</Button></div> : <Button disabled={busy || !changed || !!message} className="mt-3" onClick={() => setConfirm(true)}>開始日時の変更を確認</Button>}
-  </section>;
-}
 
 export function ActualStartEditor({ trip, busy, actorAvailable, onSave }: { trip: StartTimeRecord; busy: boolean; actorAvailable: boolean; onSave: (value: string, reason: string) => Promise<boolean> }) {
   const [value, setValue] = useState(() => trip.actualStart ? localInput(trip.actualStart) : "");

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 import { tripOverlaps, validateActualStart, validateReservationStart, type StartTimeRecord } from "../lib/trip-times";
-import { ActualStartEditor, ReservationStartEditor } from "../components/trip-start-editors";
+import { ReservationTimeEditor } from "../components/reservation-time-editor";
+import { ActualStartEditor } from "../components/trip-start-editors";
 
 const now = new Date();
 const at = (minutes: number) => new Date(now.getTime() + minutes * 60_000);
@@ -34,6 +35,6 @@ assert.match(html, /訂正理由/);
 assert.match(html, /先にこの端末の利用者を選択/);
 assert.match(html, /disabled=""/);
 assert.equal(renderToStaticMarkup(<ActualStartEditor trip={{ ...record, status: "RESERVED" }} busy={false} actorAvailable onSave={noop} />), "");
-assert.match(renderToStaticMarkup(<ReservationStartEditor trip={{ plannedStart: at(30).toISOString(), plannedEnd: at(90).toISOString() }} busy={false} onSave={noop} />), /終了予定.*は変更しません/);
-assert.match(renderToStaticMarkup(<ReservationStartEditor trip={{ plannedStart: at(30).toISOString(), plannedEnd: at(90).toISOString() }} busy={false} onSave={noop} />), /disabled=""/, "元記録に秒・ミリ秒があっても未入力では変更できない");
+assert.match(renderToStaticMarkup(<ReservationTimeEditor trip={{ plannedStart: at(30).toISOString(), plannedEnd: at(90).toISOString() }} busy={false} onSave={noop} />), /利用時間を維持/);
+assert.match(renderToStaticMarkup(<ReservationTimeEditor trip={{ plannedStart: at(30).toISOString(), plannedEnd: at(90).toISOString() }} busy={false} onSave={noop} />), /disabled=""/, "元記録に秒・ミリ秒があっても未入力では変更できない");
 console.log("Trip time tests passed: reservation/actual start limits, required reason, overlap boundaries, rare-action UI and operator selection");
