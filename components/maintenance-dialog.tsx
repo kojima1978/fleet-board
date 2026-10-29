@@ -4,8 +4,7 @@ import { useState } from "react";
 import { CalendarClock, CarFront, Wrench, X } from "lucide-react";
 import type { DashboardData, Employee, Vehicle, VehicleMaintenance } from "@/lib/types";
 import { formatMaintenanceTime, MAINTENANCE_KIND_LABELS, MAINTENANCE_KIND_SHORT_LABELS,MAINTENANCE_MAX_DAYS, MAINTENANCE_NOTE_MAX, MAINTENANCE_SCHEDULE_DAYS_AHEAD, type MaintenanceKind } from "@/lib/maintenance";
-import { canUseSpot, formatSpotLabel, isCustomerSpot } from "@/lib/parking-spots";
-import { CustomerSpotNotice } from "./customer-spot-notice";
+import { formatSpotLabel } from "@/lib/parking-spots";
 import { Button, cn, DialogActions } from "./ui";
 
 type Mutate = (body: object, success: string) => Promise<boolean>;
@@ -34,24 +33,18 @@ function ActorSelect({ label, hint, employees, value, onChange }: { label: strin
     {employees.map((person) => <option key={person.id} value={person.id}>{person.code}　{person.name}</option>)}
   </select>{hint ? <span className="mt-1 block text-[11px] text-slate-500">{hint}</span> : null}</label>;
 }
+function MaintenanceSummary({ items }: { items: { label: string; value: string }[] }) {
+  return <dl aria-label="登録内容の確認" className="grid gap-px overflow-hidden rounded-xl border border-slate-200 bg-slate-200 sm:grid-cols-2">{items.map((item) => <div key={item.label} className="min-w-0 bg-white px-3 py-2.5"><dt className="text-[10px] font-bold text-slate-500">{item.label}</dt><dd className="mt-0.5 truncate text-sm font-black text-slate-900">{item.value}</dd></div>)}</dl>;
+}
 const activeEmployeesOf = (data: Pick<DashboardData, "employees">) => data.employees.filter((person) => person.active);
 const initialActor = (employees: Employee[], currentEmployeeId?: string | null) => employees.some((person) => person.id === currentEmployeeId) ? currentEmployeeId ?? "" : "";
 
 export const activeMaintenanceOf = (data: Pick<DashboardData, "maintenances">, vehicleId: string) => data.maintenances.find((item) => item.vehicleId === vehicleId && item.status === "ACTIVE") ?? null;
 
-// 整備中の車両を戻す区画の選択肢。空欄は今の区画のまま（車検・修理で外出した車両は区画を空けているので位置未設定）を表す。
-export function ReturnSpotSelect({ vehicle, data, value, onChange, disabled }: { vehicle: Vehicle; data: Pick<DashboardData, "spots">; value: string; onChange: (value: string) => void; disabled?: boolean }) {
-  const current = data.spots.find((spot) => spot.id === vehicle.parkingSpotId);
-  const others = data.spots.filter((spot) => spot.id !== vehicle.parkingSpotId && spot.enabled && !spot.vehicle && canUseSpot(vehicle, spot));
-  return <select aria-label={`${vehicle.name}を戻す駐車区画`} disabled={disabled} className={field} value={value} onChange={(event) => onChange(event.target.value)}>
-    <option value="">{current ? `元の区画（${formatSpotLabel(current)}）` : "駐車位置は後で設定"}</option>
-    {others.map((spot) => <option key={spot.id} value={spot.id}>{formatSpotLabel(spot)}</option>)}
-  </select>;
-}
-
-export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, currentEmployeeId, initialSpotId, onClose, onDone }: { vehicle: Vehicle; data: DashboardData; mutate: Mutate; fromSettings?: boolean; currentEmployeeId?: string | null; initialSpotId?: string; onClose: () => void; onDone?: () => void }) {
+export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, currentEmployeeId, initialMaintenanceId, onClose, onDone }: { vehicle: Vehicle; data: DashboardData; mutate: Mutate; fromSettings?: boolean; currentEmployeeId?: string | null; initialMaintenanceId?: string; onClose: () => void; onDone?: () => void }) {
   const active = activeMaintenanceOf(data, vehicle.id);
   const scheduled = data.maintenances.filter((item) => item.vehicleId === vehicle.id && item.status === "SCHEDULED");
+  const initialScheduled = initialMaintenanceId ? scheduled.find((item) => item.id === initialMaintenanceId) ?? null : null;
   const inMaintenance = vehicle.status === "MAINTENANCE";
   const canStartNow = vehicle.status === "AVAILABLE";
   const [kind, setKind] = useState<MaintenanceKind>("OFF_SITE");
@@ -59,11 +52,9 @@ export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, current
   const [note, setNote] = useState(active?.note ?? "");
   const [start, setStart] = useState("");
   const [end, setEnd] = useState(toLocalInput(active?.plannedEnd ?? null));
-  // 駐車場の画面で空き区画へドラッグしたときは、その区画を選んだ状態で開く。
-  const [spotId, setSpotId] = useState(initialSpotId ?? "");
-  const chosenSpot = data.spots.find((spot) => spot.id === (spotId || vehicle.parkingSpotId));
   // 車検の日程はずれることがあるため、登録済みの予定は開始予定・戻り予定・備考を直せる。
-  const [editing, setEditing] = useState<{ id: string; start: string; end: string; note: string } | null>(null);
+  const [editing, setEditing] = useState<{ id: string; start: string; end: string; note: string } | null>(() => initialScheduled ? { id: initialScheduled.id, start: toLocalInput(initialScheduled.plannedStart), end: toLocalInput(initialScheduled.plannedEnd), note: initialScheduled.note ?? "" } : null);
+  const [keepDuration, setKeepDuration] = useState(true);
   // 予定の取り消しは元に戻せないため、確認してから行う。
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -84,7 +75,7 @@ export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, current
     return run({ action: "scheduleMaintenance", vehicleId: vehicle.id, kind, note, plannedStart: fromLocalInput(start), plannedEnd: fromLocalInput(end) }, `${vehicle.name}の整備予定を登録しました`);
   };
   const startScheduled = (item: VehicleMaintenance) => run({ action: "startMaintenance", vehicleId: vehicle.id, version: vehicle.version, kind: item.kind, note: item.note, plannedEnd: item.plannedEnd && new Date(item.plannedEnd) > new Date() ? item.plannedEnd : null, maintenanceId: item.id, ...actorBody }, `${vehicle.name}を${MAINTENANCE_KIND_SHORT_LABELS[item.kind]}にしました`);
-  const finish = () => run({ action: "endMaintenance", vehicleId: vehicle.id, version: vehicle.version, ...(spotId ? { spotId } : {}), ...actorBody }, active?.kind === "OFF_SITE" ? `${vehicle.name}が戻りました` : `${vehicle.name}を利用可能に戻しました`);
+  const finish = () => run({ action: "endMaintenance", vehicleId: vehicle.id, version: vehicle.version, ...actorBody }, active?.kind === "OFF_SITE" ? `${vehicle.name}が戻りました。駐車位置は配置図から設定してください` : `${vehicle.name}を利用可能に戻しました`);
   const now = toLocalInput(new Date());
   const nowEndMax = addDays(now, MAINTENANCE_MAX_DAYS);
   const startMax = addDays(now, MAINTENANCE_SCHEDULE_DAYS_AHEAD);
@@ -102,28 +93,48 @@ export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, current
     if (!editing || !editItem) return;
     return run({ action: "updateMaintenance", maintenanceId: editItem.id, version: editItem.version, note: editing.note, plannedEnd: fromLocalInput(editing.end), ...(editStartChanged ? { plannedStart: fromLocalInput(editing.start) } : {}) }, `${vehicle.name}の整備予定を変更しました`);
   };
+  const changeEditStart = (value: string) => {
+    if (!editing) return;
+    if (!keepDuration || !editing.start || !editing.end || !value) { setEditing({ ...editing, start: value }); return; }
+    const shift = new Date(value).getTime() - new Date(editing.start).getTime();
+    const shiftedEnd = new Date(new Date(editing.end).getTime() + shift);
+    setEditing({ ...editing, start: value, end: toLocalInput(shiftedEnd) });
+  };
   const edited = !!active && (note !== (active.note ?? "") || end !== toLocalInput(active.plannedEnd)) && inRange(end, now, nowEndMax);
+
+  if (initialScheduled && editing && editItem) return <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget && !submitting) onClose(); }} onKeyDown={(event) => { if (event.key === "Escape" && !submitting) onClose(); }}>
+    <div role="dialog" data-focus-layer aria-modal="true" aria-labelledby="maintenance-title" aria-busy={submitting} className="relative max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-3xl bg-white shadow-2xl">
+      <div className="sticky top-0 z-10 flex items-start justify-between border-b border-slate-100 bg-white p-5"><div><h2 id="maintenance-title" className="text-lg font-black">車検・整備予定を変更</h2><p className="mt-1 text-xs text-slate-500">{vehicle.name} ・ {vehicle.code}</p></div><button type="button" aria-label="閉じる" disabled={submitting} onClick={onClose} className="grid size-11 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40"><X className="size-4" /></button></div>
+      <div className="space-y-5 p-5">
+        <MaintenanceSummary items={[{ label: "状態", value: "車検・整備予定" }, { label: "車両", value: `${vehicle.code}・${vehicle.name}` }, { label: "開始予定", value: formatMaintenanceTime(editItem.plannedStart) }, { label: "現在の戻り予定", value: editItem.plannedEnd ? formatMaintenanceTime(editItem.plannedEnd) : "未定" }]} />
+        <fieldset disabled={submitting} className="space-y-3">
+          <label className="block"><span className="mb-1 block text-xs font-bold text-slate-600">開始予定</span><input type="datetime-local" className={field} min={now} max={startMax} value={editing.start} onChange={(event) => changeEditStart(event.target.value)} /></label>
+          <label className="block"><span className="mb-1 block text-xs font-bold text-slate-600">戻り予定</span><input type="datetime-local" className={field} min={editing.start} max={addDays(editing.start > now ? editing.start : now, MAINTENANCE_MAX_DAYS)} value={editing.end} onChange={(event) => setEditing({ ...editing, end: event.target.value })} /><span className="mt-1 block text-[11px] text-slate-500">この期間は車両を予約できません</span></label>
+          <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-bold text-slate-700"><input type="checkbox" className="size-4 accent-blue-600" checked={keepDuration} onChange={(event) => setKeepDuration(event.target.checked)} />開始を変えたら戻り予定も動かす</label>
+          <label className="block"><span className="mb-1 block text-xs font-bold text-slate-600">備考（任意）</span><input className={field} maxLength={MAINTENANCE_NOTE_MAX} value={editing.note} onChange={(event) => setEditing({ ...editing, note: event.target.value })} placeholder="例：〇〇整備工場、タイヤ交換" /></label>
+        </fieldset>
+        <div className="border-t border-slate-100 pt-4">{confirmCancelId === editItem.id ? <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 p-4"><p className="text-sm font-bold text-rose-800">この車検・整備予定を取り消しますか？</p><div className="mt-3 grid grid-cols-2 gap-2"><Button variant="ghost" disabled={submitting} onClick={() => setConfirmCancelId(null)}>戻る</Button><Button variant="danger" disabled={submitting} onClick={() => void run({ action: "cancelMaintenance", maintenanceId: editItem.id, version: editItem.version }, "整備予定を取り消しました")}>予定を取り消す</Button></div></div> : <button type="button" disabled={submitting} className="mx-auto flex min-h-10 items-center rounded-lg px-3 text-sm font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-40" onClick={() => setConfirmCancelId(editItem.id)}>この予定を取り消す</button>}</div>
+      </div>
+      <div className="sticky bottom-0 border-t border-slate-200 bg-white p-4"><DialogActions cancelDisabled={submitting} onCancel={onClose}><Button className="min-h-12" disabled={!editReady || submitting} onClick={() => void saveEdit()}>{submitting ? "保存中…" : "変更を保存"}</Button></DialogActions></div>
+    </div>
+  </div>;
 
   return <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm" onKeyDown={(event) => { if (event.key === "Escape" && !submitting) onClose(); }}>
     <div role="dialog" data-focus-layer aria-modal="true" aria-labelledby="maintenance-title" aria-busy={submitting} className="relative max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl">
       <button type="button" aria-label="閉じる" disabled={submitting} onClick={onClose} className="absolute right-4 top-4 grid size-9 place-items-center rounded-full text-slate-500 hover:bg-slate-100"><X className="size-4" /></button>
-      <div className="flex items-center gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-full bg-amber-50 text-amber-700"><Wrench className="size-5" /></span><div><h2 id="maintenance-title" className="text-lg font-black">{vehicle.name}の車検・故障</h2><p className="text-xs text-slate-500">{vehicle.plateNumber} ・ {vehicle.code}</p></div></div>
+      <div className="flex items-center gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-xl border border-slate-200 bg-slate-50 text-slate-700"><Wrench className="size-5" /></span><div><h2 id="maintenance-title" className="text-lg font-black">{inMaintenance ? "車検・整備の状況" : "車検・整備を登録"}</h2><p className="text-xs text-slate-500">{vehicle.code} ・ {vehicle.name} ・ {vehicle.plateNumber}</p></div></div>
       {!fromSettings && !inMaintenance && canStartNow ? <div className="mt-5"><ActorSelect label="操作する人" hint="「今すぐ」や予定の「開始」で出すときに、履歴に残します" employees={employees} value={actorId} onChange={setActorId} /></div> : null}
 
       {inMaintenance ? <div className="mt-5 space-y-4">
-        <div className="rounded-2xl bg-amber-50 p-4 text-sm"><p className="font-black text-amber-900">{active ? MAINTENANCE_KIND_LABELS[active.kind] : "整備中"}</p>{active ? <p className="mt-1 text-xs font-bold text-amber-800">{formatMaintenanceTime(active.actualStart ?? active.plannedStart)}から ・ 戻り予定 {active.plannedEnd ? formatMaintenanceTime(active.plannedEnd) : "未定"}</p> : null}{active?.note ? <p className="mt-1 text-xs text-amber-900">{active.note}</p> : null}</div>
+        <MaintenanceSummary items={active ? [{ label: "状態", value: MAINTENANCE_KIND_LABELS[active.kind] }, { label: "車両", value: `${vehicle.code}・${vehicle.name}` }, { label: "開始", value: formatMaintenanceTime(active.actualStart ?? active.plannedStart) }, { label: "戻り予定", value: active.plannedEnd ? formatMaintenanceTime(active.plannedEnd) : "未定" }] : [{ label: "状態", value: "整備中" }, { label: "車両", value: `${vehicle.code}・${vehicle.name}` }]} />
+        {active?.note ? <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-600"><span className="mr-2 font-bold text-slate-500">備考</span>{active.note}</p> : null}
         {active ? <fieldset disabled={submitting} className="space-y-3 rounded-2xl border border-slate-200 p-4">
           <legend className="px-1 text-xs font-black text-slate-600">内容を変更</legend>
           <label className="block"><span className="mb-1 block text-xs font-bold text-slate-600">戻り予定（未定なら空欄）</span><input type="datetime-local" className={field} min={now} max={nowEndMax} value={end} onChange={(event) => setEnd(event.target.value)} /><span className="mt-1 block text-[11px] text-slate-500">今から{MAINTENANCE_MAX_DAYS}日以内</span></label>
           <label className="block"><span className="mb-1 block text-xs font-bold text-slate-600">備考（任意）</span><input className={field} maxLength={MAINTENANCE_NOTE_MAX} value={note} onChange={(event) => setNote(event.target.value)} placeholder="例：〇〇整備工場、タイヤ交換" /></label>
           <div className="flex justify-end"><Button variant="ghost" className="min-h-10 px-4" disabled={!edited} onClick={() => run({ action: "updateMaintenance", maintenanceId: active.id, version: active.version, note, plannedEnd: fromLocalInput(end) }, `${vehicle.name}の整備内容を変更しました`)}>変更を保存</Button></div>
         </fieldset> : null}
-        <div className="space-y-2 rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4">
-          <p className="text-xs font-black text-emerald-800">{active?.kind === "OFF_SITE" ? "戻った車両を停める区画" : "整備後の駐車位置"}</p>
-          <ReturnSpotSelect vehicle={vehicle} data={data} value={spotId} onChange={setSpotId} disabled={submitting} />
-          {chosenSpot && isCustomerSpot(chosenSpot) ? <CustomerSpotNotice spots={data.spots} vehicle={vehicle} /> : null}
-          {fromSettings ? null : <ActorSelect label={active?.kind === "OFF_SITE" ? "戻した人" : "解除した人"} employees={employees} value={actorId} onChange={setActorId} />}
-        </div>
+        {fromSettings ? null : <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50/60 p-4"><p className="text-xs font-black text-slate-700">{active?.kind === "OFF_SITE" ? "戻った登録" : "整備終了の登録"}</p><ActorSelect label={active?.kind === "OFF_SITE" ? "戻した人" : "解除した人"} employees={employees} value={actorId} onChange={setActorId} />{active?.kind === "OFF_SITE" ? <p className="text-[11px] leading-5 text-slate-500">戻った登録後、車両は「位置未設定」に表示されます。必要な場合だけ配置図から駐車位置を設定してください。</p> : null}</div>}
       </div> : <fieldset disabled={submitting} className="mt-5 space-y-4">
         <div role="radiogroup" aria-label="整備の種類" className="grid gap-2">{KIND_ORDER.map((item) => <label key={item} className={cn("flex cursor-pointer gap-3 rounded-2xl border p-3", kind === item ? "border-amber-300 bg-amber-50" : "border-slate-200")}><input type="radio" name="maintenance-kind" className="mt-1 size-4 accent-amber-600" checked={kind === item} onChange={() => setKind(item)} /><span><span className="block text-sm font-black">{MAINTENANCE_KIND_LABELS[item]}</span><span className="block text-xs text-slate-500">{KIND_HINTS[item]}</span></span></label>)}</div>
         <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">{(["later", "now"] as const).map((item) => <button key={item} type="button" disabled={item === "now" && !canStartNow} onClick={() => setTiming(item)} className={cn("min-h-9 rounded-lg text-xs font-bold disabled:opacity-40", timing === item ? "bg-white text-slate-900 shadow-sm" : "text-slate-500")}>{item === "now" ? "今すぐ" : "予定を登録"}</button>)}</div>

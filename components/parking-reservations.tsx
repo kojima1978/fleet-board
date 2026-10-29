@@ -32,7 +32,7 @@ export function ParkingReservations({ reservations, onEdit }: { reservations: Pa
 
 // 前日になった車検・整備の予定。予定がなければ欄ごと出さない。タップでその車両の車検・故障の画面を開く。
 // 行の形は「まもなく利用予定」の予約と合わせる。今日の予定と開始予定を過ぎた予定は出庫待ちにする。出庫は配置図で車両を選んで行う。
-export function UpcomingMaintenances({ items, vehicles, spots, now, onOpen }: { items: VehicleMaintenance[]; vehicles: Vehicle[]; spots: Pick<ParkingSpot, "id" | "code">[]; now: number; onOpen: (vehicle: Vehicle) => void }) {
+export function UpcomingMaintenances({ items, vehicles, spots, now, onOpen }: { items: VehicleMaintenance[]; vehicles: Vehicle[]; spots: Pick<ParkingSpot, "id" | "code">[]; now: number; onOpen: (vehicle: Vehicle, maintenance: VehicleMaintenance) => void }) {
   const rows = items.flatMap((maintenance) => { const vehicle = vehicles.find((candidate) => candidate.id === maintenance.vehicleId); return vehicle ? [{ maintenance, vehicle }] : []; });
   if (rows.length === 0) return null;
   const hidden = rows.length - UPCOMING_MAINTENANCE_LIMIT;
@@ -45,7 +45,7 @@ export function UpcomingMaintenances({ items, vehicles, spots, now, onOpen }: { 
       const place = vehicle.status === "IN_USE" ? "現在利用中" : vehicle.status === "MAINTENANCE" ? "整備中" : spotCode ? `区画 ${spotCode}` : "位置未設定";
       const state = offSite ? (due ? "出庫待ち" : "出庫予定") : (due ? "開始待ち" : "開始予定");
       return <li key={maintenance.id} className="flex min-h-[52px] items-center gap-1 px-2 py-1.5">
-        <button type="button" aria-label={`${vehicle.name}の車検・整備の予定を確認`} onClick={() => onOpen(vehicle)} className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-1 text-left hover:bg-slate-50">
+        <button type="button" aria-label={`${vehicle.name}の車検・整備の予定を確認`} onClick={() => onOpen(vehicle, maintenance)} className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-1 text-left hover:bg-slate-50">
           <Wrench className="size-3.5 shrink-0 text-amber-600" />
           <span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate text-xs font-black">{vehicle.code}　{vehicle.name}</span><time className="shrink-0 text-[10px] font-black tabular-nums text-slate-700">{formatMaintenanceStart(maintenance.plannedStart, now)}</time></span><span className="mt-0.5 flex items-center gap-1 text-[10px]"><span className="min-w-0 flex-1 truncate text-slate-500">{place} ・ 戻り {maintenance.plannedEnd ? formatMaintenanceTime(maintenance.plannedEnd) : "未定"}</span><span className={cn("shrink-0 font-bold text-slate-600", due && "text-amber-700")}>{state}</span></span></span>
           <ChevronRight className="size-3.5 shrink-0 text-slate-300" />
