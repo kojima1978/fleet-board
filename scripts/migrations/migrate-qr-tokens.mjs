@@ -11,8 +11,8 @@ try {
   await client.query("BEGIN");
   await client.query('ALTER TABLE "Employee" ADD COLUMN IF NOT EXISTS "qrToken" TEXT');
   await client.query('ALTER TABLE "Vehicle" ADD COLUMN IF NOT EXISTS "qrToken" TEXT');
-  await client.query(`UPDATE "Employee" SET "qrToken" = upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 20)) WHERE "qrToken" IS NULL`);
-  await client.query(`UPDATE "Vehicle" SET "qrToken" = upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 20)) WHERE "qrToken" IS NULL`);
+  await client.query(`UPDATE "Employee" SET "qrToken" = upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 20)) WHERE "qrToken" IS NULL OR length(trim("qrToken")) NOT BETWEEN 16 AND 100`);
+  await client.query(`UPDATE "Vehicle" SET "qrToken" = upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 20)) WHERE "qrToken" IS NULL OR length(trim("qrToken")) NOT BETWEEN 16 AND 100`);
   await client.query('ALTER TABLE "Employee" ALTER COLUMN "qrToken" SET NOT NULL');
   await client.query('ALTER TABLE "Vehicle" ALTER COLUMN "qrToken" SET NOT NULL');
   await client.query('CREATE UNIQUE INDEX IF NOT EXISTS "Employee_qrToken_key" ON "Employee"("qrToken")');

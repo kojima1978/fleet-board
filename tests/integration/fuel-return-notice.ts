@@ -20,10 +20,12 @@ async function main() {
   try {
     assert.equal(await prisma.fuelReturnNotice.count(), 0);
     const defaults = await (await settings()).json();
-    assert.equal(defaults.notices.length, 2); assert.equal(defaults.notices[0].version, 0);
-    const base = { level: 0, version: 0, enabled: true, message: "Eの案内テスト", audio: upload };
+    assert.deepEqual(defaults.notices.map((notice: { level: number }) => notice.level), [4, 3, 2, 1, 0]);
+    assert.deepEqual(defaults.notices.map((notice: { enabled: boolean }) => notice.enabled), [false, false, false, true, true]);
+    assert.equal(defaults.notices[0].version, 0);
+    const base = { level: 0, version: 0, enabled: true, animated: true, message: "Eの案内テスト", audio: upload };
     assert.equal((await save(request(base, "http://evil.invalid"))).status, 403);
-    for (const change of [{ level: 2 }, { message: " " }, { audio: { ...upload, base64: Buffer.from("<html>bad</html>").toString("base64") } }, { audio: { ...upload, base64: Buffer.alloc(FUEL_NOTICE_AUDIO_MAX_BYTES + 1).toString("base64") } }]) assert.equal((await save(request({ ...base, ...change }))).status, 400);
+    for (const change of [{ level: 5 }, { message: " " }, { audio: { ...upload, base64: Buffer.from("<html>bad</html>").toString("base64") } }, { audio: { ...upload, base64: Buffer.alloc(FUEL_NOTICE_AUDIO_MAX_BYTES + 1).toString("base64") } }]) assert.equal((await save(request({ ...base, ...change }))).status, 400);
     let response = await save(request(base)); assert.equal(response.status, 200);
     const first = (await response.json()).notice;
     assert.equal(first.version, 1); assert.equal(first.audioName, upload.fileName); assert.equal(first.audioBase64, undefined);
@@ -33,12 +35,13 @@ async function main() {
     assert.equal((await save(request({ ...base, version: 1, enabled: false, audio: undefined }))).status, 200);
     assert.equal((await prisma.fuelReturnNotice.findUniqueOrThrow({ where: { level: 0 } })).audioBase64, upload.base64, "text-only save keeps audio");
     assert.equal((await save(request({ ...base, level: 1, message: "1/4の案内テスト" }))).status, 200);
+    assert.equal((await save(request({ ...base, level: 4, animated: false, message: "Fの案内テスト", audio: undefined }))).status, 200);
 
     const department = await prisma.department.create({ data: { name: "案内テスト" } });
     const employee = await prisma.employee.create({ data: { name: "案内テスト社員", qrToken: crypto.randomUUID(), department: { connect: { id: department.id } }, employeeNumber: { create: { code: "E901" } } } });
     const spot = await prisma.parkingSpot.create({ data: { code: "Test1", x: 1, y: 1, width: 5, height: 5, orientation: "vertical" } });
     const vehicle = await prisma.vehicle.create({ data: { name: "案内テスト車", plateNumber: "案内901", qrToken: crypto.randomUUID(), vehicleNumber: { create: { code: "C901" } }, parkingSpot: { connect: { id: spot.id } } } });
-    for (const level of [0, 1, 2, null]) {
+    for (const level of [0, 1, 2, 4, null]) {
       const started = await post({ action: "start", employeeId: employee.id, vehicleId: vehicle.id, minutes: 60, actorEmployeeId: employee.id });
       assert.equal(started.status, 200); assert.equal(started.data.fuelReturnNotice, undefined);
       const trip = await prisma.trip.findFirstOrThrow({ where: { vehicleId: vehicle.id, status: "IN_USE" } });
@@ -52,7 +55,8 @@ async function main() {
         assert.equal(result.data.fuelReturnNotice.message, "1/4の案内テスト");
         assert.ok(result.data.fuelReturnNotice.audioUrl);
         const replay = await post(end, operationId); assert.equal(replay.data.replayed, true); assert.equal(replay.data.fuelReturnNotice.level, 1);
-      } else assert.equal(result.data.fuelReturnNotice, undefined, "disabled/other/unknown level has no notice");
+      } else if (level === 4) { assert.equal(result.data.fuelReturnNotice.message, "Fの案内テスト"); assert.equal(result.data.fuelReturnNotice.animated, false); }
+      else assert.equal(result.data.fuelReturnNotice, undefined, "disabled/other/unknown level has no notice");
     }
     await prisma.vehicle.update({ where: { id: vehicle.id }, data: { status: "MAINTENANCE", parkingSpotId: null } });
     await prisma.vehicleMaintenance.create({ data: { vehicleId: vehicle.id, kind: "OFF_SITE", status: "ACTIVE", plannedStart: new Date(Date.now() - 300_000), actualStart: new Date(Date.now() - 300_000), plannedEnd: new Date(Date.now() + 3_600_000) } });
@@ -60,9 +64,11 @@ async function main() {
     const returnedMaintenance = await post({ action: "endMaintenance", vehicleId: vehicle.id, version: maintained.version, spotId: spot.id, fuelLevel: 1 });
     assert.equal(returnedMaintenance.status, 200); assert.equal(returnedMaintenance.data.fuelReturnNotice.message, "1/4の案内テスト");
     const backup = parseFleetBackup(await createFleetBackup());
-    assert.equal(backup.data.fuelReturnNotices.length, 2);
+    assert.equal(backup.data.fuelReturnNotices.length, 3);
     const old = JSON.parse(JSON.stringify(backup)); delete old.data.fuelReturnNotices;
     assert.deepEqual(parseFleetBackup(old).data.fuelReturnNotices, []);
+    const oldWithoutAnimation = JSON.parse(JSON.stringify(backup)); for (const notice of oldWithoutAnimation.data.fuelReturnNotices) delete notice.animated;
+    assert.ok(parseFleetBackup(oldWithoutAnimation).data.fuelReturnNotices.every((notice) => notice.animated), "旧バックアップは強調ONとして復元");
     const broken = JSON.parse(JSON.stringify(backup)); broken.data.fuelReturnNotices[0].audioMime = null;
     assert.throws(() => parseFleetBackup(broken));
     const duplicate = JSON.parse(JSON.stringify(backup)); duplicate.data.fuelReturnNotices = [backup.data.fuelReturnNotices[0], backup.data.fuelReturnNotices[0]];

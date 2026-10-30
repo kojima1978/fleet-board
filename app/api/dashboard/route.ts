@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { validateReservationStart } from "@/lib/trip-times";
 import { readFuelReturnNotice } from "@/lib/fuel-return-notice-store";
+import { isFuelNoticeLevel } from "@/lib/fuel-return-notice";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -359,7 +360,7 @@ export async function GET(request: Request) {
 
 async function successfulOperationResponse(input: { action: string; fuelLevel?: number | null }, replayed = false) {
   let notice = null;
-  if ((input.action === "end" || input.action === "endMaintenance") && (input.fuelLevel === 0 || input.fuelLevel === 1)) {
+  if ((input.action === "end" || input.action === "endMaintenance") && input.fuelLevel !== null && input.fuelLevel !== undefined && isFuelNoticeLevel(input.fuelLevel)) {
     // 案内の取得に失敗しても、完了済みの返却を失敗扱いにしない。
     const configured = await readFuelReturnNotice(input.fuelLevel).catch(() => null);
     if (configured?.enabled) notice = configured;

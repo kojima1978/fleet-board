@@ -40,7 +40,7 @@ const tripSchema = z.object({ id, employeeId: id, vehicleId: id, plannedStart: d
 const vehicleMaintenanceSchema = z.object({ id, vehicleId: id, kind: z.enum(["ON_SITE", "OFF_SITE"]), status: z.enum(["SCHEDULED", "ACTIVE", "COMPLETED", "CANCELLED"]), note: z.string().max(500).nullable(), plannedStart: dateTime, plannedEnd: nullableDateTime, actualStart: nullableDateTime, actualEnd: nullableDateTime, returnSpotCode: z.string().max(100).nullable(), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
 const auditLogSchema = z.object({ id, operationId: z.string().max(100).nullable(), actorEmployeeId: id.nullable(), actorName: z.string().max(100), action: z.string().max(100), targetType: z.string().max(100), targetId: z.string().max(100), description: z.string().max(1000), createdAt: dateTime }).strict();
 
-const fuelReturnNoticeSchema = z.object({ level: fuelNoticeLevel, enabled: z.boolean(), message: fuelNoticeMessage, version: z.number().int().positive(), updatedAt: dateTime,
+const fuelReturnNoticeSchema = z.object({ level: fuelNoticeLevel, enabled: z.boolean(), animated: z.boolean().default(true), message: fuelNoticeMessage, version: z.number().int().positive(), updatedAt: dateTime,
   audioBase64: z.string().max(Math.ceil(FUEL_NOTICE_AUDIO_MAX_BYTES / 3) * 4).nullable(), audioMime: z.enum(["audio/mpeg", "audio/wav"]).nullable(), audioName: z.string().min(1).max(100).nullable(),
 }).strict().superRefine((item, context) => {
   if (item.audioBase64 === null && item.audioMime === null && item.audioName === null) return;
@@ -65,7 +65,7 @@ export const fleetBackupSchema = z.object({
     trips: z.array(tripSchema).max(200_000),
     // 整備記録を追加する前のバックアップにはないため、空として読む。
     vehicleMaintenances: z.array(vehicleMaintenanceSchema).max(100_000).default([]),
-    fuelReturnNotices: z.array(fuelReturnNoticeSchema).max(2).default([]),
+    fuelReturnNotices: z.array(fuelReturnNoticeSchema).max(5).default([]),
     auditLogs: z.array(auditLogSchema).max(300_000),
   }).strict(),
 }).strict();

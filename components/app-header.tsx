@@ -10,7 +10,7 @@ import { playNfcSound } from "@/lib/nfc-sound";
 import { cn } from "./ui";
 import { KioskAutoHome } from "./kiosk-auto-home";
 
-export type AppView = "parking" | "timeline" | "settingsEmployees" | "settingsDepartments" | "settingsVehicles" | "settingsSpots" | "settingsData" | "settingsSystem" | "settingsScanner" | "settingsEmergency" | "operations";
+export type AppView = "parking" | "timeline" | "settingsEmployees" | "settingsDepartments" | "settingsVehicles" | "settingsSpots" | "settingsData" | "settingsSystem" | "settingsScanner" | "settingsReturnGuidance" | "settingsEmergency" | "operations";
 export type HeaderSyncState = "loading" | "healthy" | "stale";
 
 const jpTimeSeconds = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });

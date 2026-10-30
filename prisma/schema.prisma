@@ -10,6 +10,7 @@ datasource db {
 model FuelReturnNotice {
   level       Int      @id
   enabled     Boolean  @default(true)
+  animated    Boolean  @default(true)
   message     String
   audioBase64 String?
   audioMime   String?
