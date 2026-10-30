@@ -87,18 +87,22 @@ export function VehicleUseHistory({ refreshKey = 0 }: { refreshKey?: number }) {
     </Card>;
   }
   return <Card className="overflow-hidden">
-    <div className="space-y-3 border-b border-slate-100 p-4"><Button variant="ghost" onClick={backToVehicles}><ArrowLeft className="size-4" />車両一覧へ戻る</Button><div><h3 className="text-lg font-black">{selected.name}の利用履歴</h3><p className="mt-1 text-sm text-slate-500">{selected.vehicleNumber.code} ・ {selected.plateNumber}</p></div><div role="group" aria-label="確認する期間" className="flex flex-wrap gap-2">{([{ value: "1", label: "過去1か月" }, { value: "3", label: "過去3か月" }, { value: "custom", label: "期間指定" }] as const).map((item) => <button key={item.value} type="button" aria-pressed={period === item.value} onClick={() => choosePeriod(item.value)} className={cn("min-h-11 rounded-xl border px-4 text-sm font-bold", period === item.value ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50")}>{item.label}</button>)}</div></div>
-    <form data-kiosk-filter-form onSubmit={(event) => { event.preventDefault(); void load(filters); }} className="grid gap-3 border-b border-slate-100 p-4 sm:grid-cols-2 lg:grid-cols-3">
-      {period === "custom" ? <>
-        <label className="min-w-0 text-xs font-bold text-slate-600">開始日時（日本時間）<input type="datetime-local" required value={filters.from} onInput={(event) => { const value = event.currentTarget.value; setFilters((current) => ({ ...current, from: value })); }} className={`${field} mt-1`} /></label>
-        <label className="min-w-0 text-xs font-bold text-slate-600">終了日時（日本時間）<input type="datetime-local" required value={filters.to} onInput={(event) => { const value = event.currentTarget.value; setFilters((current) => ({ ...current, to: value })); }} className={`${field} mt-1`} /></label>
-      </> : null}
-      <label className="text-xs font-bold text-slate-600">利用者名（任意）<input value={filters.q} onChange={(event) => { const value = event.target.value; setFilters((current) => ({ ...current, q: value })); }} placeholder="利用者名で絞り込み" className={`${field} mt-1`} /></label>
-      <div className="flex flex-wrap items-center gap-2 sm:col-span-2 lg:col-span-3"><Button type="submit" disabled={loading}>{loading ? <RefreshCw className="size-4 animate-spin" /> : <Search className="size-4" />}{loading ? "読込中" : "検索"}</Button><Button type="button" variant="secondary" onClick={downloadCsv} disabled={loading || !data?.pagination.total}><Download className="size-4" />CSV</Button><p className="text-xs text-slate-500">指定した時間帯と実際の利用時間が重なる記録を表示します。</p></div>
+    <div className="space-y-3 border-b border-slate-100 p-4"><Button variant="ghost" onClick={backToVehicles}><ArrowLeft className="size-4" />車両一覧へ戻る</Button><div><h3 className="text-lg font-black">{selected.name}の利用履歴</h3><p className="mt-1 text-sm text-slate-500">{selected.vehicleNumber.code} ・ {selected.plateNumber}</p></div></div>
+    <form data-kiosk-filter-form onSubmit={(event) => { event.preventDefault(); void load(filters); }} className="space-y-3 border-b border-slate-100 p-4">
+      <div className="flex flex-wrap items-end gap-2">
+        <div><span className="text-xs font-bold text-slate-600">期間</span><div role="group" aria-label="確認する期間" className="mt-1 flex w-fit gap-1 rounded-xl border border-slate-200 bg-white p-1">{([{ value: "1", label: "過去1か月" }, { value: "3", label: "過去3か月" }, { value: "custom", label: "期間指定" }] as const).map((item) => <button key={item.value} type="button" aria-pressed={period === item.value} onClick={() => choosePeriod(item.value)} className={cn("min-h-9 rounded-lg px-4 text-sm font-bold", period === item.value ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50")}>{item.label}</button>)}</div></div>
+        <label className="w-full text-xs font-bold text-slate-600 sm:w-64">利用者名（任意）<input value={filters.q} onChange={(event) => { const value = event.target.value; setFilters((current) => ({ ...current, q: value })); }} placeholder="利用者名で絞り込み" className={`${field} mt-1`} /></label>
+        <div className="flex gap-2"><Button type="submit" disabled={loading}>{loading ? <RefreshCw className="size-4 animate-spin" /> : <Search className="size-4" />}{loading ? "読込中" : "検索"}</Button><Button type="button" variant="secondary" onClick={downloadCsv} disabled={loading || !data?.pagination.total}><Download className="size-4" />CSV</Button></div>
+      </div>
+      {period === "custom" ? <div className="flex flex-wrap items-end gap-2">
+        <label className="w-full text-xs font-bold text-slate-600 sm:w-60">開始日時（日本時間）<input type="datetime-local" required value={filters.from} onInput={(event) => { const value = event.currentTarget.value; setFilters((current) => ({ ...current, from: value })); }} className={`${field} mt-1`} /></label>
+        <span className="hidden pb-3 text-sm text-slate-400 sm:block">〜</span>
+        <label className="w-full text-xs font-bold text-slate-600 sm:w-60">終了日時（日本時間）<input type="datetime-local" required value={filters.to} onInput={(event) => { const value = event.currentTarget.value; setFilters((current) => ({ ...current, to: value })); }} className={`${field} mt-1`} /></label>
+      </div> : null}
     </form>
     {error ? <p role="alert" className="m-4 rounded-xl bg-rose-50 p-3 text-sm font-bold text-rose-700">{error}</p> : null}
     <div aria-live="polite" aria-busy={loading}>
-      {data ? <p className="border-b border-slate-100 px-4 py-3 text-xs font-bold text-slate-500">検索結果：{data.pagination.total}件{loading ? "（更新中）" : ""}<span className="mt-1 block font-normal">対象期間：{applied.from.replace("T", " ")} ～ {applied.to.replace("T", " ")}（日本時間）</span></p> : null}
+      {data ? <p className="border-b border-slate-100 px-4 py-3 text-xs font-bold text-slate-500">検索結果：{data.pagination.total}件{loading ? "（更新中）" : ""}<span className="mt-1 block font-normal">対象期間：{applied.from.replace("T", " ")} ～ {applied.to.replace("T", " ")}（日本時間）・この期間と実際の利用時間が重なる記録を表示しています</span></p> : null}
       <div className={cn("hidden gap-4 bg-slate-50 px-4 py-2 text-xs font-bold text-slate-500 lg:grid", historyColumns)}><span>利用開始</span><span>返却</span><span>利用時間</span><span>ガソリン</span><span>利用者</span></div>
       <div className="divide-y divide-slate-100">{data?.records.map((trip) => {
         const start = formatHistoryDateTime(trip.actualStart);
