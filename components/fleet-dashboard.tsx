@@ -974,9 +974,9 @@ function Timeline({ data, openReserve, openEdit, highlightTripId, timelineDate, 
   </div></>;
 }
 
-function VehicleEquipmentBadges({ vehicle, compact = false }: { vehicle: Pick<Vehicle, "hasEtc" | "hasNavigation" | "hasBackMonitor" | "hasWinterTires">; compact?: boolean }) {
+function VehicleEquipmentBadges({ vehicle, compact = false, className }: { vehicle: Pick<Vehicle, "hasEtc" | "hasNavigation" | "hasBackMonitor" | "hasWinterTires">; compact?: boolean; className?: string }) {
   if (!vehicle.hasEtc && !vehicle.hasNavigation && (compact || (!vehicle.hasBackMonitor && !vehicle.hasWinterTires))) return null;
-  return <span className={cn("flex items-center gap-1", compact ? "mt-0.5 justify-center" : "mt-1.5")} aria-label={`装備：${[vehicle.hasEtc ? "ETC" : "", vehicle.hasNavigation ? "ナビ" : "", !compact && vehicle.hasBackMonitor ? "バックモニター" : "", !compact && vehicle.hasWinterTires ? "冬タイヤ" : ""].filter(Boolean).join("、")}`}>
+  return <span className={cn("flex items-center gap-1", compact ? "mt-0.5 justify-center" : "mt-1.5", className)} aria-label={`装備：${[vehicle.hasEtc ? "ETC" : "", vehicle.hasNavigation ? "ナビ" : "", !compact && vehicle.hasBackMonitor ? "バックモニター" : "", !compact && vehicle.hasWinterTires ? "冬タイヤ" : ""].filter(Boolean).join("、")}`}>
     {vehicle.hasEtc ? <span className={cn("rounded bg-sky-100 font-black text-sky-700", compact ? "px-1 text-[6px] leading-[9px] @2xl:text-[7px]" : "px-1.5 py-0.5 text-[10px]")}>ETC</span> : null}
     {vehicle.hasNavigation ? <span className={cn("rounded bg-violet-100 font-black text-violet-700", compact ? "px-1 text-[6px] leading-[9px] @2xl:text-[7px]" : "px-1.5 py-0.5 text-[10px]")}>ナビ</span> : null}
     {!compact && vehicle.hasBackMonitor ? <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-black text-emerald-700">バックモニター</span> : null}
@@ -1133,9 +1133,7 @@ function ParkingMap({ selectedVehicleId, setSelectedVehicleId, data, trips, chan
           <div className="flex min-w-0 flex-1 items-center gap-2.5">
             <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-slate-200 bg-slate-100"><CarFront className="size-5" style={vehicleIconStyle(selectedVehicle.color)} /></span>
             <div className="min-w-0 flex-1 pr-3">
-              <div className="flex flex-wrap items-center gap-1.5"><b className="break-words text-sm">{selectedVehicle.name}</b>{selectedVehicle.status === "MAINTENANCE" ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-800">{MAINTENANCE_KIND_SHORT_LABELS[selectedMaintenance?.kind ?? "ON_SITE"]}</span> : null}</div>
-              <p className="break-words text-[10px] font-bold text-slate-500">{selectedVehicle.code} ・ {selectedVehicle.plateNumber}</p>
-              <VehicleEquipmentBadges vehicle={selectedVehicle} />
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1"><span className="text-[11px] font-black text-slate-500">{selectedVehicle.code}</span><b className="break-words text-sm">{selectedVehicle.name}</b>{selectedVehicle.status === "MAINTENANCE" ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-800">{MAINTENANCE_KIND_SHORT_LABELS[selectedMaintenance?.kind ?? "ON_SITE"]}</span> : null}<span className="break-words text-[10px] font-bold text-slate-500">{selectedVehicle.plateNumber}</span><VehicleEquipmentBadges vehicle={selectedVehicle} className="mt-0 flex-wrap" /></div>
               {selectedMaintenance ? <p className="text-[10px] font-bold text-slate-500">戻り予定 {selectedMaintenance.plannedEnd ? formatMaintenanceTime(selectedMaintenance.plannedEnd) : "未定"}</p> : null}
               {selectedMaintenance?.note ? <p className="truncate text-[10px] text-slate-500">{selectedMaintenance.note}</p> : null}
             </div>
