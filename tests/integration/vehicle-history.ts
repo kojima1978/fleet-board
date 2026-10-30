@@ -56,7 +56,17 @@ async function main() {
     assert.equal(first.data.pagination.total, 55);
     assert.equal(first.data.records.length, 50); assert.equal(second.data.records.length, 5);
     assert.equal(new Set([...first.data.records, ...second.data.records].map((item: { id: string }) => item.id)).size, 55);
-    console.log("Vehicle history API passed: vehicle/employee filters, overnight use, exact moment, return boundary, ongoing/future, inactive cars, safe fields and pagination");
+    const csvResponse = await GET(new Request(`http://localhost/api/trips/history?${new URLSearchParams({ vehicleId: vehicle.id, format: "csv" })}`));
+    assert.equal(csvResponse.headers.get("Content-Type"), "text/csv; charset=utf-8");
+    assert.match(csvResponse.headers.get("Content-Disposition") ?? "", /^attachment; filename="fleetflow-vehicle-history-C001-\d{4}-\d{2}-\d{2}\.csv"$/);
+    assert.equal(csvResponse.headers.get("Cache-Control"), "no-store");
+    const csvRows = (await csvResponse.text()).replace(/^﻿/, "").split("\r\n");
+    assert.equal(csvRows.length, 56, "ページを分けずに全件を書き出す");
+    assert.match(csvRows[1], /^"2026\/01\/03 10:00","","","利用中",.*"履歴 花子"/, "新しい順・利用中は返却を空欄にする");
+    assert.ok(csvRows.some((row) => row.startsWith('"2026/01/01 22:00","2026/01/02 02:00","240","返却済み"') && row.includes('"3/4"')), "日をまたぐ利用と返却時の残量");
+    assert.ok(!csvRows.some((row) => row.includes("別の車")), "選んだ車両だけを書き出す");
+    assert.equal((await get({ vehicleId: vehicle.id, format: "csv", from: "2026-02-30T00:00" })).response.status, 400);
+    console.log("Vehicle history API passed: vehicle/employee filters, overnight use, exact moment, return boundary, ongoing/future, inactive cars, safe fields, pagination and CSV");
   } finally { await prisma.$disconnect(); }
 }
 void main().catch((error) => { console.error(error); process.exitCode = 1; });

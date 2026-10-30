@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { vehicleHistoryQuery } from "@/lib/vehicle-history";
+import type { Prisma } from "@/prisma/generated/client";
+import { csvResponse } from "@/lib/csv";
+import { formatHistoryDateTime, vehicleHistoryCsv, vehicleHistoryQuery } from "@/lib/vehicle-history";
 
 export const dynamic = "force-dynamic";
 const vehicleSelect = { id: true, name: true, plateNumber: true, active: true, vehicleNumber: { select: { code: true } } } as const;
@@ -16,13 +18,20 @@ export async function GET(request: Request) {
   catch (error) { return NextResponse.json({ message: (error as Error).message }, { status: 400 }); }
   const { where, page } = query;
   const pageSize = 50;
+  const tripQuery = { where, orderBy: [{ actualStart: "desc" }, { id: "asc" }],
+    select: { id: true, status: true, actualStart: true, actualEnd: true, plannedEnd: true, returnFuelLevel: true,
+      snapshotCapturedAt: true, employeeNameAtStart: true, employeeCodeAtStart: true, departmentNameAtStart: true,
+      vehicleNameAtStart: true, vehicleCodeAtStart: true, plateNumberAtStart: true,
+      vehicle: { select: vehicleSelect }, employee: { select: { name: true, employeeNumber: { select: { code: true } }, department: { select: { name: true } } } } },
+  } satisfies Prisma.TripFindManyArgs;
+  if (params.get("format") === "csv") {
+    const trips = await prisma.trip.findMany({ ...tripQuery, take: 10_000 });
+    const vehicleCode = typeof where.vehicleId === "string" ? (await prisma.vehicle.findUnique({ where: { id: where.vehicleId }, select: vehicleSelect }))?.vehicleNumber.code : "all";
+    const today = formatHistoryDateTime(new Date()).slice(0, 10).replaceAll("/", "-");
+    return csvResponse(vehicleHistoryCsv(trips), `fleetflow-vehicle-history-${(vehicleCode ?? "vehicle").replace(/[^\w-]/g, "_")}-${today}.csv`);
+  }
   const [records, total, vehicles] = await Promise.all([
-    prisma.trip.findMany({ where, orderBy: [{ actualStart: "desc" }, { id: "asc" }], skip: (page - 1) * pageSize, take: pageSize,
-      select: { id: true, status: true, actualStart: true, actualEnd: true, plannedEnd: true, returnFuelLevel: true,
-        snapshotCapturedAt: true, employeeNameAtStart: true, employeeCodeAtStart: true, departmentNameAtStart: true,
-        vehicleNameAtStart: true, vehicleCodeAtStart: true, plateNumberAtStart: true,
-        vehicle: { select: vehicleSelect }, employee: { select: { name: true, employeeNumber: { select: { code: true } }, department: { select: { name: true } } } } },
-    }),
+    prisma.trip.findMany({ ...tripQuery, skip: (page - 1) * pageSize, take: pageSize }),
     prisma.trip.count({ where }),
     // Inactive vehicles remain searchable for past trips.
     prisma.vehicle.findMany({ orderBy: [{ vehicleNumber: { code: "asc" } }, { id: "asc" }], select: vehicleSelect }),
