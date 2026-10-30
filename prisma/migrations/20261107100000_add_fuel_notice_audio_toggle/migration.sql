@@ -1,0 +1,2 @@
+ALTER TABLE "FuelReturnNotice"
+  ADD COLUMN IF NOT EXISTS "audioEnabled" BOOLEAN NOT NULL DEFAULT true;

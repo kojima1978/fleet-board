@@ -36,7 +36,10 @@ assert.match(returnReminder, /fuel-reminder-attention/, "返却時も給油案�
 console.log("Fuel label tests passed: compact/detail labels, all five levels and no-wrap fractions");
 const notice = { ...defaultFuelReturnNotice(1), audioUrl: "/api/settings/fuel-return/1/audio?v=1" };
 assert.deepEqual([4, 3, 2, 1, 0].map((level) => defaultFuelReturnNotice(level as 0 | 1 | 2 | 3 | 4).enabled), [false, false, false, true, true], "初期設定は1/4以下だけ案内する");
+assert.deepEqual([4, 3, 2, 1, 0].map((level) => defaultFuelReturnNotice(level as 0 | 1 | 2 | 3 | 4).displayMode), ["NONE", "NONE", "NONE", "MODAL", "MODAL"], "初期設定は1/4以下だけポップ表示する");
 assert.match(renderToStaticMarkup(<FuelReturnNoticeMessage notice={notice} kiosk={false} />), /fuel-reminder-attention/, "強調ONではアニメーション用クラスを付ける");
-assert.doesNotMatch(renderToStaticMarkup(<FuelReturnNoticeMessage notice={{ ...notice, animated: false }} kiosk={false} />), /fuel-reminder-attention/, "強調OFFでは静止表示にする");
+assert.doesNotMatch(renderToStaticMarkup(<FuelReturnNoticeMessage notice={{ ...notice, displayMode: "MESSAGE", animated: false }} kiosk={false} />), /fuel-reminder-attention/, "メッセージ表示では静止表示にする");
+assert.match(renderToStaticMarkup(<FuelReturnNoticeMessage notice={{ ...notice, displayMode: "EMPHASIZED" }} kiosk={false} />), /fuel-reminder-attention/, "強調表示ではアニメーション用クラスを付ける");
 assert.doesNotMatch(renderToStaticMarkup(<FuelReturnNoticeMessage notice={notice} kiosk={false} />), /<audio/, "各自PCは音声を読み込まない");
 assert.match(renderToStaticMarkup(<FuelReturnNoticeMessage notice={notice} kiosk />), /<audio.*controls/, "共用端末は自動再生できない場合も手動再生できる");
+assert.doesNotMatch(renderToStaticMarkup(<FuelReturnNoticeMessage notice={{ ...notice, audioEnabled: false }} kiosk />), /<audio/, "音声なしでは登録済み音声を読み込まない");

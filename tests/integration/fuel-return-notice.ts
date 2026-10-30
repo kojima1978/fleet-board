@@ -22,8 +22,9 @@ async function main() {
     const defaults = await (await settings()).json();
     assert.deepEqual(defaults.notices.map((notice: { level: number }) => notice.level), [4, 3, 2, 1, 0]);
     assert.deepEqual(defaults.notices.map((notice: { enabled: boolean }) => notice.enabled), [false, false, false, true, true]);
+    assert.deepEqual(defaults.notices.map((notice: { displayMode: string }) => notice.displayMode), ["NONE", "NONE", "NONE", "MODAL", "MODAL"]);
     assert.equal(defaults.notices[0].version, 0);
-    const base = { level: 0, version: 0, enabled: true, animated: true, message: "Eの案内テスト", audio: upload };
+    const base = { level: 0, version: 0, displayMode: "MODAL", audioEnabled: true, message: "Eの案内テスト", audio: upload };
     assert.equal((await save(request(base, "http://evil.invalid"))).status, 403);
     for (const change of [{ level: 5 }, { message: " " }, { audio: { ...upload, base64: Buffer.from("<html>bad</html>").toString("base64") } }, { audio: { ...upload, base64: Buffer.alloc(FUEL_NOTICE_AUDIO_MAX_BYTES + 1).toString("base64") } }]) assert.equal((await save(request({ ...base, ...change }))).status, 400);
     let response = await save(request(base)); assert.equal(response.status, 200);
@@ -32,10 +33,10 @@ async function main() {
     const sound = await audio(new Request("http://localhost"), { params: Promise.resolve({ level: "0" }) });
     assert.equal(sound.status, 200); assert.equal(sound.headers.get("Content-Type"), "audio/wav"); assert.deepEqual(Buffer.from(await sound.arrayBuffer()), wav);
     assert.equal((await save(request(base))).status, 409, "stale create rejected");
-    assert.equal((await save(request({ ...base, version: 1, enabled: false, audio: undefined }))).status, 200);
+    response = await save(request({ ...base, version: 1, displayMode: "NONE", audioEnabled: false, audio: undefined })); assert.equal(response.status, 200); assert.equal((await response.json()).notice.audioEnabled, false);
     assert.equal((await prisma.fuelReturnNotice.findUniqueOrThrow({ where: { level: 0 } })).audioBase64, upload.base64, "text-only save keeps audio");
     assert.equal((await save(request({ ...base, level: 1, message: "1/4の案内テスト" }))).status, 200);
-    assert.equal((await save(request({ ...base, level: 4, animated: false, message: "Fの案内テスト", audio: undefined }))).status, 200);
+    assert.equal((await save(request({ ...base, level: 4, displayMode: "MESSAGE", audioEnabled: false, message: "Fの案内テスト", audio: undefined }))).status, 200);
 
     const department = await prisma.department.create({ data: { name: "案内テスト" } });
     const employee = await prisma.employee.create({ data: { name: "案内テスト社員", qrToken: crypto.randomUUID(), department: { connect: { id: department.id } }, employeeNumber: { create: { code: "E901" } } } });
@@ -55,7 +56,7 @@ async function main() {
         assert.equal(result.data.fuelReturnNotice.message, "1/4の案内テスト");
         assert.ok(result.data.fuelReturnNotice.audioUrl);
         const replay = await post(end, operationId); assert.equal(replay.data.replayed, true); assert.equal(replay.data.fuelReturnNotice.level, 1);
-      } else if (level === 4) { assert.equal(result.data.fuelReturnNotice.message, "Fの案内テスト"); assert.equal(result.data.fuelReturnNotice.animated, false); }
+      } else if (level === 4) { assert.equal(result.data.fuelReturnNotice.message, "Fの案内テスト"); assert.equal(result.data.fuelReturnNotice.displayMode, "MESSAGE"); assert.equal(result.data.fuelReturnNotice.animated, false); assert.equal(result.data.fuelReturnNotice.audioEnabled, false); }
       else assert.equal(result.data.fuelReturnNotice, undefined, "disabled/other/unknown level has no notice");
     }
     await prisma.vehicle.update({ where: { id: vehicle.id }, data: { status: "MAINTENANCE", parkingSpotId: null } });
@@ -69,6 +70,10 @@ async function main() {
     assert.deepEqual(parseFleetBackup(old).data.fuelReturnNotices, []);
     const oldWithoutAnimation = JSON.parse(JSON.stringify(backup)); for (const notice of oldWithoutAnimation.data.fuelReturnNotices) delete notice.animated;
     assert.ok(parseFleetBackup(oldWithoutAnimation).data.fuelReturnNotices.every((notice) => notice.animated), "旧バックアップは強調ONとして復元");
+    const oldWithoutDisplayMode = JSON.parse(JSON.stringify(backup)); for (const notice of oldWithoutDisplayMode.data.fuelReturnNotices) delete notice.displayMode;
+    assert.deepEqual(parseFleetBackup(oldWithoutDisplayMode).data.fuelReturnNotices.map((notice) => notice.displayMode), ["NONE", "MODAL", "MESSAGE"], "旧バックアップは有効・強調設定から表示方法を復元");
+    const oldWithoutAudioToggle = JSON.parse(JSON.stringify(backup)); for (const notice of oldWithoutAudioToggle.data.fuelReturnNotices) delete notice.audioEnabled;
+    assert.ok(parseFleetBackup(oldWithoutAudioToggle).data.fuelReturnNotices.every((notice) => notice.audioEnabled), "旧バックアップは音声ONとして復元");
     const broken = JSON.parse(JSON.stringify(backup)); broken.data.fuelReturnNotices[0].audioMime = null;
     assert.throws(() => parseFleetBackup(broken));
     const duplicate = JSON.parse(JSON.stringify(backup)); duplicate.data.fuelReturnNotices = [backup.data.fuelReturnNotices[0], backup.data.fuelReturnNotices[0]];

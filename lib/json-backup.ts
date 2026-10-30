@@ -1,4 +1,4 @@
-import { fuelNoticeLevel, fuelNoticeMessage, FUEL_NOTICE_AUDIO_MAX_BYTES } from "@/lib/fuel-return-notice";
+import { fuelNoticeDisplayMode, fuelNoticeLevel, fuelNoticeMessage, FUEL_NOTICE_AUDIO_MAX_BYTES } from "@/lib/fuel-return-notice";
 import { validateNoticeAudio } from "@/lib/fuel-return-notice-store";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -40,13 +40,13 @@ const tripSchema = z.object({ id, employeeId: id, vehicleId: id, plannedStart: d
 const vehicleMaintenanceSchema = z.object({ id, vehicleId: id, kind: z.enum(["ON_SITE", "OFF_SITE"]), status: z.enum(["SCHEDULED", "ACTIVE", "COMPLETED", "CANCELLED"]), note: z.string().max(500).nullable(), plannedStart: dateTime, plannedEnd: nullableDateTime, actualStart: nullableDateTime, actualEnd: nullableDateTime, returnSpotCode: z.string().max(100).nullable(), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
 const auditLogSchema = z.object({ id, operationId: z.string().max(100).nullable(), actorEmployeeId: id.nullable(), actorName: z.string().max(100), action: z.string().max(100), targetType: z.string().max(100), targetId: z.string().max(100), description: z.string().max(1000), createdAt: dateTime }).strict();
 
-const fuelReturnNoticeSchema = z.object({ level: fuelNoticeLevel, enabled: z.boolean(), animated: z.boolean().default(true), message: fuelNoticeMessage, version: z.number().int().positive(), updatedAt: dateTime,
+const fuelReturnNoticeSchema = z.object({ level: fuelNoticeLevel, displayMode: fuelNoticeDisplayMode.optional(), enabled: z.boolean(), animated: z.boolean().default(true), audioEnabled: z.boolean().default(true), message: fuelNoticeMessage, version: z.number().int().positive(), updatedAt: dateTime,
   audioBase64: z.string().max(Math.ceil(FUEL_NOTICE_AUDIO_MAX_BYTES / 3) * 4).nullable(), audioMime: z.enum(["audio/mpeg", "audio/wav"]).nullable(), audioName: z.string().min(1).max(100).nullable(),
 }).strict().superRefine((item, context) => {
   if (item.audioBase64 === null && item.audioMime === null && item.audioName === null) return;
   try { if (!item.audioBase64 || !item.audioName || validateNoticeAudio(item.audioBase64) !== item.audioMime) throw new Error(); }
   catch { context.addIssue({code:"custom",message:"返却時案内の音声データが不正です"}); }
-});
+}).transform((item) => ({ ...item, displayMode: item.displayMode ?? (!item.enabled ? "NONE" as const : item.animated ? "MODAL" as const : "MESSAGE" as const) }));
 
 export const fleetBackupSchema = z.object({
   format: z.literal("fleetflow-json-backup"),

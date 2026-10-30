@@ -364,7 +364,7 @@ async function successfulOperationResponse(input: { action: string; fuelLevel?: 
   if ((input.action === "end" || input.action === "endMaintenance") && input.fuelLevel !== null && input.fuelLevel !== undefined && isFuelNoticeLevel(input.fuelLevel)) {
     // 案内の取得に失敗しても、完了済みの返却を失敗扱いにしない。
     const configured = await readFuelReturnNotice(input.fuelLevel).catch(() => null);
-    if (configured?.enabled) notice = configured;
+    if (configured?.displayMode !== "NONE") notice = configured;
   }
   return NextResponse.json({ ok: true, ...(replayed ? { replayed: true } : {}), ...(notice ? { fuelReturnNotice: notice } : {}) });
 }

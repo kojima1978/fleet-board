@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Check, Fuel, LoaderCircle, Play, Save, Trash2, Upload, Volume2, VolumeX } from "lucide-react";
-import { FUEL_NOTICE_AUDIO_MAX_BYTES, type FuelReturnNotice } from "@/lib/fuel-return-notice";
+import { FUEL_NOTICE_AUDIO_MAX_BYTES, FUEL_NOTICE_DISPLAY_MODES, fuelNoticeDisplayModeLabel, type FuelNoticeDisplayMode, type FuelReturnNotice } from "@/lib/fuel-return-notice";
 import { formatFuelLevel } from "@/lib/fuel-level";
 import { Button, Card, cn } from "./ui";
 
@@ -29,7 +29,7 @@ export function FuelReturnNoticeSettings() {
     return () => { cancelled = true; controller.abort(); window.clearTimeout(timer); };
   }, [reload]);
 
-  const enabledCount = notices.filter((notice) => notice.enabled).length;
+  const enabledCount = notices.filter((notice) => notice.displayMode !== "NONE").length;
   return <Card className="w-full max-w-[900px] overflow-hidden border-slate-200 bg-white p-0">
     <div className="flex flex-wrap items-start gap-3 border-b border-slate-100 px-4 py-4 sm:px-5">
       <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600"><Fuel className="size-5" /></span>
@@ -38,15 +38,15 @@ export function FuelReturnNoticeSettings() {
     </div>
     {error ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-4 text-sm text-rose-700 sm:px-5"><span>{error}</span><Button variant="secondary" onClick={() => setReload((value) => value + 1)}>再読み込み</Button></div> : null}
     {!error && !notices.length ? <div role="status" className="flex items-center gap-2 px-5 py-8 text-sm text-slate-500"><LoaderCircle className="size-4 animate-spin" />設定を読み込んでいます</div> : null}
-    {notices.length ? <div role="tablist" aria-label="ガソリン残量" className="grid grid-cols-5 gap-1 border-b border-slate-100 bg-slate-50/70 p-2 sm:gap-2 sm:px-5">{notices.map((notice) => <button key={notice.level} type="button" role="tab" aria-selected={selectedLevel === notice.level} aria-controls={`fuel-notice-panel-${notice.level}`} onClick={() => setSelectedLevel(notice.level)} className={cn("flex min-h-12 items-center justify-center gap-1.5 rounded-xl border text-sm font-black transition", selectedLevel === notice.level ? "border-slate-300 bg-white text-slate-900 shadow-sm" : "border-transparent text-slate-500 hover:border-slate-200 hover:bg-white")}><span className={cn("size-2 rounded-full", notice.enabled ? "bg-emerald-500" : "bg-slate-300")} /><span className="tabular-nums">{formatFuelLevel(notice.level)}</span><span className="hidden text-[10px] font-bold sm:inline">{notice.enabled ? "ON" : "OFF"}</span></button>)}</div> : null}
+    {notices.length ? <div role="tablist" aria-label="ガソリン残量" className="grid grid-cols-5 gap-1 border-b border-slate-100 bg-slate-50/70 p-2 sm:gap-2 sm:px-5">{notices.map((notice) => <button key={notice.level} type="button" role="tab" aria-selected={selectedLevel === notice.level} aria-controls={`fuel-notice-panel-${notice.level}`} onClick={() => setSelectedLevel(notice.level)} className={cn("flex min-h-12 items-center justify-center gap-1.5 rounded-xl border text-sm font-black transition", selectedLevel === notice.level ? "border-slate-300 bg-white text-slate-900 shadow-sm" : "border-transparent text-slate-500 hover:border-slate-200 hover:bg-white")}><span className={cn("size-2 rounded-full", notice.displayMode !== "NONE" ? "bg-emerald-500" : "bg-slate-300")} /><span className="tabular-nums">{formatFuelLevel(notice.level)}</span><span className="hidden text-[10px] font-bold sm:inline">{notice.displayMode !== "NONE" ? "ON" : "OFF"}</span></button>)}</div> : null}
     <div>{notices.map((notice) => <div key={notice.level} id={`fuel-notice-panel-${notice.level}`} role="tabpanel" hidden={selectedLevel !== notice.level}><NoticeEditor key={`${notice.level}:${notice.version}`} notice={notice} onSaved={(saved) => setNotices((items) => items.map((item) => item.level === saved.level ? saved : item))} /></div>)}</div>
     <div className="border-t border-slate-100 bg-slate-50/70 px-4 py-3 text-xs leading-5 text-slate-500 sm:px-5">音声はMP3・WAV（各2MBまで）に対応しています。設定は全端末で共有され、JSONバックアップにも保存されます。</div>
   </Card>;
 }
 
 function NoticeEditor({ notice, onSaved }: { notice: FuelReturnNotice; onSaved: (notice: FuelReturnNotice) => void }) {
-  const [enabled, setEnabled] = useState(notice.enabled);
-  const [animated, setAnimated] = useState(notice.animated);
+  const [displayMode, setDisplayMode] = useState<FuelNoticeDisplayMode>(notice.displayMode);
+  const [audioEnabled, setAudioEnabled] = useState(notice.audioEnabled);
   const [message, setMessage] = useState(notice.message);
   const [audio, setAudio] = useState<UploadFile | null | undefined>();
   const [busy, setBusy] = useState(false);
@@ -58,7 +58,7 @@ function NoticeEditor({ notice, onSaved }: { notice: FuelReturnNotice; onSaved: 
   const levelLabel = formatFuelLevel(notice.level);
   const audioUrl = audio ? `data:audio/${audio.fileName.toLowerCase().endsWith(".wav") ? "wav" : "mpeg"};base64,${audio.base64}` : audio === null ? null : notice.audioUrl;
   const audioName = reading ? "読み込み中…" : audio?.fileName ?? (audio === null ? "音声なし" : notice.audioName ?? "音声なし");
-  const dirty = message !== notice.message || enabled !== notice.enabled || animated !== notice.animated || audio !== undefined;
+  const dirty = message !== notice.message || displayMode !== notice.displayMode || audioEnabled !== notice.audioEnabled || audio !== undefined;
 
   useEffect(() => { const element = player.current; return () => { element?.pause(); }; }, [audioUrl]);
 
@@ -80,7 +80,7 @@ function NoticeEditor({ notice, onSaved }: { notice: FuelReturnNotice; onSaved: 
     const timer = window.setTimeout(() => controller.abort(), 10_000);
     try {
       player.current?.pause();
-      const response = await fetch("/api/settings/fuel-return", { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ level: notice.level, version: notice.version, enabled, animated, message, ...(audio !== undefined ? { audio } : {}) }) });
+      const response = await fetch("/api/settings/fuel-return", { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ level: notice.level, version: notice.version, displayMode, audioEnabled, message, ...(audio !== undefined ? { audio } : {}) }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.message);
       onSaved(result.notice);
@@ -89,9 +89,10 @@ function NoticeEditor({ notice, onSaved }: { notice: FuelReturnNotice; onSaved: 
   }
 
   return <form data-kiosk-auto-home-blocked={dirty || busy || reading} onSubmit={(event) => { event.preventDefault(); if (!busy && !reading && dirty) void save(); }} className="px-4 py-5 sm:px-5">
+    <fieldset disabled={busy} className="mb-4"><legend className="mb-2 text-xs font-bold text-slate-600">表示方法</legend><div className="grid grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1 sm:grid-cols-4">{FUEL_NOTICE_DISPLAY_MODES.map((mode) => <button key={mode} type="button" aria-pressed={displayMode === mode} onClick={() => setDisplayMode(mode)} className={cn("min-h-10 rounded-lg px-2 text-xs font-bold transition disabled:opacity-60", displayMode === mode ? "bg-white text-blue-700 shadow-sm ring-1 ring-blue-200" : "text-slate-500 hover:bg-white hover:text-slate-700")}>{fuelNoticeDisplayModeLabel[mode]}</button>)}</div><p className="mt-2 text-[11px] leading-5 text-slate-500">メッセージは画面内に静かに表示、強調表示は動きを加えます。ポップ表示は確認するまで画面中央に表示します。</p></fieldset>
     <div className="grid gap-4 lg:grid-cols-2">
-      <div><button type="button" role="switch" aria-checked={animated} disabled={busy} onClick={() => setAnimated((value) => !value)} className={cn("flex min-h-10 w-32 items-center justify-center gap-2 whitespace-nowrap rounded-lg border px-2 text-xs font-bold transition disabled:opacity-60", animated ? "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50")}><span className={cn("relative h-5 w-9 shrink-0 rounded-full transition", animated ? "bg-blue-600" : "bg-slate-200")}><span className={cn("absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition", animated ? "left-[18px]" : "left-0.5")} /></span>{animated ? "強調あり" : "強調なし"}</button><label className="mt-3 block text-xs font-bold text-slate-600">表示メッセージ<textarea required maxLength={500} value={message} disabled={busy} onChange={(event) => setMessage(event.target.value)} className="mt-1.5 h-40 w-full resize-none rounded-xl border border-slate-300 bg-white p-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200 disabled:bg-slate-50" /></label></div>
-      <div><button type="button" role="switch" aria-checked={enabled} disabled={busy} onClick={() => setEnabled((value) => !value)} className={cn("flex min-h-10 w-32 items-center justify-center gap-2 whitespace-nowrap rounded-lg border px-2 text-xs font-bold transition disabled:opacity-60", enabled ? "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50")}><span className={cn("relative h-5 w-9 shrink-0 rounded-full transition", enabled ? "bg-blue-600" : "bg-slate-200")}><span className={cn("absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition", enabled ? "left-[18px]" : "left-0.5")} /></span>{enabled ? "案内あり" : "案内なし"}</button><p className="mt-3 text-xs font-bold text-slate-600">音声案内</p><div onDragEnter={(event) => { event.preventDefault(); if (!busy && !reading) setDragging(true); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; if (!busy && !reading) setDragging(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }} onDrop={(event) => { event.preventDefault(); setDragging(false); if (busy || reading) return; const files = [...event.dataTransfer.files]; if (files.length !== 1) { setError("音声ファイルを1つだけドロップしてください"); return; } void choose(files[0]); }} className={cn("mt-1.5 flex h-40 flex-col rounded-xl border border-slate-200 bg-slate-50/70 p-3 transition", dragging && "border-blue-400 bg-blue-50 ring-2 ring-blue-100")}>
+      <div><p className="flex min-h-8 items-center text-xs font-bold text-slate-600">表示メッセージ</p><textarea aria-label="表示メッセージ" required maxLength={500} value={message} disabled={busy} onChange={(event) => setMessage(event.target.value)} className="mt-1.5 h-40 w-full resize-none rounded-xl border border-slate-300 bg-white p-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200 disabled:bg-slate-50" /></div>
+      <div><div className="flex min-h-8 items-center justify-between gap-2"><p className="text-xs font-bold text-slate-600">音声案内</p><button type="button" role="switch" aria-checked={audioEnabled} disabled={busy} onClick={() => setAudioEnabled((value) => !value)} className={cn("flex min-h-8 w-28 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border px-2 text-xs font-bold transition disabled:opacity-60", audioEnabled ? "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50")}><span className={cn("relative h-4 w-7 shrink-0 rounded-full transition", audioEnabled ? "bg-blue-600" : "bg-slate-200")}><span className={cn("absolute top-0.5 size-3 rounded-full bg-white shadow-sm transition", audioEnabled ? "left-[14px]" : "left-0.5")} /></span>{audioEnabled ? "音声あり" : "音声なし"}</button></div><div onDragEnter={(event) => { event.preventDefault(); if (!busy && !reading) setDragging(true); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; if (!busy && !reading) setDragging(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }} onDrop={(event) => { event.preventDefault(); setDragging(false); if (busy || reading) return; const files = [...event.dataTransfer.files]; if (files.length !== 1) { setError("音声ファイルを1つだけドロップしてください"); return; } void choose(files[0]); }} className={cn("mt-1.5 flex h-40 flex-col rounded-xl border border-slate-200 bg-slate-50/70 p-3 transition", dragging && "border-blue-400 bg-blue-50 ring-2 ring-blue-100")}>
         <div className="flex min-w-0 items-center gap-2"><span className="grid size-8 shrink-0 place-items-center rounded-lg bg-white text-slate-500 shadow-sm">{audioUrl ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}</span><span className="min-w-0 flex-1 truncate text-xs font-bold text-slate-700" title={audioName}>{audioName}</span></div>
         <p className={cn("mt-2 text-[11px] font-bold", dragging ? "text-blue-700" : "text-slate-500")}>{dragging ? "ここにドロップしてください" : "MP3・WAVをここへドロップ、またはファイルを選択"}</p>
         {audio !== undefined ? <p className="mt-2 text-[11px] font-bold text-amber-700">保存すると反映されます</p> : null}
