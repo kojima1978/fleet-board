@@ -7,6 +7,7 @@ import type { DashboardData, Employee, ParkingSpot, Vehicle } from "@/lib/types"
 import { canUseSpot, formatSpotLabel, isCustomerSpot } from "@/lib/parking-spots";
 import { CustomerSpotNotice } from "./customer-spot-notice";
 import { normalizeNfcUid, sameNfcUid } from "@/lib/nfc";
+import { isLightVehicleColor, VEHICLE_COLORS, vehicleColorName, vehicleIconStyle } from "@/lib/vehicle-colors";
 import { isRecordCode, normalizeRecordCode, RECORD_CODE_EXAMPLES, recordCodeMessage, sanitizeRecordCodeInput } from "@/lib/record-codes";
 import { nfcBridgeStatusText, useNfcBridge } from "@/lib/use-nfc-bridge";
 import { activeMaintenanceOf, MaintenanceDialog } from "./maintenance-dialog";
@@ -905,7 +906,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                   <div key={vehicle.id} className={cn(vehicleGrid, "py-2.5 transition [content-visibility:auto] hover:bg-slate-50/70", !vehicle.active && "bg-slate-50 text-slate-500", vehicle.status === "MAINTENANCE" && "bg-amber-50/60", highlightId === vehicle.id && "bg-amber-50 ring-2 ring-inset ring-amber-300")}>
                     <span className="flex items-center gap-2">
                       <span className="hidden size-8 shrink-0 place-items-center rounded-lg bg-slate-100 sm:grid">
-                        <CarFront className="size-4" style={{ color: vehicle.color }} />
+                        <CarFront className="size-4" style={vehicleIconStyle(vehicle.color)} />
                       </span>
                       <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-xs font-bold text-slate-700">{vehicle.code}</span>
                     </span>
@@ -1397,21 +1398,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                       <VehicleKindChoice isKei={vehicleForm.isKei} onChange={(isKei) => setVehicleForm((current) => ({ ...current, isKei }))} />
                     </Field>
                     <Field label="表示色">
-                      <span className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 px-3">
-                        <input
-                          aria-label="車両の表示色"
-                          type="color"
-                          className="h-7 w-10 cursor-pointer border-0 bg-transparent p-0"
-                          value={vehicleForm.color}
-                          onChange={(event) =>
-                            setVehicleForm((current) => ({
-                              ...current,
-                              color: event.target.value,
-                            }))
-                          }
-                        />
-                        <span className="text-xs font-bold text-slate-500">{vehicleForm.color.toUpperCase()}</span>
-                      </span>
+                      <VehicleColorChoice color={vehicleForm.color} onChange={(color) => setVehicleForm((current) => ({ ...current, color }))} />
                     </Field>
                       </div>
                     </section>
@@ -1981,6 +1968,31 @@ function EquipmentBadges({ vehicle, className }: { vehicle: Pick<Vehicle, "hasEt
   );
 }
 
+function VehicleColorChoice({ color, onChange }: { color: string; onChange: (color: string) => void }) {
+  const presetName = vehicleColorName(color);
+  const swatch = "size-6 shrink-0 rounded-full border border-slate-300";
+  const choice = (selected: boolean) => cn("relative flex min-h-11 items-center gap-2 whitespace-nowrap rounded-xl border px-2.5 text-sm font-bold transition", selected ? "border-blue-500 bg-blue-50 text-blue-800 ring-1 ring-blue-500" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50");
+  return (
+    <div role="radiogroup" aria-label="車両の表示色" className="grid grid-cols-3 gap-2">
+      {VEHICLE_COLORS.map((item) => {
+        const selected = presetName === item.name;
+        return (
+          <button key={item.value} type="button" role="radio" aria-checked={selected} onClick={() => onChange(item.value)} className={choice(selected)}>
+            <span className={cn(swatch, "grid place-items-center")} style={{ background: item.value }}>{selected ? <Check className={cn("size-3.5", isLightVehicleColor(item.value) ? "text-slate-900" : "text-white")} /> : null}</span>
+            {item.name}
+          </button>
+        );
+      })}
+      <label className={cn(choice(!presetName), "cursor-pointer")}>
+        <span className={cn(swatch, "relative overflow-hidden")} style={{ background: presetName ? "conic-gradient(#dc2626, #eab308, #15803d, #2563eb, #9333ea, #dc2626)" : color }}>
+          <input type="color" aria-label="その他の表示色" value={color} onChange={(event) => onChange(event.target.value)} className="absolute inset-0 size-full cursor-pointer opacity-0" />
+        </span>
+        <span className="min-w-0">その他{presetName ? null : <span className="block text-[10px] font-semibold text-slate-500">{color.toUpperCase()}</span>}</span>
+      </label>
+    </div>
+  );
+}
+
 function VehicleKindChoice({ isKei, onChange }: { isKei: boolean; onChange: (isKei: boolean) => void }) {
   return (
     <div role="radiogroup" aria-label="車種" className="grid grid-cols-2 gap-2">
@@ -2200,7 +2212,7 @@ function NfcCheckDialog({ data, kind, onOpen, onClose }: { data: DashboardData; 
                   const action = "inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-blue-700 hover:bg-blue-50";
                   return (
                     <div key={owner.item.id} className={cn("flex items-center gap-3 rounded-2xl border p-3", owner.item.active ? "border-emerald-200 bg-emerald-50/60" : "border-slate-200 bg-slate-50")}>
-                      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white">{owner.kind === "employee" ? <UserRound className="size-5 text-slate-500" /> : <CarFront className="size-5" style={{ color: owner.item.color }} />}</span>
+                      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white">{owner.kind === "employee" ? <UserRound className="size-5 text-slate-500" /> : <CarFront className="size-5" style={vehicleIconStyle(owner.item.color)} />}</span>
                       <div className="min-w-0 flex-1">
                         <p className="text-[11px] font-bold text-slate-500">
                           {owner.kind === "employee" ? "社員" : "車両"} <span className="font-mono">{owner.item.code}</span>
