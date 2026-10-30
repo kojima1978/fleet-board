@@ -178,6 +178,8 @@ model ParkingSpot {
   dedicatedVehicleId String?
   dedicatedVehicle Vehicle? @relation("DedicatedVehicle", fields: [dedicatedVehicleId], references: [id], onDelete: NoAction)
   label       String?
+  // 中央の道路側にある区画。ここに車があると出庫・入庫できないので注意を出す。
+  frontSpotIds String[] @default([])
   vehicle     Vehicle?
   version     Int      @default(1)
 }

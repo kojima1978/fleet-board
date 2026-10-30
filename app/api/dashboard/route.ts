@@ -156,6 +156,7 @@ const recordCodeSchema = z.string().max(20).transform(normalizeRecordCode).pipe(
 // 区画番号は配置図の小さな枠に出すため短くし、全角数字は半角へそろえる。
 // 表示名は区画の枠に収まる長さにする。空欄なら用途から自動で決める。
 const spotLabelSchema = z.string().transform((value) => value.normalize("NFKC").trim()).pipe(z.string().max(SPOT_LABEL_MAX_LENGTH, `表示名は${SPOT_LABEL_MAX_LENGTH}文字以内で入力してください`)).transform((value) => value || null);
+const FRONT_SPOT_MAX = 20;
 const spotCodeSchema = z.string().transform((value) => value.normalize("NFKC").trim()).pipe(z.string().min(1, "区画番号を入力してください").max(12, "区画番号は12文字以内で入力してください").regex(/^\S+$/, "区画番号に空白は使えません"));
 // 空白の違いで同じ部署が二重に登録されないよう、連続する空白を1つにまとめる。
 const departmentNameSchema = z.string().trim().min(1).max(50).transform((value) => value.replace(/\s+/g, " "));
@@ -196,7 +197,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("correctActualStart"), tripId: idSchema, version: z.number().int().nonnegative(), actualStart: z.string().datetime(), reason: z.string().trim().min(1).max(200), ...actorSchema, actorEmployeeId: idSchema }),
   z.object({ action: z.literal("cancelTrip"), tripId: idSchema, version: z.number().int().nonnegative(), ...actorSchema }),
   z.object({ action: z.literal("moveVehicle"), vehicleId: idSchema, version: z.number().int().nonnegative(), spotId: idSchema, ...actorSchema }),
-  z.object({ action: z.literal("updateSpot"), id: idSchema, version: z.number().int().nonnegative(), code: spotCodeSchema, label: spotLabelSchema.nullable(), role: z.enum(PARKING_SPOT_ROLES), dedicatedVehicleId: idSchema.nullable() }),
+  z.object({ action: z.literal("updateSpot"), id: idSchema, version: z.number().int().nonnegative(), code: spotCodeSchema, label: spotLabelSchema.nullable(), role: z.enum(PARKING_SPOT_ROLES), dedicatedVehicleId: idSchema.nullable(), frontSpotIds: z.array(idSchema).max(FRONT_SPOT_MAX).optional() }),
   z.object({ action: z.literal("setFuelLevel"), vehicleId: idSchema, version: z.number().int().nonnegative(), fuelLevel: z.number().int().min(0).max(FUEL_LEVEL_MAX), ...actorSchema }),
   z.object({ action: z.literal("createDepartment"), name: departmentNameSchema }),
   z.object({ action: z.literal("renameDepartment"), id: idSchema, version: z.number().int().nonnegative(), name: departmentNameSchema }),
@@ -1093,16 +1094,21 @@ export async function POST(request: Request) {
         const codeChanged = spot.code !== input.code;
         const roleChanged = spot.role !== input.role || spot.dedicatedVehicleId !== dedicatedVehicleId;
         const labelChanged = spot.label !== input.label;
-        if (!codeChanged && !roleChanged && !labelChanged) throw new Error("区画番号・用途・表示名は変更されていません");
+        // 手前の区画は送られたときだけ変える。自分自身と重複は除き、存在する区画だけを受け付ける。
+        const frontSpotIds = input.frontSpotIds ? [...new Set(input.frontSpotIds)].filter((id) => id !== input.id) : spot.frontSpotIds;
+        const frontSpots = frontSpotIds.length ? await tx.parkingSpot.findMany({ where: { id: { in: frontSpotIds } }, select: { id: true, code: true }, orderBy: { code: "asc" } }) : [];
+        if (frontSpots.length !== frontSpotIds.length) throw new Error("手前の区画に存在しない区画が含まれています");
+        const frontSpotsChanged = [...spot.frontSpotIds].sort().join() !== [...frontSpotIds].sort().join();
+        if (!codeChanged && !roleChanged && !labelChanged && !frontSpotsChanged) throw new Error("区画番号・用途・表示名・手前の区画は変更されていません");
         if (codeChanged) {
           const sameCode = await tx.parkingSpot.findUnique({ where: { code: input.code }, select: { id: true } });
           if (sameCode) throw new Error(`区画番号${input.code}はすでに使われています`);
         }
-        const updated = await tx.parkingSpot.updateMany({ where: { id: input.id, version: input.version }, data: { code: input.code, role: input.role, dedicatedVehicleId, label: input.label, version: { increment: 1 } } });
+        const updated = await tx.parkingSpot.updateMany({ where: { id: input.id, version: input.version }, data: { code: input.code, role: input.role, dedicatedVehicleId, label: input.label, frontSpotIds: frontSpots.map((item) => item.id), version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
         const previousName = spot.dedicatedVehicleId ? (await tx.vehicle.findUnique({ where: { id: spot.dedicatedVehicleId }, select: { name: true } }))?.name ?? null : null;
         const describe = (role: typeof input.role, name: string | null) => role === "DEDICATED" ? `${name ?? "車両未設定"}専用` : SPOT_ROLE_LABELS[role];
-        const changes = [codeChanged ? `番号を${input.code}へ` : "", roleChanged ? `用途を「${describe(spot.role, previousName)}」から「${describe(input.role, dedicatedVehicleName)}」へ` : "", labelChanged ? `表示名を${input.label ? `「${input.label}」` : "自動"}へ` : ""].filter(Boolean).join("、");
+        const changes = [codeChanged ? `番号を${input.code}へ` : "", roleChanged ? `用途を「${describe(spot.role, previousName)}」から「${describe(input.role, dedicatedVehicleName)}」へ` : "", labelChanged ? `表示名を${input.label ? `「${input.label}」` : "自動"}へ` : "", frontSpotsChanged ? `手前の区画を${frontSpots.length ? frontSpots.map((item) => item.code).join("・") : "なし"}へ` : ""].filter(Boolean).join("、");
         await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "区画設定変更", targetType: "ParkingSpot", targetId: input.id, description: `区画${spot.code}の${changes}変更` } });
       });
     }

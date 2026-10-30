@@ -1,0 +1,2 @@
+ALTER TABLE "ParkingSpot"
+ADD COLUMN "frontSpotIds" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];

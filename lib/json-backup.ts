@@ -20,7 +20,7 @@ const nullableDateTime = dateTime.nullable();
 const departmentSchema = z.object({ id, name: z.string().min(1).max(100), active: z.boolean(), sortOrder: z.number().int().optional(), version: z.number().int().nonnegative().optional(), createdAt: dateTime, updatedAt: dateTime }).strict();
 const employeeNumberSchema = z.object({ id, code: z.string().min(1).max(100), createdAt: dateTime, updatedAt: dateTime }).strict();
 const vehicleNumberSchema = z.object({ id, code: z.string().min(1).max(100), createdAt: dateTime, updatedAt: dateTime }).strict();
-const parkingSpotSchema = z.object({ id, code: z.string().min(1).max(100), x: z.number().finite(), y: z.number().finite(), width: z.number().finite().positive(), height: z.number().finite().positive(), orientation: z.string().min(1).max(50), enabled: z.boolean(), role: z.enum(["REGULAR", "TEMPORARY", "CUSTOMER", "DEDICATED", "HOLDING"]).optional(), dedicatedVehicleId: id.nullable().optional(), label: z.string().max(100).nullable().optional(), version: z.number().int().nonnegative() }).strict();
+const parkingSpotSchema = z.object({ id, code: z.string().min(1).max(100), x: z.number().finite(), y: z.number().finite(), width: z.number().finite().positive(), height: z.number().finite().positive(), orientation: z.string().min(1).max(50), enabled: z.boolean(), role: z.enum(["REGULAR", "TEMPORARY", "CUSTOMER", "DEDICATED", "HOLDING"]).optional(), dedicatedVehicleId: id.nullable().optional(), label: z.string().max(100).nullable().optional(), frontSpotIds: z.array(id).max(100).optional(), version: z.number().int().nonnegative() }).strict();
 const nfcTagSchema = z.object({ id, uid: z.string().min(1).max(100), createdAt: dateTime, updatedAt: dateTime }).strict();
 const employeeSchema = z.object({ id, employeeNumberId: id, departmentId: id, name: z.string().min(1).max(100), email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()).nullable().optional(), qrToken: z.string().min(16).max(100).optional(), active: z.boolean(), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
 const fuelLevelSchema = z.number().int().min(0).max(FUEL_LEVEL_MAX).nullable().optional();
@@ -165,7 +165,10 @@ export function parseFleetBackup(value: unknown): FleetBackup {
     assertReference(vehicleNumberIds, vehicle.vehicleNumberId, "車両番号");
     assertReference(parkingSpotIds, vehicle.parkingSpotId, "駐車区画");
   }
-  for (const spot of data.parkingSpots) assertReference(vehicleIds, spot.dedicatedVehicleId ?? null, "専用区画の車両");
+  for (const spot of data.parkingSpots) {
+    assertReference(vehicleIds, spot.dedicatedVehicleId ?? null, "専用区画の車両");
+    for (const frontId of spot.frontSpotIds ?? []) assertReference(parkingSpotIds, frontId, "手前の区画");
+  }
   for (const assignment of data.nfcAssignments) {
     if ((assignment.employeeId === null) === (assignment.vehicleId === null)) throw new FleetBackupValidationError("NFC割当は社員または車両のどちらか一方を参照する必要があります");
     assertReference(employeeIds, assignment.employeeId, "NFC割当の社員");

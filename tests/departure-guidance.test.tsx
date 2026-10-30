@@ -4,7 +4,7 @@ import { findEmployees } from "../components/employee-picker";
 import { StartDialog } from "../components/fleet-dashboard";
 import { isKioskDevice, type DeviceMode } from "../lib/device-mode";
 import type { NfcBridgeStatus } from "../lib/use-nfc-bridge";
-import type { Employee, Vehicle, Trip } from "../lib/types";
+import type { Employee, ParkingSpot, Vehicle, Trip } from "../lib/types";
 
 const employee: Employee = { id: "e1", code: "E001", name: "手動選択テスト", department: "総務", email: "", nfcUid: "", qrCode: "", active: true, version: 1 };
 const vehicle: Vehicle = { id: "v1", code: "C001", name: "出庫テスト車", plateNumber: "テスト001", nfcUid: "", qrCode: "", hasEtc: false, hasNavigation: false, hasWinterTires: false, hasBackMonitor: false, isKei: false, fuelCard: "", fuelLevel: null, color: "#2563eb", status: "AVAILABLE", parkingSpotId: "s1", active: true, version: 1 };
@@ -49,6 +49,13 @@ assert.match(reserve, /この内容で予約/);
 assert.doesNotMatch(reserve, /予約した車両を利用開始|この内容で利用開始|>時刻指定<|>今すぐ</, "予約入口で現在の予約を利用開始しない");
 const lowFuelReserve = renderToStaticMarkup(<StartDialog intent="scheduled" kiosk={false} employees={[employee]} vehicles={[lowFuelVehicle]} trips={[]} initialEmployee={employee} initialVehicleId={lowFuelVehicle.id} submitting={false} onClose={noop} onSubmit={noop} />);
 assert.doesNotMatch(lowFuelReserve, /ガソリン残量が1\/2以下です/, "将来の予約時には現在の残量で給油案内を出さない");
+const baseSpot: ParkingSpot = { id: "s1", code: "15", x: 0, y: 0, width: 5, height: 5, orientation: "vertical", enabled: true, version: 1, vehicle, role: "REGULAR", dedicatedVehicleId: null, dedicatedVehicleName: null, label: null, frontSpotIds: ["s2"] };
+const blockedSpots: ParkingSpot[] = [baseSpot, { ...baseSpot, id: "s2", code: "14", vehicle: { ...vehicle, id: "v2", name: "プロボックス" }, frontSpotIds: [] }];
+const blockedStart = renderToStaticMarkup(<StartDialog kiosk={false} employees={[employee]} vehicles={[vehicle]} trips={[]} spots={blockedSpots} initialEmployee={employee} initialVehicleId={vehicle.id} submitting={false} onClose={noop} onSubmit={noop} />);
+assert.match(blockedStart, /手前の区画14（プロボックス）に車があります/, "今すぐ利用で手前の車を知らせる");
+assert.match(blockedStart, /この内容で利用開始/, "注意だけで利用開始はできる");
+const blockedReserve = renderToStaticMarkup(<StartDialog intent="scheduled" kiosk={false} employees={[employee]} vehicles={[vehicle]} trips={[]} spots={blockedSpots} initialEmployee={employee} initialVehicleId={vehicle.id} submitting={false} onClose={noop} onSubmit={noop} />);
+assert.doesNotMatch(blockedReserve, /手前の区画/, "将来の予約では今の駐車状況で注意しない");
 console.log("Departure guidance tests passed: personal/auto-personal manual selection, selected user reuse and kiosk scanner guidance");
 
 const manyEmployees = Array.from({length: 150}, (_, index) => ({ ...employee, id: `e${index + 1}`, code: `E${String(index + 1).padStart(3, "0")}`, name: `社員${index + 1}` }));

@@ -40,3 +40,7 @@ export const isCustomerSpot = (spot: Pick<SpotRoleInfo, "role">) => spot.role ==
 // お客様用の区画の代わりに案内する、空いている通常区画（その車の専用区画を含む）。
 export const freeRegularSpots = <T extends Pick<SpotRoleInfo, "code" | "role" | "dedicatedVehicleId"> & { enabled: boolean; vehicle?: unknown }>(spots: T[], vehicle: { id: string } | null) =>
   spots.filter((spot) => spot.enabled && !spot.vehicle && (spot.role === "REGULAR" || (spot.role === "DEDICATED" && !!vehicle && spot.dedicatedVehicleId === vehicle.id)));
+
+// 手前の区画に駐車中の区画。中央の道路から出し入れするとき、先にその車を動かす必要がある。
+export const blockingFrontSpots = <T extends { id: string; vehicle?: { id: string } | null }>(spot: { frontSpotIds?: string[] } | null | undefined, spots: T[], vehicleId?: string | null) =>
+  spot?.frontSpotIds?.length ? spots.filter((item) => spot.frontSpotIds!.includes(item.id) && !!item.vehicle && item.vehicle.id !== vehicleId) : [];

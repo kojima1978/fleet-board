@@ -3,10 +3,11 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { isWinterTireSeason, parkingSpotClass, VehicleMapIcon } from "../components/fleet-dashboard";
 import { CustomerSpotNotice } from "../components/customer-spot-notice";
-import { freeRegularSpots, isCustomerSpot } from "../lib/parking-spots";
+import { FrontSpotNotice } from "../components/front-spot-notice";
+import { blockingFrontSpots, freeRegularSpots, isCustomerSpot } from "../lib/parking-spots";
 import type { ParkingSpot, Vehicle } from "../lib/types";
 
-const spot: ParkingSpot = { id: "s1", code: "01", x: 0, y: 0, width: 5, height: 5, orientation: "vertical", enabled: true, version: 1, vehicle: null, role: "REGULAR", dedicatedVehicleId: null, dedicatedVehicleName: null, label: null };
+const spot: ParkingSpot = { id: "s1", code: "01", x: 0, y: 0, width: 5, height: 5, orientation: "vertical", enabled: true, version: 1, vehicle: null, role: "REGULAR", dedicatedVehicleId: null, dedicatedVehicleName: null, label: null, frontSpotIds: [] };
 const vehicle: Vehicle = { id: "v1", code: "C001", name: "テスト車", plateNumber: "テスト001", nfcUid: "", qrCode: "", hasEtc: false, hasNavigation: false, hasWinterTires: false, hasBackMonitor: false, isKei: false, fuelCard: "", fuelLevel: null, color: "#2563eb", status: "AVAILABLE", parkingSpotId: spot.id, active: true, version: 1 };
 assert.equal(parkingSpotClass(spot), "border-slate-300 bg-white/70");
 assert.equal(parkingSpotClass({ ...spot, role: "TEMPORARY" }), "border-[3px] border-dashed border-slate-300/70 bg-slate-50/50");
@@ -50,4 +51,21 @@ assert.match(notice, /別の区画を選ぶ/);
 const noOther = renderToStaticMarkup(createElement(CustomerSpotNotice, { spots: [spotsForNotice[0]], vehicle, onChooseOther: () => {} }));
 assert.match(noOther, /いま空いている通常区画はありません/);
 assert.doesNotMatch(noOther, /別の区画を選ぶ/, "選び直す先がなければボタンを出さない");
-console.log("Parking appearance tests passed: empty background only, back monitor camera mark, unchanged borders/occupied/maintenance/off-site, customer spot notice");
+const frontSpots: ParkingSpot[] = [
+  { ...spot, id: "f13", code: "13", vehicle: { ...vehicle, id: "v13", name: "アクア 2" } },
+  { ...spot, id: "f14", code: "14", vehicle: { ...vehicle, id: "v14", name: "プロボックス" } },
+  { ...spot, id: "f15", code: "15", vehicle: { ...vehicle, id: "v15", name: "タウンエース" }, frontSpotIds: ["f13", "f14"] },
+  { ...spot, id: "f16", code: "16", frontSpotIds: ["f15"] },
+];
+assert.deepEqual(blockingFrontSpots(frontSpots[2], frontSpots).map((item) => item.code), ["13", "14"], "手前の区画のうち車がある区画を返す");
+assert.deepEqual(blockingFrontSpots({ ...frontSpots[2], frontSpotIds: [] }, frontSpots), [], "手前の区画を設定していなければ注意しない");
+assert.deepEqual(blockingFrontSpots(frontSpots[3], frontSpots, "v15"), [], "動かす車自身は手前の車に数えない");
+assert.deepEqual(blockingFrontSpots(undefined, frontSpots), [], "区画がなければ注意しない");
+const outNotice = renderToStaticMarkup(createElement(FrontSpotNotice, { spot: frontSpots[2], spots: frontSpots, vehicleId: "v15", direction: "out" }));
+assert.match(outNotice, /手前の区画13（アクア 2）・14（プロボックス）に車があります/);
+assert.match(outNotice, /出庫するには、先に手前の車の移動が必要です。登録はこのまま続けられます。/);
+const inNotice = renderToStaticMarkup(createElement(FrontSpotNotice, { spot: frontSpots[3], spots: frontSpots, vehicleId: "v1", direction: "in" }));
+assert.match(inNotice, /手前の区画15（タウンエース）に車があります/);
+assert.match(inNotice, /入庫するには/);
+assert.equal(renderToStaticMarkup(createElement(FrontSpotNotice, { spot: frontSpots[0], spots: frontSpots, direction: "in" })), "", "手前に車がなければ何も出さない");
+console.log("Parking appearance tests passed: empty background only, back monitor camera mark, unchanged borders/occupied/maintenance/off-site, customer spot notice, front spot notice");

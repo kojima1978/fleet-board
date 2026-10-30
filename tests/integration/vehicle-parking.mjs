@@ -23,7 +23,7 @@ async function post(body) {
 }
 const create = (i, spotId) => post({ action: "createVehicle", code: codes[i], name: `駐車登録テスト${i}`, plateNumber: plates[i], color: "#2563eb", nfcUid: "", ...(spotId ? { spotId } : {}) });
 const spotRow = async (id) => (await client.query('SELECT * FROM "ParkingSpot" WHERE id=$1', [id])).rows[0];
-const updateSpot = async (id, changes, version) => { const row = await spotRow(id); return post({ action: "updateSpot", id, version: version ?? row.version, code: row.code, label: row.label, role: row.role, dedicatedVehicleId: row.dedicatedVehicleId, ...changes }); };
+const updateSpot = async (id, changes, version) => { const row = await spotRow(id); return post({ action: "updateSpot", id, version: version ?? row.version, code: row.code, label: row.label, role: row.role, dedicatedVehicleId: row.dedicatedVehicleId, frontSpotIds: row.frontSpotIds, ...changes }); };
 const setRole = (id, role, dedicatedVehicleId = null, version) => updateSpot(id, { role, dedicatedVehicleId }, version);
 const importItem = (i, spotId) => ({ code: codes[i], name: `駐車取込テスト${i}`, plateNumber: plates[i], ...(spotId ? { spotId } : {}) });
 const importVehicles = (items) => post({ action: "importVehicles", items });
@@ -105,6 +105,14 @@ try {
   assert.equal((await (await fetch(`${appUrl}/api/dashboard`)).json()).spots.find((spot) => spot.id === spots[3]).label, "社長車専用", "配置図に表示名を返す");
   assert.equal((await updateSpot(spots[3], { label: "　" })).status, 200);
   assert.equal((await spotRow(spots[3])).label, null, "空欄の表示名は自動表示へ戻す");
+  const fronted = await updateSpot(spots[3], { frontSpotIds: [spots[4], spots[5], spots[4], spots[3]] });
+  assert.equal(fronted.status, 200, JSON.stringify(fronted.body));
+  assert.deepEqual([...(await spotRow(spots[3])).frontSpotIds].sort(), [spots[4], spots[5]].sort(), "手前の区画は重複と自分自身を除いて保存する");
+  assert.deepEqual([...(await (await fetch(`${appUrl}/api/dashboard`)).json()).spots.find((spot) => spot.id === spots[3]).frontSpotIds].sort(), [spots[4], spots[5]].sort(), "配置図に手前の区画を返す");
+  assert.equal((await updateSpot(spots[3], { frontSpotIds: ["missing-spot"] })).status, 400, "存在しない手前の区画を拒否する");
+  assert.equal((await updateSpot(spots[3], { frontSpotIds: [spots[5], spots[4]] })).status, 400, "順番だけ違う手前の区画は変更なしとして拒否する");
+  assert.equal((await updateSpot(spots[3], { frontSpotIds: [] })).status, 200, "手前の区画を外せる");
+  assert.deepEqual((await spotRow(spots[3])).frontSpotIds, []);
   assert.equal((await importVehicles([importItem(8, spots[4]), importItem(9, spots[4])])).status, 400, "JSON内で同じ区画の割当を拒否する");
   assert.equal((await importVehicles([importItem(8, spots[4]), importItem(9, spots[2])])).status, 400, "使用中区画への取込を拒否する");
   assert.equal((await importVehicles([importItem(8, spots[4]), importItem(9, `missing-${suffix}`)])).status, 400, "存在しない区画への取込を拒否する");
@@ -129,7 +137,7 @@ try {
   assert.equal((await create(13, freedSpot)).status, 200, "仮置きが空けば登録できる");
   assert.equal((await setActive(11, true)).status, 200, "仮置きが埋まっていても利用再開はできる");
   assert.equal((await vehicle(11)).parkingSpotId, null, "仮置きが埋まっていたら位置未設定で再開する");
-  console.log("Vehicle parking passed: registration without NFC, edit, occupied/disabled/missing spots, concurrent registration, required spot, holding spots, later placement, stale version, map data, spot roles and numbers, resume and JSON import with spots");
+  console.log("Vehicle parking passed: registration without NFC, edit, occupied/disabled/missing spots, concurrent registration, required spot, holding spots, later placement, stale version, map data, spot roles and numbers, front spots, resume and JSON import with spots");
 } finally {
   await client.query('DELETE FROM "AuditLog" WHERE "operationId"=ANY($1::text[])', [operationIds]);
   await client.query('DELETE FROM "Vehicle" WHERE "vehicleNumberId" IN (SELECT id FROM "VehicleNumber" WHERE code=ANY($1::text[]))', [codes]);
