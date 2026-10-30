@@ -18,12 +18,15 @@ assert.equal(isWinterTireSeason(new Date("2026-10-31T14:59:59Z")), false, "東�
 assert.equal(isWinterTireSeason(new Date("2026-10-31T15:00:00Z")), true, "東京時間の11月から冬タイヤ凡例を出す");
 assert.equal(isWinterTireSeason(new Date("2027-04-30T14:59:59Z")), true, "東京時間の4月末までは冬タイヤ凡例を出す");
 assert.equal(isWinterTireSeason(new Date("2027-04-30T15:00:00Z")), false, "東京時間の5月から冬タイヤ凡例を出さない");
-const winterIcon = renderToStaticMarkup(createElement(VehicleMapIcon, { vehicle: { color: "#2563eb", hasWinterTires: true, isKei: false }, className: "size-4" }));
+const winterIcon = renderToStaticMarkup(createElement(VehicleMapIcon, { vehicle: { color: "#2563eb", hasBackMonitor: false, hasWinterTires: true, isKei: false }, className: "size-4" }));
 assert.match(winterIcon, /スタッドレスタイヤ装着中/, "装着車の車アイコンへ雪マークの説明を付ける");
-const normalIcon = renderToStaticMarkup(createElement(VehicleMapIcon, { vehicle: { color: "#2563eb", hasWinterTires: false, isKei: false }, className: "size-4" }));
+const normalIcon = renderToStaticMarkup(createElement(VehicleMapIcon, { vehicle: { color: "#2563eb", hasBackMonitor: false, hasWinterTires: false, isKei: false }, className: "size-4" }));
 assert.doesNotMatch(normalIcon, /スタッドレスタイヤ装着中/, "未装着車には雪マークを付けない");
 assert.doesNotMatch(normalIcon, /軽自動車|scale-80/, "普通車は縮めず軽マークも付けない");
-const keiIcon = renderToStaticMarkup(createElement(VehicleMapIcon, { vehicle: { color: "#2563eb", hasWinterTires: false, isKei: true }, className: "size-4" }));
+assert.doesNotMatch(normalIcon, /バックモニター付/, "バックモニターなしの車にはカメラマークを付けない");
+const backMonitorIcon = renderToStaticMarkup(createElement(VehicleMapIcon, { vehicle: { color: "#2563eb", hasBackMonitor: true, hasWinterTires: false, isKei: false }, className: "size-4" }));
+assert.match(backMonitorIcon, /aria-label="バックモニター付"/, "バックモニター付の車アイコンへカメラマークを付ける");
+const keiIcon = renderToStaticMarkup(createElement(VehicleMapIcon, { vehicle: { color: "#2563eb", hasBackMonitor: false, hasWinterTires: false, isKei: true }, className: "size-4" }));
 assert.match(keiIcon, /scale-80/, "軽自動車の車アイコンを縮める");
 assert.match(keiIcon, /aria-label="軽自動車"/, "軽自動車に軽マークを付ける");
 const spotsForNotice: ParkingSpot[] = [
@@ -47,4 +50,4 @@ assert.match(notice, /別の区画を選ぶ/);
 const noOther = renderToStaticMarkup(createElement(CustomerSpotNotice, { spots: [spotsForNotice[0]], vehicle, onChooseOther: () => {} }));
 assert.match(noOther, /いま空いている通常区画はありません/);
 assert.doesNotMatch(noOther, /別の区画を選ぶ/, "選び直す先がなければボタンを出さない");
-console.log("Parking appearance tests passed: empty background only, unchanged borders/occupied/maintenance/off-site, customer spot notice");
+console.log("Parking appearance tests passed: empty background only, back monitor camera mark, unchanged borders/occupied/maintenance/off-site, customer spot notice");

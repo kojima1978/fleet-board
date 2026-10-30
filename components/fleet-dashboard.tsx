@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { AlertTriangle, CalendarClock, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Fuel, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Move, Nfc, Play, Plus, Printer, QrCode, RefreshCw, Snowflake, UserRound, Utensils, Wrench, X } from "lucide-react";
+import { AlertTriangle, CalendarClock, Camera, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Fuel, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Move, Nfc, Play, Plus, Printer, QrCode, RefreshCw, Snowflake, UserRound, Utensils, Wrench, X } from "lucide-react";
 import type { DashboardData, Employee, ParkingSpot, Trip, Vehicle, VehicleMaintenance } from "@/lib/types";
 import { normalizeNfcUid } from "@/lib/nfc";
 import { vehicleDotStyle, vehicleIconStyle } from "@/lib/vehicle-colors";
@@ -525,7 +525,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
               <OperationalAlerts data={data} compact />
               {undoReturn ? <span title={`間違えた場合は、あと${undoSecondsLeft}秒のうちに取り消せます`} className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-bold border-amber-300 bg-amber-50 text-amber-950">{undoReturn.vehicleName}を返却しました<button type="button" disabled={pendingAction} onClick={undoLastReturn} className="ml-0.5 rounded-full border border-amber-300 bg-white px-2 py-0.5 text-amber-900 hover:bg-amber-100 disabled:opacity-60">取り消す<span className="tabular-nums text-amber-700">（{undoSecondsLeft}秒）</span></button><button type="button" aria-label="返却取消の案内を閉じる" onClick={() => setUndoReturn(null)} className="grid size-5 place-items-center rounded-full text-amber-700 hover:bg-amber-100"><X className="size-3.5" /></button></span> : null}
             </div>
-            <div className="flex flex-1 basis-full justify-end md:basis-0">{isWinterTireSeason() && activeVehicles.some((vehicle) => vehicle.hasWinterTires) ? <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-bold text-slate-600" title="雪マークはスタッドレスタイヤ装着中の車両です"><Snowflake className="size-3.5" />雪マーク：スタッドレスタイヤ</span> : null}</div>
+            <div className="flex flex-1 basis-full flex-wrap justify-end gap-x-3 gap-y-1 md:basis-0">{activeVehicles.some((vehicle) => vehicle.hasBackMonitor) ? <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-bold text-slate-600" title="カメラマークはバックモニター付の車両です"><Camera className="size-3.5" />カメラ：バックモニター付</span> : null}{isWinterTireSeason() && activeVehicles.some((vehicle) => vehicle.hasWinterTires) ? <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-bold text-slate-600" title="雪マークはスタッドレスタイヤ装着中の車両です"><Snowflake className="size-3.5" />雪マーク：スタッドレスタイヤ</span> : null}</div>
           </div>
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_240px]">
             <ParkingMap selectedVehicleId={parkingVehicleId} setSelectedVehicleId={setParkingVehicleId} data={data} trips={activeTrips} changedVehicleIds={changedVehicleIds} mutate={mutate} openStart={openStart} openReserve={openReserve} openReturn={openParkingReturn} openFuel={openFuel} openEdit={openEdit} openEnd={openEnd} actorName={employee?.name ?? "共用端末"} currentEmployeeId={employee?.id ?? null} returnRequest={mapReturnRequest} />
@@ -1135,6 +1135,7 @@ function ParkingMap({ selectedVehicleId, setSelectedVehicleId, data, trips, chan
             <div className="min-w-0 flex-1 pr-3">
               <div className="flex flex-wrap items-center gap-1.5"><b className="break-words text-sm">{selectedVehicle.name}</b>{selectedVehicle.status === "MAINTENANCE" ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-800">{MAINTENANCE_KIND_SHORT_LABELS[selectedMaintenance?.kind ?? "ON_SITE"]}</span> : null}</div>
               <p className="break-words text-[10px] font-bold text-slate-500">{selectedVehicle.code} ・ {selectedVehicle.plateNumber}</p>
+              <VehicleEquipmentBadges vehicle={selectedVehicle} />
               {selectedMaintenance ? <p className="text-[10px] font-bold text-slate-500">戻り予定 {selectedMaintenance.plannedEnd ? formatMaintenanceTime(selectedMaintenance.plannedEnd) : "未定"}</p> : null}
               {selectedMaintenance?.note ? <p className="truncate text-[10px] text-slate-500">{selectedMaintenance.note}</p> : null}
             </div>
@@ -1426,8 +1427,9 @@ const vehicleTileContent = (vehicle: Vehicle, horizontal: boolean, offSite = fal
 };
 
 // 軽自動車は枠の大きさを変えずに車を8割に縮め、右下に「軽」マークを付ける。
-export function VehicleMapIcon({ vehicle, className }: { vehicle: Pick<Vehicle, "color" | "hasWinterTires" | "isKei">; className: string }) {
-  return <span className="relative inline-grid shrink-0 place-items-center"><CarFront className={cn(className, vehicle.isKei && "scale-80")} style={vehicleIconStyle(vehicle.color)} />{vehicle.isKei ? <span aria-label="軽自動車" title="軽自動車" className="absolute -bottom-1 -right-1.5 grid size-3 place-items-center rounded-sm bg-yellow-300 text-[7px] font-black leading-none text-yellow-950 @4xl:size-3.5 @4xl:text-[8px]">軽</span> : null}{vehicle.hasWinterTires ? <span aria-label="スタッドレスタイヤ装着中" title="スタッドレスタイヤ装着中" className="absolute -right-1.5 -top-1.5 grid size-3 place-items-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-sm @4xl:size-3.5"><Snowflake aria-hidden className="size-2 @4xl:size-2.5" /></span> : null}</span>;
+// バックモニター付は左上にカメラ、スタッドレス装着中は右上に雪のマークを付ける。
+export function VehicleMapIcon({ vehicle, className }: { vehicle: Pick<Vehicle, "color" | "hasBackMonitor" | "hasWinterTires" | "isKei">; className: string }) {
+  return <span className="relative inline-grid shrink-0 place-items-center"><CarFront className={cn(className, vehicle.isKei && "scale-80")} style={vehicleIconStyle(vehicle.color)} />{vehicle.isKei ? <span aria-label="軽自動車" title="軽自動車" className="absolute -bottom-1 -right-1.5 grid size-3 place-items-center rounded-sm bg-yellow-300 text-[7px] font-black leading-none text-yellow-950 @4xl:size-3.5 @4xl:text-[8px]">軽</span> : null}{vehicle.hasBackMonitor ? <span aria-label="バックモニター付" title="バックモニター付" className="absolute -left-1.5 -top-1.5 grid size-3 place-items-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-sm @4xl:size-3.5"><Camera aria-hidden className="size-2 @4xl:size-2.5" /></span> : null}{vehicle.hasWinterTires ? <span aria-label="スタッドレスタイヤ装着中" title="スタッドレスタイヤ装着中" className="absolute -right-1.5 -top-1.5 grid size-3 place-items-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-sm @4xl:size-3.5"><Snowflake aria-hidden className="size-2 @4xl:size-2.5" /></span> : null}</span>;
 }
 const fuelFillHeight = (level: number) => `${Math.max(6, level * 25)}%`;
 // 残量が変わった車両だけ、少しの間タイルの液面を波打たせる。初回表示では揺らさない。
