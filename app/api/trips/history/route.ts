@@ -18,7 +18,7 @@ export async function GET(request: Request) {
   const pageSize = 50;
   const [records, total, vehicles] = await Promise.all([
     prisma.trip.findMany({ where, orderBy: [{ actualStart: "desc" }, { id: "asc" }], skip: (page - 1) * pageSize, take: pageSize,
-      select: { id: true, status: true, actualStart: true, actualEnd: true, plannedEnd: true,
+      select: { id: true, status: true, actualStart: true, actualEnd: true, plannedEnd: true, returnFuelLevel: true,
         snapshotCapturedAt: true, employeeNameAtStart: true, employeeCodeAtStart: true, departmentNameAtStart: true,
         vehicleNameAtStart: true, vehicleCodeAtStart: true, plateNumberAtStart: true,
         vehicle: { select: vehicleSelect }, employee: { select: { name: true, employeeNumber: { select: { code: true } }, department: { select: { name: true } } } } },
