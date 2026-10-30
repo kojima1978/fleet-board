@@ -7,7 +7,7 @@ import { freeRegularSpots, isCustomerSpot } from "../lib/parking-spots";
 import type { ParkingSpot, Vehicle } from "../lib/types";
 
 const spot: ParkingSpot = { id: "s1", code: "01", x: 0, y: 0, width: 5, height: 5, orientation: "vertical", enabled: true, version: 1, vehicle: null, role: "REGULAR", dedicatedVehicleId: null, dedicatedVehicleName: null, label: null };
-const vehicle: Vehicle = { id: "v1", code: "C001", name: "テスト車", plateNumber: "テスト001", nfcUid: "", qrCode: "", hasEtc: false, hasNavigation: false, hasWinterTires: false, isKei: false, fuelCard: "", fuelLevel: null, color: "#2563eb", status: "AVAILABLE", parkingSpotId: spot.id, active: true, version: 1 };
+const vehicle: Vehicle = { id: "v1", code: "C001", name: "テスト車", plateNumber: "テスト001", nfcUid: "", qrCode: "", hasEtc: false, hasNavigation: false, hasWinterTires: false, hasBackMonitor: false, isKei: false, fuelCard: "", fuelLevel: null, color: "#2563eb", status: "AVAILABLE", parkingSpotId: spot.id, active: true, version: 1 };
 assert.equal(parkingSpotClass(spot), "border-slate-300 bg-white/70");
 assert.equal(parkingSpotClass({ ...spot, role: "TEMPORARY" }), "border-[3px] border-dashed border-slate-300/70 bg-slate-50/50");
 assert.equal(parkingSpotClass({ ...spot, vehicle }), "border-blue-400 bg-blue-50", "駐車中の車両は変更しない");

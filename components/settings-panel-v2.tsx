@@ -44,6 +44,7 @@ const emptyVehicle = {
   hasEtc: false,
   hasNavigation: false,
   hasWinterTires: false,
+  hasBackMonitor: false,
   isKei: false,
   fuelCard: "",
 };
@@ -218,6 +219,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
             hasEtc: editingVehicle.hasEtc,
             hasNavigation: editingVehicle.hasNavigation,
             hasWinterTires: editingVehicle.hasWinterTires,
+            hasBackMonitor: editingVehicle.hasBackMonitor,
             isKei: editingVehicle.isKei,
             fuelCard: editingVehicle.fuelCard,
           }
@@ -357,6 +359,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
       hasEtc: vehicle.hasEtc,
       hasNavigation: vehicle.hasNavigation,
       hasWinterTires: vehicle.hasWinterTires,
+      hasBackMonitor: vehicle.hasBackMonitor,
       isKei: vehicle.isKei,
       fuelCard: vehicle.fuelCard,
     });
@@ -409,6 +412,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
         if (kind === "vehicle" && "hasEtc" in row && typeof (row as ImportRow).hasEtc !== "boolean") throw new Error(`${index + 1}件目のhasEtcはtrueまたはfalseで指定してください`);
         if (kind === "vehicle" && "hasNavigation" in row && typeof (row as ImportRow).hasNavigation !== "boolean") throw new Error(`${index + 1}件目のhasNavigationはtrueまたはfalseで指定してください`);
         if (kind === "vehicle" && "hasWinterTires" in row && typeof (row as ImportRow).hasWinterTires !== "boolean") throw new Error(`${index + 1}件目のhasWinterTiresはtrueまたはfalseで指定してください`);
+        if (kind === "vehicle" && "hasBackMonitor" in row && typeof (row as ImportRow).hasBackMonitor !== "boolean") throw new Error(`${index + 1}件目のhasBackMonitorはtrueまたはfalseで指定してください`);
         if (kind === "vehicle" && "isKei" in row && typeof (row as ImportRow).isKei !== "boolean") throw new Error(`${index + 1}件目のisKeiはtrueまたはfalseで指定してください`);
         const fuelCard = (row as ImportRow).fuelCard;
         if (kind === "vehicle" && fuelCard != null && (typeof fuelCard !== "string" || fuelCard.trim().length > FUEL_CARD_MAX)) throw new Error(`${index + 1}件目のfuelCardは${FUEL_CARD_MAX}文字以内の文字列にしてください`);
@@ -446,6 +450,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
               hasEtc: true,
               hasNavigation: true,
               hasWinterTires: true,
+              hasBackMonitor: true,
               isKei: false,
               fuelCard: "出光 末尾1234",
             },
@@ -457,6 +462,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
               hasEtc: false,
               hasNavigation: true,
               hasWinterTires: false,
+              hasBackMonitor: false,
               isKei: true,
             },
           ];
@@ -508,6 +514,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
               hasEtc: row.hasEtc === true,
               hasNavigation: row.hasNavigation === true,
               hasWinterTires: row.hasWinterTires === true,
+              hasBackMonitor: row.hasBackMonitor === true,
               isKei: row.isKei === true,
               fuelCard: typeof row.fuelCard === "string" ? row.fuelCard.trim() : "",
               ...(importSpots[index] ? { spotId: importSpots[index] } : {}),
@@ -604,6 +611,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
             hasEtc: vehicleForm.hasEtc,
             hasNavigation: vehicleForm.hasNavigation,
             hasWinterTires: vehicleForm.hasWinterTires,
+            hasBackMonitor: vehicleForm.hasBackMonitor,
             isKei: vehicleForm.isKei,
             fuelCard: vehicleForm.fuelCard,
           }
@@ -1342,7 +1350,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                       <div><h3 className="text-sm font-black">装備・表示</h3><p className="mt-1 text-xs text-slate-500">利用者が車両を選ぶときに表示する情報です。</p></div>
                       <div className="mt-4 space-y-4">
                     <Field label="車両装備">
-                      <div className="grid gap-2 sm:grid-cols-3">
+                      <div className="grid gap-2 sm:grid-cols-2">
                         <EquipmentToggle
                           checked={vehicleForm.hasEtc}
                           label="ETC付"
@@ -1364,6 +1372,16 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                           }
                         />
                         <EquipmentToggle
+                          checked={vehicleForm.hasBackMonitor}
+                          label="バックモニター付"
+                          onChange={(checked) =>
+                            setVehicleForm((current) => ({
+                              ...current,
+                              hasBackMonitor: checked,
+                            }))
+                          }
+                        />
+                        <EquipmentToggle
                           checked={vehicleForm.hasWinterTires}
                           label="スタッドレス装着中"
                           onChange={(checked) =>
@@ -1376,18 +1394,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                       </div>
                     </Field>
                     <Field label="車種">
-                      <div className="grid gap-2 sm:grid-cols-3">
-                        <EquipmentToggle
-                          checked={vehicleForm.isKei}
-                          label="軽自動車"
-                          onChange={(checked) =>
-                            setVehicleForm((current) => ({
-                              ...current,
-                              isKei: checked,
-                            }))
-                          }
-                        />
-                      </div>
+                      <VehicleKindChoice isKei={vehicleForm.isKei} onChange={(isKei) => setVehicleForm((current) => ({ ...current, isKei }))} />
                     </Field>
                     <Field label="表示色">
                       <span className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 px-3">
@@ -1961,15 +1968,32 @@ function VehicleStatusBadge({ vehicle, offSite, className }: { vehicle: Pick<Veh
   return <span className={cn("inline-block w-fit shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold", !vehicle.active ? "bg-slate-200 text-slate-600" : vehicle.status === "AVAILABLE" ? "bg-emerald-50 text-emerald-700" : vehicle.status === "MAINTENANCE" ? "bg-amber-100 text-amber-800" : "bg-blue-50 text-blue-700", className)}>{label}</span>;
 }
 
-function EquipmentBadges({ vehicle, className }: { vehicle: Pick<Vehicle, "hasEtc" | "hasNavigation" | "hasWinterTires" | "isKei">; className?: string }) {
-  if (!vehicle.hasEtc && !vehicle.hasNavigation && !vehicle.hasWinterTires && !vehicle.isKei) return null;
+function EquipmentBadges({ vehicle, className }: { vehicle: Pick<Vehicle, "hasEtc" | "hasNavigation" | "hasBackMonitor" | "hasWinterTires" | "isKei">; className?: string }) {
+  if (!vehicle.hasEtc && !vehicle.hasNavigation && !vehicle.hasBackMonitor && !vehicle.hasWinterTires && !vehicle.isKei) return null;
   return (
-    <span className={cn("flex shrink-0 gap-1", className)} aria-label={`装備：${[vehicle.isKei ? "軽自動車" : "", vehicle.hasEtc ? "ETC" : "", vehicle.hasNavigation ? "ナビ" : "", vehicle.hasWinterTires ? "冬タイヤ" : ""].filter(Boolean).join("、")}`}>
+    <span className={cn("flex shrink-0 gap-1", className)} aria-label={`装備：${[vehicle.isKei ? "軽自動車" : "", vehicle.hasEtc ? "ETC" : "", vehicle.hasNavigation ? "ナビ" : "", vehicle.hasBackMonitor ? "バックモニター" : "", vehicle.hasWinterTires ? "冬タイヤ" : ""].filter(Boolean).join("、")}`}>
       {vehicle.isKei ? <span className="rounded bg-yellow-100 px-1.5 py-0.5 text-[9px] font-black text-yellow-800">軽</span> : null}
       {vehicle.hasEtc ? <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[9px] font-black text-sky-700">ETC</span> : null}
       {vehicle.hasNavigation ? <span className="rounded bg-violet-50 px-1.5 py-0.5 text-[9px] font-black text-violet-700">ナビ</span> : null}
+      {vehicle.hasBackMonitor ? <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] font-black text-emerald-700">バックモニター</span> : null}
       {vehicle.hasWinterTires ? <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-black text-slate-700">冬タイヤ</span> : null}
     </span>
+  );
+}
+
+function VehicleKindChoice({ isKei, onChange }: { isKei: boolean; onChange: (isKei: boolean) => void }) {
+  return (
+    <div role="radiogroup" aria-label="車種" className="grid grid-cols-2 gap-2">
+      {[{ value: false, label: "普通車" }, { value: true, label: "軽自動車" }].map((option) => {
+        const selected = option.value === isKei;
+        return (
+          <button key={option.label} type="button" role="radio" aria-checked={selected} onClick={() => onChange(option.value)} className={cn("flex min-h-12 items-center justify-center gap-1.5 rounded-xl border px-3 text-sm font-bold transition", selected ? "border-blue-500 bg-blue-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50")}>
+            {selected ? <Check className="size-4" /> : null}
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

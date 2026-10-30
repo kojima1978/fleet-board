@@ -973,11 +973,12 @@ function Timeline({ data, openReserve, openEdit, highlightTripId, timelineDate, 
   </div></>;
 }
 
-function VehicleEquipmentBadges({ vehicle, compact = false }: { vehicle: Pick<Vehicle, "hasEtc" | "hasNavigation" | "hasWinterTires">; compact?: boolean }) {
-  if (!vehicle.hasEtc && !vehicle.hasNavigation && (!vehicle.hasWinterTires || compact)) return null;
-  return <span className={cn("flex items-center gap-1", compact ? "mt-0.5 justify-center" : "mt-1.5")} aria-label={`装備：${[vehicle.hasEtc ? "ETC" : "", vehicle.hasNavigation ? "ナビ" : "", !compact && vehicle.hasWinterTires ? "冬タイヤ" : ""].filter(Boolean).join("、")}`}>
+function VehicleEquipmentBadges({ vehicle, compact = false }: { vehicle: Pick<Vehicle, "hasEtc" | "hasNavigation" | "hasBackMonitor" | "hasWinterTires">; compact?: boolean }) {
+  if (!vehicle.hasEtc && !vehicle.hasNavigation && (compact || (!vehicle.hasBackMonitor && !vehicle.hasWinterTires))) return null;
+  return <span className={cn("flex items-center gap-1", compact ? "mt-0.5 justify-center" : "mt-1.5")} aria-label={`装備：${[vehicle.hasEtc ? "ETC" : "", vehicle.hasNavigation ? "ナビ" : "", !compact && vehicle.hasBackMonitor ? "バックモニター" : "", !compact && vehicle.hasWinterTires ? "冬タイヤ" : ""].filter(Boolean).join("、")}`}>
     {vehicle.hasEtc ? <span className={cn("rounded bg-sky-100 font-black text-sky-700", compact ? "px-1 text-[6px] leading-[9px] @2xl:text-[7px]" : "px-1.5 py-0.5 text-[10px]")}>ETC</span> : null}
     {vehicle.hasNavigation ? <span className={cn("rounded bg-violet-100 font-black text-violet-700", compact ? "px-1 text-[6px] leading-[9px] @2xl:text-[7px]" : "px-1.5 py-0.5 text-[10px]")}>ナビ</span> : null}
+    {!compact && vehicle.hasBackMonitor ? <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-black text-emerald-700">バックモニター</span> : null}
     {!compact && vehicle.hasWinterTires ? <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-black text-slate-700">冬タイヤ</span> : null}
   </span>;
 }

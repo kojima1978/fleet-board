@@ -1,0 +1,2 @@
+ALTER TABLE "Vehicle"
+ADD COLUMN "hasBackMonitor" BOOLEAN NOT NULL DEFAULT false;
