@@ -41,7 +41,7 @@ const auditActorBody = (currentEmployeeId?: string | null, fromSettings = false)
 
 export const activeMaintenanceOf = (data: Pick<DashboardData, "maintenances">, vehicleId: string) => data.maintenances.find((item) => item.vehicleId === vehicleId && item.status === "ACTIVE") ?? null;
 
-export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, currentEmployeeId, initialMaintenanceId, initialSpotId = "", onChooseSpot, onClose, onDone }: { vehicle: Vehicle; data: DashboardData; mutate: Mutate; fromSettings?: boolean; currentEmployeeId?: string | null; initialMaintenanceId?: string; initialSpotId?: string; onChooseSpot?: () => void; onClose: () => void; onDone?: () => void }) {
+export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, currentEmployeeId, initialMaintenanceId, onChooseSpot, onClose, onDone }: { vehicle: Vehicle; data: DashboardData; mutate: Mutate; fromSettings?: boolean; currentEmployeeId?: string | null; initialMaintenanceId?: string; onChooseSpot?: () => void; onClose: () => void; onDone?: () => void }) {
   const active = activeMaintenanceOf(data, vehicle.id);
   const scheduled = data.maintenances.filter((item) => item.vehicleId === vehicle.id && item.status === "SCHEDULED");
   const initialScheduled = initialMaintenanceId ? scheduled.find((item) => item.id === initialMaintenanceId) ?? null : null;
@@ -52,7 +52,7 @@ export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, current
   const [note, setNote] = useState(active?.note ?? "");
   const [start, setStart] = useState("");
   const [end, setEnd] = useState(toLocalInput(active?.plannedEnd ?? null));
-  const [spotId, setSpotId] = useState(initialSpotId);
+  const [spotId, setSpotId] = useState("");
   const [fuelLevel, setFuelLevel] = useState(vehicle.fuelLevel);
   // 車検の日程はずれることがあるため、登録済みの予定は開始予定・戻り予定・備考を直せる。
   const [editing, setEditing] = useState<{ id: string; start: string; end: string; note: string } | null>(() => initialScheduled ? { id: initialScheduled.id, start: toLocalInput(initialScheduled.plannedStart), end: toLocalInput(initialScheduled.plannedEnd), note: initialScheduled.note ?? "" } : null);
