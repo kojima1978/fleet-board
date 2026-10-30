@@ -553,7 +553,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
           </div> : null}
       </main>
 
-      {fuelNotice?.notice.displayMode === "MODAL" && dialog === null && !pendingAction ? <DialogShell title={`返却完了・ガソリン残量 ${formatFuelLevel(fuelNotice.notice.level)}`} subtitle="返却時のガソリン残量についてのご案内" onClose={() => setFuelNotice(null)} footer={<Button className="min-h-12 w-full" onClick={() => setFuelNotice(null)}>確認しました</Button>}><FuelReturnNoticeMessage key={fuelNotice.operationId} notice={fuelNotice.notice} kiosk={fuelNotice.kiosk} /></DialogShell> : null}
+      {fuelNotice?.notice.displayMode === "MODAL" && dialog === null && !pendingAction ? <FuelReturnNoticeDialog key={fuelNotice.operationId} notice={fuelNotice.notice} kiosk={fuelNotice.kiosk} onClose={() => setFuelNotice(null)} /> : null}
       {dialog === "nfc" && <NfcDialog employees={activeEmployees} vehicles={activeVehicles} onEmployee={(person) => { authenticateEmployee(person); setDialog(null); }} onVehicle={(vehicle) => { setDialog(null); openVehicleFromNfc(vehicle); }} onClose={() => setDialog(null)} />}
       {dialog === "user" && <UserPickerDialog kiosk={kiosk} employees={activeEmployees} currentId={employee?.id ?? null} nfcEnabled={kiosk && nfcAvailable} onSelect={(person) => { authenticateEmployee(person); setDialog(null); }} onClose={() => setDialog(null)} />}
       {dialog === "start" && <StartDialog key={`${startIntent}:${selectedVehicleId}`} intent={startIntent} kiosk={kiosk} submitting={pendingAction} employees={activeEmployees} vehicles={startIntent === "scheduled" ? activeVehicles : available} trips={data.trips} spots={data.spots} initialEmployee={employee?.active ? employee : null} initialVehicleId={selectedVehicleId} onClose={() => setDialog(null)} onSubmit={async (values) => { const identifiedEmployee = activeEmployees.find((person) => person.id === values.employeeId) ?? null; const scheduled = values.plannedStart !== null; const ok = await mutate(scheduled ? { action: "reserve", employeeId: values.employeeId, vehicleId: values.vehicleId, plannedStart: values.plannedStart!, minutes: values.minutes, actorName: values.employeeName, actorEmployeeId: values.employeeId } : { action: "start", employeeId: values.employeeId, vehicleId: values.vehicleId, minutes: values.minutes, actorName: values.employeeName, actorEmployeeId: values.employeeId }, scheduled ? "予約を登録しました" : "利用を開始しました"); if (ok) { setParkingVehicleId(null); setDialog(null); } if (ok && identifiedEmployee) { if (kiosk) finishKioskCheck(); else if (!employee) selectEmployee(identifiedEmployee); if (!scheduled) window.location.assign(`/timeline?started=1&vehicleId=${encodeURIComponent(values.vehicleId)}&employeeId=${encodeURIComponent(values.employeeId)}`); } }} />}
@@ -572,6 +572,23 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
 
 function SettingsSectionLoading() {
   return <Card role="status" className="grid min-h-48 place-items-center"><div className="text-center"><LoaderCircle className="mx-auto size-7 animate-spin text-blue-600" /><p className="mt-2 text-sm font-bold text-slate-600">設定を読み込み中</p></div></Card>;
+}
+
+const FUEL_NOTICE_AUTO_CLOSE_SECONDS = 10;
+function FuelReturnNoticeDialog({ notice, kiosk, onClose }: { notice: FuelReturnNotice; kiosk: boolean; onClose: () => void }) {
+  const [remaining, setRemaining] = useState(FUEL_NOTICE_AUTO_CLOSE_SECONDS);
+  const [pointerPaused, setPointerPaused] = useState(false);
+  const [audioPlaying, setAudioPlaying] = useState(false);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    if (pointerPaused || remaining === 0) return;
+    const timer = window.setTimeout(() => setRemaining((seconds) => Math.max(0, seconds - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [pointerPaused, remaining]);
+  useEffect(() => { if (remaining === 0 && !audioPlaying && !pointerPaused) onCloseRef.current(); }, [audioPlaying, pointerPaused, remaining]);
+  const buttonLabel = remaining > 0 ? `確認しました（あと${remaining}秒）` : audioPlaying ? "音声終了後に閉じます" : "確認しました";
+  return <DialogShell title={`返却完了・ガソリン残量 ${formatFuelLevel(notice.level)}`} subtitle="返却時のガソリン残量についてのご案内" onClose={onClose} onPointerPresenceChange={setPointerPaused} onUserInteraction={() => setRemaining(FUEL_NOTICE_AUTO_CLOSE_SECONDS)} footer={<Button className="min-h-12 w-full" onClick={onClose}>{buttonLabel}</Button>}><FuelReturnNoticeMessage notice={notice} kiosk={kiosk} onAudioPlaybackChange={setAudioPlaying} /></DialogShell>;
 }
 
 function ReturnDriveAnimation({ animation, onDone }: { animation: ReturnAnimation; onDone: () => void }) {
@@ -1232,7 +1249,7 @@ function ParkingMap({ selectedVehicleId, setSelectedVehicleId, data, trips, chan
   </>;
 }
 
-function DialogShell({ title, subtitle, onClose, children, footer, wide = false, busy = false }: { title: string; subtitle: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; busy?: boolean }) {
+function DialogShell({ title, subtitle, onClose, children, footer, wide = false, busy = false, onPointerPresenceChange, onUserInteraction }: { title: string; subtitle: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; busy?: boolean; onPointerPresenceChange?: (inside: boolean) => void; onUserInteraction?: () => void }) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
@@ -1257,7 +1274,7 @@ function DialogShell({ title, subtitle, onClose, children, footer, wide = false,
     document.addEventListener("keydown", onKeyDown);
     return () => { document.removeEventListener("keydown", onKeyDown); returnFocus.current?.focus(); };
   }, []);
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-3 backdrop-blur-sm sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}><div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-busy={busy} className={cn("max-h-[94vh] w-full rounded-2xl bg-white shadow-2xl sm:rounded-3xl", footer ? "flex flex-col overflow-hidden" : "overflow-y-auto", wide ? "max-w-3xl" : "max-w-lg")}><div className="sticky top-0 z-10 flex shrink-0 items-start justify-between border-b border-slate-100 bg-white p-4 sm:p-5"><div><div className="flex flex-wrap items-center gap-2"><h2 id={titleId} className="text-lg font-black">{title}</h2>{busy ? <span role="status" className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-blue-700"><LoaderCircle className="size-3 animate-spin" />処理中</span> : null}</div><p className="mt-1 text-xs text-slate-500">{subtitle}</p></div><button aria-label={busy ? "処理中は閉じられません" : "閉じる"} disabled={busy} onClick={onClose} className="grid size-11 shrink-0 place-items-center rounded-xl bg-slate-100 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-40"><X className="size-4" /></button></div><div className={cn("p-4 sm:p-5", footer && "min-h-0 overflow-y-auto overscroll-contain")}>{children}</div>{footer ? <div className="shrink-0 border-t border-slate-200 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-5">{footer}</div> : null}</div></div>;
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-3 backdrop-blur-sm sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}><div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-busy={busy} onMouseEnter={() => onPointerPresenceChange?.(true)} onMouseLeave={() => onPointerPresenceChange?.(false)} onKeyDownCapture={onUserInteraction} className={cn("max-h-[94vh] w-full rounded-2xl bg-white shadow-2xl sm:rounded-3xl", footer ? "flex flex-col overflow-hidden" : "overflow-y-auto", wide ? "max-w-3xl" : "max-w-lg")}><div className="sticky top-0 z-10 flex shrink-0 items-start justify-between border-b border-slate-100 bg-white p-4 sm:p-5"><div><div className="flex flex-wrap items-center gap-2"><h2 id={titleId} className="text-lg font-black">{title}</h2>{busy ? <span role="status" className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-blue-700"><LoaderCircle className="size-3 animate-spin" />処理中</span> : null}</div><p className="mt-1 text-xs text-slate-500">{subtitle}</p></div><button aria-label={busy ? "処理中は閉じられません" : "閉じる"} disabled={busy} onClick={onClose} className="grid size-11 shrink-0 place-items-center rounded-xl bg-slate-100 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-40"><X className="size-4" /></button></div><div className={cn("p-4 sm:p-5", footer && "min-h-0 overflow-y-auto overscroll-contain")}>{children}</div>{footer ? <div className="shrink-0 border-t border-slate-200 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-5">{footer}</div> : null}</div></div>;
 }
 
 function OperationSummary({ items, tone = "slate" }: { items: { label: string; value: ReactNode }[]; tone?: "slate" | "violet" | "emerald" }) {
