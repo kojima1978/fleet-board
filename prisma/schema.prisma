@@ -21,6 +21,20 @@ model FuelReturnNotice {
   updatedAt   DateTime @updatedAt
 }
 
+model FuelStartNotice {
+  level        Int      @id
+  displayMode  String   @default("NONE")
+  enabled      Boolean  @default(false)
+  animated     Boolean  @default(false)
+  audioEnabled Boolean  @default(false)
+  message      String
+  audioBase64  String?
+  audioMime    String?
+  audioName    String?
+  version      Int      @default(1)
+  updatedAt    DateTime @updatedAt
+}
+
 enum VehicleStatus {
   AVAILABLE
   RESERVED

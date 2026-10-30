@@ -66,6 +66,7 @@ export const fleetBackupSchema = z.object({
     // 整備記録を追加する前のバックアップにはないため、空として読む。
     vehicleMaintenances: z.array(vehicleMaintenanceSchema).max(100_000).default([]),
     fuelReturnNotices: z.array(fuelReturnNoticeSchema).max(5).default([]),
+    fuelStartNotices: z.array(fuelReturnNoticeSchema).max(5).default([]),
     auditLogs: z.array(auditLogSchema).max(300_000),
   }).strict(),
 }).strict();
@@ -137,8 +138,9 @@ export function parseFleetBackup(value: unknown): FleetBackup {
   }
   data.nfcTags = upgradeDummyNfcUids(data);
   const collections = Object.entries(data) as [keyof typeof data, Array<{ id: string }>][];
-  for (const [name, items] of collections) { if (name !== "fuelReturnNotices") assertUnique(items, (item) => item.id, `${name}のID`); }
+  for (const [name, items] of collections) { if (name !== "fuelReturnNotices" && name !== "fuelStartNotices") assertUnique(items, (item) => item.id, `${name}のID`); }
   assertUnique(data.fuelReturnNotices, (item) => String(item.level), "返却時ガソリン案内");
+  assertUnique(data.fuelStartNotices, (item) => String(item.level), "利用開始時ガソリン案内");
   assertUnique(data.departments, (item) => item.name, "部署名");
   assertUnique(data.employeeNumbers, (item) => item.code, "社員番号");
   assertUnique(data.vehicleNumbers, (item) => item.code, "車両番号");
@@ -195,7 +197,7 @@ export function backupCounts(backup: FleetBackup): FleetBackupCounts {
 export async function createFleetBackup(): Promise<FleetBackup> {
   const systemPromise = getApplicationSystemStatus();
   const data = await prisma.$transaction(async (tx) => {
-    const [departments, employeeNumbers, vehicleNumbers, parkingSpots, nfcTags, employees, vehicles, nfcAssignments, trips, vehicleMaintenances, auditLogs, fuelReturnNotices] = await Promise.all([
+    const [departments, employeeNumbers, vehicleNumbers, parkingSpots, nfcTags, employees, vehicles, nfcAssignments, trips, vehicleMaintenances, auditLogs, fuelReturnNotices, fuelStartNotices] = await Promise.all([
       tx.department.findMany({ orderBy: { id: "asc" } }),
       tx.employeeNumber.findMany({ orderBy: { id: "asc" } }),
       tx.vehicleNumber.findMany({ orderBy: { id: "asc" } }),
@@ -208,8 +210,9 @@ export async function createFleetBackup(): Promise<FleetBackup> {
       tx.vehicleMaintenance.findMany({ orderBy: { id: "asc" } }),
       tx.auditLog.findMany({ orderBy: { id: "asc" } }),
       tx.fuelReturnNotice.findMany({ orderBy: { level: "asc" } }),
+      tx.fuelStartNotice.findMany({ orderBy: { level: "asc" } }),
     ]);
-    return { departments, employeeNumbers, vehicleNumbers, parkingSpots, nfcTags, employees, vehicles, nfcAssignments, trips, vehicleMaintenances, auditLogs, fuelReturnNotices };
+    return { departments, employeeNumbers, vehicleNumbers, parkingSpots, nfcTags, employees, vehicles, nfcAssignments, trips, vehicleMaintenances, auditLogs, fuelReturnNotices, fuelStartNotices };
   }, { isolationLevel: "RepeatableRead", timeout: 30_000 });
   const system = await systemPromise;
   return JSON.parse(JSON.stringify({ format: "fleetflow-json-backup", formatVersion: JSON_BACKUP_FORMAT_VERSION, exportedAt: new Date().toISOString(), source: { appVersion: system.appVersion, schemaVersion: system.schemaVersion }, data })) as FleetBackup;
@@ -231,7 +234,8 @@ export async function restoreFleetBackup(backup: FleetBackup) {
   const data = backup.data;
   await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('fleetflow-json-restore'))::text AS restore_lock`;
-    await tx.$executeRawUnsafe('LOCK TABLE "FuelReturnNotice", "AuditLog", "NfcAssignment", "Trip", "VehicleMaintenance", "Employee", "Vehicle", "NfcTag", "EmployeeNumber", "VehicleNumber", "Department", "ParkingSpot" IN ACCESS EXCLUSIVE MODE');
+    await tx.$executeRawUnsafe('LOCK TABLE "FuelStartNotice", "FuelReturnNotice", "AuditLog", "NfcAssignment", "Trip", "VehicleMaintenance", "Employee", "Vehicle", "NfcTag", "EmployeeNumber", "VehicleNumber", "Department", "ParkingSpot" IN ACCESS EXCLUSIVE MODE');
+    await tx.fuelStartNotice.deleteMany();
     await tx.fuelReturnNotice.deleteMany();
     await tx.auditLog.deleteMany();
     await tx.nfcAssignment.deleteMany();
@@ -256,6 +260,7 @@ export async function restoreFleetBackup(backup: FleetBackup) {
     if (data.trips.length) await tx.trip.createMany({ data: data.trips.map((item) => ({ ...item, plannedStart: asDate(item.plannedStart), plannedEnd: asDate(item.plannedEnd), actualStart: asNullableDate(item.actualStart), actualEnd: asNullableDate(item.actualEnd), snapshotCapturedAt: asNullableDate(item.snapshotCapturedAt), createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
     if (data.vehicleMaintenances.length) await tx.vehicleMaintenance.createMany({ data: data.vehicleMaintenances.map((item) => ({ ...item, plannedStart: asDate(item.plannedStart), plannedEnd: asNullableDate(item.plannedEnd), actualStart: asNullableDate(item.actualStart), actualEnd: asNullableDate(item.actualEnd), createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
     if (data.fuelReturnNotices.length) await tx.fuelReturnNotice.createMany({ data: data.fuelReturnNotices.map((item) => ({ ...item, updatedAt: asDate(item.updatedAt) })) });
+    if (data.fuelStartNotices.length) await tx.fuelStartNotice.createMany({ data: data.fuelStartNotices.map((item) => ({ ...item, updatedAt: asDate(item.updatedAt) })) });
     if (data.auditLogs.length) await tx.auditLog.createMany({ data: data.auditLogs.map((item) => ({ ...item, createdAt: asDate(item.createdAt) })) });
     await tx.auditLog.create({ data: { operationId: randomUUID(), actorName: "設定画面", action: "JSON一括復元", targetType: "System", targetId: backup.exportedAt, description: `${backup.exportedAt}に書き出したJSONバックアップを復元` } });
   }, { isolationLevel: "Serializable", maxWait: 10_000, timeout: 120_000 });

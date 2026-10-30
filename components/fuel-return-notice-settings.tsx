@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Check, Fuel, LoaderCircle, Play, Save, Trash2, Upload, Volume2, VolumeX } from "lucide-react";
-import { FUEL_NOTICE_AUDIO_MAX_BYTES, FUEL_NOTICE_DISPLAY_MODES, fuelNoticeDisplayModeLabel, type FuelNoticeDisplayMode, type FuelReturnNotice } from "@/lib/fuel-return-notice";
+import { FUEL_NOTICE_AUDIO_MAX_BYTES, FUEL_NOTICE_DISPLAY_MODES, fuelNoticeDisplayModeLabel, type FuelNoticeDisplayMode, type FuelNoticePhase, type FuelReturnNotice } from "@/lib/fuel-return-notice";
 import { formatFuelLevel } from "@/lib/fuel-level";
 import { Button, Card, cn } from "./ui";
 
@@ -10,6 +10,7 @@ type UploadFile = { fileName: string; base64: string };
 
 export function FuelReturnNoticeSettings() {
   const [notices, setNotices] = useState<FuelReturnNotice[]>([]);
+  const [phase, setPhase] = useState<FuelNoticePhase>("RETURN");
   const [selectedLevel, setSelectedLevel] = useState(1);
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
@@ -19,7 +20,8 @@ export function FuelReturnNoticeSettings() {
     let cancelled = false;
     const timer = window.setTimeout(() => controller.abort(), 8000);
     setError("");
-    void fetch("/api/settings/fuel-return", { cache: "no-store", signal: controller.signal }).then(async (response) => {
+    setNotices([]);
+    void fetch(`/api/settings/fuel-return?phase=${phase}`, { cache: "no-store", signal: controller.signal }).then(async (response) => {
       if (!response.ok) throw new Error();
       const result = await response.json();
       if (!cancelled) setNotices(result.notices);
@@ -27,15 +29,16 @@ export function FuelReturnNoticeSettings() {
       if (!cancelled) setError(controller.signal.aborted ? "応答を確認できませんでした" : "案内設定を読み込めませんでした");
     }).finally(() => window.clearTimeout(timer));
     return () => { cancelled = true; controller.abort(); window.clearTimeout(timer); };
-  }, [reload]);
+  }, [phase, reload]);
 
   const enabledCount = notices.filter((notice) => notice.displayMode !== "NONE").length;
   return <Card className="w-full max-w-[900px] overflow-hidden border-slate-200 bg-white p-0">
     <div className="flex flex-wrap items-start gap-3 border-b border-slate-100 px-4 py-4 sm:px-5">
       <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600"><Fuel className="size-5" /></span>
-      <div className="mr-auto min-w-0"><h3 className="text-base font-black text-slate-900">ガソリン残量別の案内</h3><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">返却を保存した後、選択された残量の案内を表示します。音声は共用端末だけで1回再生します。</p></div>
+      <div className="mr-auto min-w-0"><h3 className="text-base font-black text-slate-900">ガソリン残量別の案内</h3><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">利用開始時と返却時の案内を残量ごとに設定します。音声は共用端末だけで1回再生します。</p></div>
       {notices.length ? <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-600">5段階中 {enabledCount}件を使用</span> : null}
     </div>
+    <div role="tablist" aria-label="案内するタイミング" className="grid grid-cols-2 gap-1 border-b border-slate-100 bg-white px-4 py-3 sm:px-5"><button type="button" role="tab" aria-selected={phase === "START"} onClick={() => setPhase("START")} className={cn("min-h-10 rounded-lg text-sm font-bold transition", phase === "START" ? "bg-blue-50 text-blue-700 ring-1 ring-blue-200" : "text-slate-500 hover:bg-slate-50")}>利用開始時</button><button type="button" role="tab" aria-selected={phase === "RETURN"} onClick={() => setPhase("RETURN")} className={cn("min-h-10 rounded-lg text-sm font-bold transition", phase === "RETURN" ? "bg-blue-50 text-blue-700 ring-1 ring-blue-200" : "text-slate-500 hover:bg-slate-50")}>返却時</button></div>
     {error ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-4 text-sm text-rose-700 sm:px-5"><span>{error}</span><Button variant="secondary" onClick={() => setReload((value) => value + 1)}>再読み込み</Button></div> : null}
     {!error && !notices.length ? <div role="status" className="flex items-center gap-2 px-5 py-8 text-sm text-slate-500"><LoaderCircle className="size-4 animate-spin" />設定を読み込んでいます</div> : null}
     {notices.length ? <div role="tablist" aria-label="ガソリン残量" className="grid grid-cols-5 gap-1 border-b border-slate-100 bg-slate-50/70 p-2 sm:gap-2 sm:px-5">{notices.map((notice) => <button key={notice.level} type="button" role="tab" aria-selected={selectedLevel === notice.level} aria-controls={`fuel-notice-panel-${notice.level}`} onClick={() => setSelectedLevel(notice.level)} className={cn("flex min-h-12 items-center justify-center gap-1.5 rounded-xl border text-sm font-black transition", selectedLevel === notice.level ? "border-slate-300 bg-white text-slate-900 shadow-sm" : "border-transparent text-slate-500 hover:border-slate-200 hover:bg-white")}><span className={cn("size-2 rounded-full", notice.displayMode !== "NONE" ? "bg-emerald-500" : "bg-slate-300")} /><span className="tabular-nums">{formatFuelLevel(notice.level)}</span><span className="hidden text-[10px] font-bold sm:inline">{notice.displayMode !== "NONE" ? "ON" : "OFF"}</span></button>)}</div> : null}
@@ -80,7 +83,7 @@ function NoticeEditor({ notice, onSaved }: { notice: FuelReturnNotice; onSaved: 
     const timer = window.setTimeout(() => controller.abort(), 10_000);
     try {
       player.current?.pause();
-      const response = await fetch("/api/settings/fuel-return", { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ level: notice.level, version: notice.version, displayMode, audioEnabled, message, ...(audio !== undefined ? { audio } : {}) }) });
+      const response = await fetch("/api/settings/fuel-return", { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ phase: notice.phase, level: notice.level, version: notice.version, displayMode, audioEnabled, message, ...(audio !== undefined ? { audio } : {}) }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.message);
       onSaved(result.notice);

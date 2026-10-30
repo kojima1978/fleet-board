@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { FUEL_NOTICE_LEVELS, fuelNoticeDisplayModeLabel, fuelNoticeLegacyFlags, fuelNoticeUpdateSchema } from "@/lib/fuel-return-notice";
+import { FUEL_NOTICE_LEVELS, fuelNoticeDisplayModeLabel, fuelNoticeLegacyFlags, fuelNoticePhase, fuelNoticeUpdateSchema } from "@/lib/fuel-return-notice";
 import { formatFuelLevel } from "@/lib/fuel-level";
-import { readFuelReturnNotice, validateNoticeAudio } from "@/lib/fuel-return-notice-store";
+import { readFuelNotice, validateNoticeAudio } from "@/lib/fuel-return-notice-store";
 import { consumeRateLimit, isSameOriginRequest, readJsonBody, requestClientKey } from "@/lib/request-security";
 
 export const dynamic = "force-dynamic";
-export async function GET() {
-  return NextResponse.json({ notices: await Promise.all(FUEL_NOTICE_LEVELS.map(readFuelReturnNotice)) }, { headers: { "Cache-Control": "no-store" } });
+export async function GET(request: Request = new Request("http://localhost/api/settings/fuel-return")) {
+  const phase = fuelNoticePhase.catch("RETURN").parse(new URL(request.url).searchParams.get("phase")?.toUpperCase());
+  return NextResponse.json({ notices: await Promise.all(FUEL_NOTICE_LEVELS.map((level) => readFuelNotice(level, phase))) }, { headers: { "Cache-Control": "no-store" } });
 }
 export async function POST(request: Request) {
   if (!isSameOriginRequest(request)) return NextResponse.json({ message: "送信元を確認できません" }, { status: 403 });
@@ -18,14 +19,16 @@ export async function POST(request: Request) {
     const audio = input.audio === undefined ? {} : input.audio === null ? { audioBase64: null, audioMime: null, audioName: null } : { audioBase64: input.audio.base64, audioMime: validateNoticeAudio(input.audio.base64), audioName: input.audio.fileName };
     await prisma.$transaction(async (tx) => {
       const data = { displayMode: input.displayMode, ...fuelNoticeLegacyFlags(input.displayMode), audioEnabled: input.audioEnabled, message: input.message, ...audio };
-      if (input.version === 0) await tx.fuelReturnNotice.create({ data: { level: input.level, ...data } });
-      else {
-        const result = await tx.fuelReturnNotice.updateMany({ where: { level: input.level, version: input.version }, data: { ...data, version: { increment: 1 } } });
+      if (input.version === 0) {
+        if (input.phase === "START") await tx.fuelStartNotice.create({ data: { level: input.level, ...data } });
+        else await tx.fuelReturnNotice.create({ data: { level: input.level, ...data } });
+      } else {
+        const result = input.phase === "START" ? await tx.fuelStartNotice.updateMany({ where: { level: input.level, version: input.version }, data: { ...data, version: { increment: 1 } } }) : await tx.fuelReturnNotice.updateMany({ where: { level: input.level, version: input.version }, data: { ...data, version: { increment: 1 } } });
         if (result.count !== 1) throw new Error("CONFLICT");
       }
-      await tx.auditLog.create({ data: { actorName: "設定画面", action: "返却時ガソリン案内変更", targetType: "FuelReturnNotice", targetId: String(input.level), description: `${formatFuelLevel(input.level)}を${fuelNoticeDisplayModeLabel[input.displayMode]}・音声${input.audioEnabled ? "あり" : "なし"}に設定${input.audio !== undefined ? "・音声ファイルを変更" : ""}` } });
+      await tx.auditLog.create({ data: { actorName: "設定画面", action: `${input.phase === "START" ? "利用開始時" : "返却時"}ガソリン案内変更`, targetType: input.phase === "START" ? "FuelStartNotice" : "FuelReturnNotice", targetId: String(input.level), description: `${formatFuelLevel(input.level)}を${fuelNoticeDisplayModeLabel[input.displayMode]}・音声${input.audioEnabled ? "あり" : "なし"}に設定${input.audio !== undefined ? "・音声ファイルを変更" : ""}` } });
     });
-    return NextResponse.json({ notice: await readFuelReturnNotice(input.level) });
+    return NextResponse.json({ notice: await readFuelNotice(input.level, input.phase) });
   } catch (error) {
     const code = (error as { code?: string }).code;
     if (code === "P2002" || (error as Error).message === "CONFLICT") return NextResponse.json({ message: "他の端末で変更されています。再読み込みしてやり直してください" }, { status: 409 });

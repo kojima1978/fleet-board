@@ -37,6 +37,8 @@ console.log("Fuel label tests passed: compact/detail labels, all five levels and
 const notice = { ...defaultFuelReturnNotice(1), audioUrl: "/api/settings/fuel-return/1/audio?v=1" };
 assert.deepEqual([4, 3, 2, 1, 0].map((level) => defaultFuelReturnNotice(level as 0 | 1 | 2 | 3 | 4).enabled), [false, false, false, true, true], "初期設定は1/4以下だけ案内する");
 assert.deepEqual([4, 3, 2, 1, 0].map((level) => defaultFuelReturnNotice(level as 0 | 1 | 2 | 3 | 4).displayMode), ["NONE", "NONE", "NONE", "MODAL", "MODAL"], "初期設定は1/4以下だけポップ表示する");
+assert.deepEqual([4, 3, 2, 1, 0].map((level) => defaultFuelReturnNotice(level as 0 | 1 | 2 | 3 | 4, "START").displayMode), ["NONE", "NONE", "MESSAGE", "EMPHASIZED", "EMPHASIZED"], "利用開始時は1/2をメッセージ、1/4以下を強調表示する");
+assert.ok([4, 3, 2, 1, 0].every((level) => !defaultFuelReturnNotice(level as 0 | 1 | 2 | 3 | 4, "START").audioEnabled), "利用開始時の音声は初期状態で無効");
 assert.match(renderToStaticMarkup(<FuelReturnNoticeMessage notice={notice} kiosk={false} />), /fuel-reminder-attention/, "強調ONではアニメーション用クラスを付ける");
 assert.doesNotMatch(renderToStaticMarkup(<FuelReturnNoticeMessage notice={{ ...notice, displayMode: "MESSAGE", animated: false }} kiosk={false} />), /fuel-reminder-attention/, "メッセージ表示では静止表示にする");
 assert.match(renderToStaticMarkup(<FuelReturnNoticeMessage notice={{ ...notice, displayMode: "EMPHASIZED" }} kiosk={false} />), /fuel-reminder-attention/, "強調表示ではアニメーション用クラスを付ける");
