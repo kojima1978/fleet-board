@@ -12,11 +12,11 @@ async function main() {
     const otherVehicle = await prisma.vehicle.create({ data: { name: "別の車", vehicleNumber: { create: { code: "C002" } }, plateNumber: "履歴002", qrToken: crypto.randomUUID() } });
     const at = (value: string) => new Date(`${value}:00+09:00`);
     const base = { vehicleId: vehicle.id, employeeId: employee.id, plannedStart: at("2026-01-01T22:00"), plannedEnd: at("2026-01-02T02:00") };
-    const overnight = await prisma.trip.create({ data: { ...base, actualStart: base.plannedStart, actualEnd: base.plannedEnd, status: "COMPLETED" } });
+    const overnight = await prisma.trip.create({ data: { ...base, actualStart: base.plannedStart, actualEnd: base.plannedEnd, status: "COMPLETED", returnFuelLevel: 3 } });
     const ongoing = await prisma.trip.create({ data: { ...base, employeeId: other.id, actualStart: at("2026-01-03T10:00"), status: "IN_USE" } });
     await prisma.trip.createMany({ data: [
       { ...base, status: "RESERVED" }, { ...base, status: "CANCELLED" },
-      { ...base, status: "COMPLETED", actualStart: at("2026-01-01T10:00"), actualEnd: at("2026-01-01T11:00") },
+      { ...base, status: "COMPLETED", actualStart: at("2026-01-01T10:00"), actualEnd: at("2026-01-01T11:00"), returnFuelLevel: 0 },
       { ...base, vehicleId: otherVehicle.id, status: "COMPLETED", actualStart: base.plannedStart, actualEnd: base.plannedEnd },
     ] });
     async function get(params: Record<string, string> = {}) {
@@ -31,6 +31,10 @@ async function main() {
     assert.equal(result.response.status, 200);
     assert.deepEqual(result.data.records.map((item: { id: string }) => item.id), [overnight.id]);
     assert.equal(result.data.records[0].employee.name, employee.name);
+    assert.equal(result.data.records[0].returnFuelLevel, 3, "返却時の保存値を利用者の同じ記録に返す");
+    const fuelRecords = await get({ vehicleId: vehicle.id });
+    assert.ok(fuelRecords.data.records.some((trip: { returnFuelLevel: number | null }) => trip.returnFuelLevel === 0), "空の0も欠落させない");
+    assert.equal((await get({ vehicleId: otherVehicle.id })).data.records[0].returnFuelLevel, null, "未入力を推測しない");
     assert.equal(result.data.records[0].actualStart, base.plannedStart.toISOString());
     assert.equal(result.data.records[0].actualEnd, base.plannedEnd.toISOString());
     assert.equal(result.data.records[0].vehicle.vehicleNumber.code, "C001");

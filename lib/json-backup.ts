@@ -1,3 +1,5 @@
+import { fuelNoticeLevel, fuelNoticeMessage, FUEL_NOTICE_AUDIO_MAX_BYTES } from "@/lib/fuel-return-notice";
+import { validateNoticeAudio } from "@/lib/fuel-return-notice-store";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -38,6 +40,14 @@ const tripSchema = z.object({ id, employeeId: id, vehicleId: id, plannedStart: d
 const vehicleMaintenanceSchema = z.object({ id, vehicleId: id, kind: z.enum(["ON_SITE", "OFF_SITE"]), status: z.enum(["SCHEDULED", "ACTIVE", "COMPLETED", "CANCELLED"]), note: z.string().max(500).nullable(), plannedStart: dateTime, plannedEnd: nullableDateTime, actualStart: nullableDateTime, actualEnd: nullableDateTime, returnSpotCode: z.string().max(100).nullable(), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
 const auditLogSchema = z.object({ id, operationId: z.string().max(100).nullable(), actorEmployeeId: id.nullable(), actorName: z.string().max(100), action: z.string().max(100), targetType: z.string().max(100), targetId: z.string().max(100), description: z.string().max(1000), createdAt: dateTime }).strict();
 
+const fuelReturnNoticeSchema = z.object({ level: fuelNoticeLevel, enabled: z.boolean(), message: fuelNoticeMessage, version: z.number().int().positive(), updatedAt: dateTime,
+  audioBase64: z.string().max(Math.ceil(FUEL_NOTICE_AUDIO_MAX_BYTES / 3) * 4).nullable(), audioMime: z.enum(["audio/mpeg", "audio/wav"]).nullable(), audioName: z.string().min(1).max(100).nullable(),
+}).strict().superRefine((item, context) => {
+  if (item.audioBase64 === null && item.audioMime === null && item.audioName === null) return;
+  try { if (!item.audioBase64 || !item.audioName || validateNoticeAudio(item.audioBase64) !== item.audioMime) throw new Error(); }
+  catch { context.addIssue({code:"custom",message:"返却時案内の音声データが不正です"}); }
+});
+
 export const fleetBackupSchema = z.object({
   format: z.literal("fleetflow-json-backup"),
   formatVersion: z.literal(JSON_BACKUP_FORMAT_VERSION),
@@ -55,6 +65,7 @@ export const fleetBackupSchema = z.object({
     trips: z.array(tripSchema).max(200_000),
     // 整備記録を追加する前のバックアップにはないため、空として読む。
     vehicleMaintenances: z.array(vehicleMaintenanceSchema).max(100_000).default([]),
+    fuelReturnNotices: z.array(fuelReturnNoticeSchema).max(2).default([]),
     auditLogs: z.array(auditLogSchema).max(300_000),
   }).strict(),
 }).strict();
@@ -126,7 +137,8 @@ export function parseFleetBackup(value: unknown): FleetBackup {
   }
   data.nfcTags = upgradeDummyNfcUids(data);
   const collections = Object.entries(data) as [keyof typeof data, Array<{ id: string }>][];
-  for (const [name, items] of collections) assertUnique(items, (item) => item.id, `${name}のID`);
+  for (const [name, items] of collections) { if (name !== "fuelReturnNotices") assertUnique(items, (item) => item.id, `${name}のID`); }
+  assertUnique(data.fuelReturnNotices, (item) => String(item.level), "返却時ガソリン案内");
   assertUnique(data.departments, (item) => item.name, "部署名");
   assertUnique(data.employeeNumbers, (item) => item.code, "社員番号");
   assertUnique(data.vehicleNumbers, (item) => item.code, "車両番号");
@@ -180,7 +192,7 @@ export function backupCounts(backup: FleetBackup): FleetBackupCounts {
 export async function createFleetBackup(): Promise<FleetBackup> {
   const systemPromise = getApplicationSystemStatus();
   const data = await prisma.$transaction(async (tx) => {
-    const [departments, employeeNumbers, vehicleNumbers, parkingSpots, nfcTags, employees, vehicles, nfcAssignments, trips, vehicleMaintenances, auditLogs] = await Promise.all([
+    const [departments, employeeNumbers, vehicleNumbers, parkingSpots, nfcTags, employees, vehicles, nfcAssignments, trips, vehicleMaintenances, auditLogs, fuelReturnNotices] = await Promise.all([
       tx.department.findMany({ orderBy: { id: "asc" } }),
       tx.employeeNumber.findMany({ orderBy: { id: "asc" } }),
       tx.vehicleNumber.findMany({ orderBy: { id: "asc" } }),
@@ -192,8 +204,9 @@ export async function createFleetBackup(): Promise<FleetBackup> {
       tx.trip.findMany({ orderBy: { id: "asc" } }),
       tx.vehicleMaintenance.findMany({ orderBy: { id: "asc" } }),
       tx.auditLog.findMany({ orderBy: { id: "asc" } }),
+      tx.fuelReturnNotice.findMany({ orderBy: { level: "asc" } }),
     ]);
-    return { departments, employeeNumbers, vehicleNumbers, parkingSpots, nfcTags, employees, vehicles, nfcAssignments, trips, vehicleMaintenances, auditLogs };
+    return { departments, employeeNumbers, vehicleNumbers, parkingSpots, nfcTags, employees, vehicles, nfcAssignments, trips, vehicleMaintenances, auditLogs, fuelReturnNotices };
   }, { isolationLevel: "RepeatableRead", timeout: 30_000 });
   const system = await systemPromise;
   return JSON.parse(JSON.stringify({ format: "fleetflow-json-backup", formatVersion: JSON_BACKUP_FORMAT_VERSION, exportedAt: new Date().toISOString(), source: { appVersion: system.appVersion, schemaVersion: system.schemaVersion }, data })) as FleetBackup;
@@ -215,7 +228,8 @@ export async function restoreFleetBackup(backup: FleetBackup) {
   const data = backup.data;
   await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('fleetflow-json-restore'))::text AS restore_lock`;
-    await tx.$executeRawUnsafe('LOCK TABLE "AuditLog", "NfcAssignment", "Trip", "VehicleMaintenance", "Employee", "Vehicle", "NfcTag", "EmployeeNumber", "VehicleNumber", "Department", "ParkingSpot" IN ACCESS EXCLUSIVE MODE');
+    await tx.$executeRawUnsafe('LOCK TABLE "FuelReturnNotice", "AuditLog", "NfcAssignment", "Trip", "VehicleMaintenance", "Employee", "Vehicle", "NfcTag", "EmployeeNumber", "VehicleNumber", "Department", "ParkingSpot" IN ACCESS EXCLUSIVE MODE');
+    await tx.fuelReturnNotice.deleteMany();
     await tx.auditLog.deleteMany();
     await tx.nfcAssignment.deleteMany();
     await tx.trip.deleteMany();
@@ -238,6 +252,7 @@ export async function restoreFleetBackup(backup: FleetBackup) {
     if (data.nfcAssignments.length) await tx.nfcAssignment.createMany({ data: data.nfcAssignments.map((item) => ({ ...item, validFrom: asDate(item.validFrom), validTo: asNullableDate(item.validTo), createdAt: asDate(item.createdAt) })) });
     if (data.trips.length) await tx.trip.createMany({ data: data.trips.map((item) => ({ ...item, plannedStart: asDate(item.plannedStart), plannedEnd: asDate(item.plannedEnd), actualStart: asNullableDate(item.actualStart), actualEnd: asNullableDate(item.actualEnd), snapshotCapturedAt: asNullableDate(item.snapshotCapturedAt), createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
     if (data.vehicleMaintenances.length) await tx.vehicleMaintenance.createMany({ data: data.vehicleMaintenances.map((item) => ({ ...item, plannedStart: asDate(item.plannedStart), plannedEnd: asNullableDate(item.plannedEnd), actualStart: asNullableDate(item.actualStart), actualEnd: asNullableDate(item.actualEnd), createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
+    if (data.fuelReturnNotices.length) await tx.fuelReturnNotice.createMany({ data: data.fuelReturnNotices.map((item) => ({ ...item, updatedAt: asDate(item.updatedAt) })) });
     if (data.auditLogs.length) await tx.auditLog.createMany({ data: data.auditLogs.map((item) => ({ ...item, createdAt: asDate(item.createdAt) })) });
     await tx.auditLog.create({ data: { operationId: randomUUID(), actorName: "設定画面", action: "JSON一括復元", targetType: "System", targetId: backup.exportedAt, description: `${backup.exportedAt}に書き出したJSONバックアップを復元` } });
   }, { isolationLevel: "Serializable", maxWait: 10_000, timeout: 120_000 });

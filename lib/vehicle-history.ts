@@ -2,7 +2,7 @@ import type { Prisma } from "@/prisma/generated/client";
 
 export type VehicleHistoryVehicle = { id: string; name: string; plateNumber: string; active: boolean; vehicleNumber: { code: string } };
 export type VehicleHistoryData = {
-  records: { id: string; status: "IN_USE" | "COMPLETED"; actualStart: string; actualEnd: string | null; plannedEnd: string;
+  records: { id: string; status: "IN_USE" | "COMPLETED"; actualStart: string; actualEnd: string | null; plannedEnd: string; returnFuelLevel: number | null;
     snapshotCapturedAt: string | null; employeeNameAtStart: string | null; employeeCodeAtStart: string | null; departmentNameAtStart: string | null;
     vehicleNameAtStart: string | null; vehicleCodeAtStart: string | null; plateNumberAtStart: string | null;
     vehicle: VehicleHistoryVehicle; employee: { name: string; employeeNumber: { code: string }; department: { name: string } } }[];

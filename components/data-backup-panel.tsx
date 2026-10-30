@@ -7,7 +7,7 @@ import { Button, Card, cn } from "./ui";
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const COUNT_LABELS: Record<string, string> = {
   departments: "部署", employeeNumbers: "社員番号", employees: "社員", vehicleNumbers: "車両番号", vehicles: "車両",
-  parkingSpots: "駐車区画", nfcTags: "NFCタグ", nfcAssignments: "NFC割当", trips: "利用予定・履歴", vehicleMaintenances: "整備記録", auditLogs: "操作履歴",
+  parkingSpots: "駐車区画", nfcTags: "NFCタグ", nfcAssignments: "NFC割当", trips: "利用予定・履歴", vehicleMaintenances: "整備記録", fuelReturnNotices: "返却時ガソリン案内・音声", auditLogs: "操作履歴",
 };
 
 type BackupSummary = { exportedAt: string; source: { appVersion: string; schemaVersion: string }; counts: Record<string, number> };

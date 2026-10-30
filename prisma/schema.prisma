@@ -7,6 +7,17 @@ datasource db {
   provider = "postgresql"
 }
 
+model FuelReturnNotice {
+  level       Int      @id
+  enabled     Boolean  @default(true)
+  message     String
+  audioBase64 String?
+  audioMime   String?
+  audioName   String?
+  version     Int      @default(1)
+  updatedAt   DateTime @updatedAt
+}
+
 enum VehicleStatus {
   AVAILABLE
   RESERVED
