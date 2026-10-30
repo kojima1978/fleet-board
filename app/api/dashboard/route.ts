@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { validateReservationStart } from "@/lib/trip-times";
+import { readFuelReturnNotice } from "@/lib/fuel-return-notice-store";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -356,6 +357,16 @@ export async function GET(request: Request) {
   }
 }
 
+async function successfulOperationResponse(input: { action: string; fuelLevel?: number | null }, replayed = false) {
+  let notice = null;
+  if ((input.action === "end" || input.action === "endMaintenance") && (input.fuelLevel === 0 || input.fuelLevel === 1)) {
+    // 案内の取得に失敗しても、完了済みの返却を失敗扱いにしない。
+    const configured = await readFuelReturnNotice(input.fuelLevel).catch(() => null);
+    if (configured?.enabled) notice = configured;
+  }
+  return NextResponse.json({ ok: true, ...(replayed ? { replayed: true } : {}), ...(notice ? { fuelReturnNotice: notice } : {}) });
+}
+
 export async function POST(request: Request) {
   if (!isSameOriginRequest(request)) return NextResponse.json({ message: "許可されていない送信元です" }, { status: 403 });
   let body: unknown;
@@ -371,7 +382,7 @@ export async function POST(request: Request) {
     for (let attempt = 0; attempt < 100; attempt += 1) {
       await wait(100);
       const completed = await prisma.auditLog.findUnique({ where: { operationId }, select: { id: true } });
-      if (completed) return NextResponse.json({ ok: true, replayed: true });
+      if (completed) return successfulOperationResponse(input, true);
       if (!activeOperationIds.has(operationId)) break;
     }
     return NextResponse.json({ message: "同じ操作を処理中です。最新状態を再読込してください" }, { status: 409 });
@@ -379,7 +390,7 @@ export async function POST(request: Request) {
   activeOperationIds.add(operationId);
   try {
     const completed = await prisma.auditLog.findUnique({ where: { operationId }, select: { id: true } });
-    if (completed) return NextResponse.json({ ok: true, replayed: true });
+    if (completed) return successfulOperationResponse(input, true);
     await checkStaleReservations();
     let auditActor: { actorEmployeeId: string | null; actorName: string } = { actorEmployeeId: null, actorName: "共用端末" };
     if ("actorEmployeeId" in input && input.actorEmployeeId) {
@@ -1155,12 +1166,12 @@ export async function POST(request: Request) {
     }
     markDashboardDataChanged();
     syncDashboardSnapshotVersion();
-    return NextResponse.json({ ok: true });
+    return successfulOperationResponse(input);
   } catch (error) {
     const duplicate = typeof error === "object" && error !== null && "code" in error && error.code === "P2002";
     if (duplicate) {
       const completed = await prisma.auditLog.findUnique({ where: { operationId }, select: { id: true } });
-      if (completed) return NextResponse.json({ ok: true, replayed: true });
+      if (completed) return successfulOperationResponse(input, true);
     }
     const employeeAction = input.action === "createEmployee" || input.action === "updateEmployee" || input.action === "updateEmployeeNfc" || input.action === "rotateEmployeeQr" || input.action === "importEmployees";
     const departmentAction = input.action === "createDepartment" || input.action === "renameDepartment";

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { FuelReturnNoticeMessage } from "../components/fuel-return-notice-message";
+import { defaultFuelReturnNotice } from "../lib/fuel-return-notice";
 import { renderToStaticMarkup } from "react-dom/server";
 import { FuelLevelLabel, FuelReminder } from "../components/fleet-dashboard";
 import { FUEL_LEVEL_LABELS, needsReturnFuelReminder, needsStartFuelReminder } from "../lib/fuel-level";
@@ -32,3 +34,6 @@ assert.match(returnReminder, /次回から、可能な範囲で給油してか�
 assert.doesNotMatch(returnReminder, /利用中の給油/);
 assert.match(returnReminder, /fuel-reminder-attention/, "返却時も給油案内を短く強調する");
 console.log("Fuel label tests passed: compact/detail labels, all five levels and no-wrap fractions");
+const notice = { ...defaultFuelReturnNotice(1), audioUrl: "/api/settings/fuel-return/1/audio?v=1" };
+assert.doesNotMatch(renderToStaticMarkup(<FuelReturnNoticeMessage notice={notice} kiosk={false} />), /<audio/, "各自PCは音声を読み込まない");
+assert.match(renderToStaticMarkup(<FuelReturnNoticeMessage notice={notice} kiosk />), /<audio.*controls/, "共用端末は自動再生できない場合も手動再生できる");

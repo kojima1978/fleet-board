@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { CalendarClock, CarFront, Check, MapPin, Wrench, X } from "lucide-react";
 import type { DashboardData, Vehicle, VehicleMaintenance } from "@/lib/types";
 import { needsReturnFuelReminder } from "@/lib/fuel-level";
-import { playFuelReturnVoice, stopFuelReturnVoice } from "@/lib/fuel-voice";
 import { formatMaintenanceTime, MAINTENANCE_KIND_LABELS, MAINTENANCE_KIND_SHORT_LABELS,MAINTENANCE_MAX_DAYS, MAINTENANCE_NOTE_MAX, MAINTENANCE_SCHEDULE_DAYS_AHEAD, type MaintenanceKind } from "@/lib/maintenance";
 import { canUseSpot, formatSpotLabel, isCustomerSpot } from "@/lib/parking-spots";
 import { CustomerSpotNotice } from "./customer-spot-notice";
@@ -107,10 +106,7 @@ export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, current
   };
   const changeFuelLevel = (level: number) => {
     setFuelLevel(level);
-    if (needsReturnFuelReminder(level)) playFuelReturnVoice();
-    else stopFuelReturnVoice();
   };
-  useEffect(() => () => stopFuelReturnVoice(), []);
 
   if (initialScheduled && editing && editItem) return <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget && !submitting) onClose(); }} onKeyDown={(event) => { if (event.key === "Escape" && !submitting) onClose(); }}>
     <div role="dialog" data-focus-layer aria-modal="true" aria-labelledby="maintenance-title" aria-busy={submitting} className="relative max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-3xl bg-white shadow-2xl">

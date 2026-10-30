@@ -19,7 +19,6 @@ import { FUEL_LEVEL_MAX, formatFuelLevel, isLowFuel, needsReturnFuelReminder, ne
 import { scannerBridgeStatusText, useNfcBridge, useNfcBridgeHealth, useQrBridgeHealth, useScannerBridge, type NfcBridgeStatus, type ScannerEvent } from "@/lib/use-nfc-bridge";
 import { useKioskIdle, useKioskUserTimeout } from "@/lib/use-kiosk-idle";
 import { playNfcSound } from "@/lib/nfc-sound";
-import { playFuelReturnVoice, stopFuelReturnVoice } from "@/lib/fuel-voice";
 import { FuelLevelLabel, FuelLevelPicker, FuelReminder } from "./fuel-controls";
 export { FuelLevelLabel, FuelReminder } from "./fuel-controls";
 import { clearSavedEmployee, forgetPersistentEmployee, readSavedEmployee, saveEmployee } from "@/lib/employee-session";
@@ -28,6 +27,8 @@ import { canSendOutMaintenance, formatMaintenanceStart, formatMaintenanceTime, g
 import { AllDayDateSelector } from "./all-day-date-selector";
 import { allDayDates, allDayStart } from "@/lib/all-day-reservation";
 import { EmployeePicker } from "./employee-picker";
+import type { FuelReturnNotice } from "@/lib/fuel-return-notice";
+import { FuelReturnNoticeMessage } from "./fuel-return-notice-message";
 import { Button, Card, cn, DialogActions } from "./ui";
 import { ReservationTimeActions, ReservationTimeFields, useReservationTimeEdit } from "./reservation-time-editor";
 import { IdleTraffic, reportActivity } from "./idle-traffic";
@@ -49,6 +50,7 @@ const SettingsPanelV2 = dynamic(() => import("./settings-panel-v2").then((module
 const SpotRoleSettings = dynamic(() => import("./spot-role-settings").then((module) => module.SpotRoleSettings), { loading: SettingsSectionLoading });
 const DepartmentSettings = dynamic(() => import("./department-settings").then((module) => module.DepartmentSettings), { loading: SettingsSectionLoading });
 const DataBackupPanel = dynamic(() => import("./data-backup-panel").then((module) => module.DataBackupPanel), { loading: SettingsSectionLoading });
+const FuelReturnNoticeSettings = dynamic(() => import("./fuel-return-notice-settings").then((module) => module.FuelReturnNoticeSettings), { loading: SettingsSectionLoading });
 const SystemStatusPanel = dynamic(() => import("./system-status-panel").then((module) => module.SystemStatusPanel), { loading: SettingsSectionLoading });
 const ScannerGuide = dynamic(() => import("./scanner-guide").then((module) => module.ScannerGuide), { loading: SettingsSectionLoading });
 // 操作時だけ必要なフォームを初期バンドルから外す。配置図とタイムラインの初回表示を軽くする。
@@ -117,6 +119,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   const [fuelVehicle, setFuelVehicle] = useState<Vehicle | null>(null);
   const [startIntent, setStartIntent] = useState<"now" | "scheduled">("now");
   const [editTrip, setEditTrip] = useState<Trip | null>(null);
+  const [fuelNotice, setFuelNotice] = useState<{ operationId: string; notice: FuelReturnNotice; kiosk: boolean } | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: "success" | "error"; thanks?: string; brief?: boolean } | null>(null);
   const [undoReturn, setUndoReturn] = useState<UndoReturn | null>(null);
   const [returnAnimation, setReturnAnimation] = useState<ReturnAnimation | null>(null);
@@ -402,6 +405,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
       const result = await response.json().catch(() => ({ message: "サーバーから正しい応答を受信できませんでした" }));
       setToast({ message: response.ok ? success : result.message, tone: response.ok ? "success" : "error" });
       await load(true);
+      if (response.ok && result.fuelReturnNotice) setFuelNotice({ operationId, notice: result.fuelReturnNotice, kiosk });
       return response.ok;
     } catch (error) {
       await load(true);
@@ -411,7 +415,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
       pendingRef.current = false;
       setPendingAction(false);
     }
-  }, [employee?.id, load]);
+  }, [employee?.id, load, kiosk]);
 
   if (loading && !data) return <Loading view={view} />;
   if (!data) return <InitialLoadError view={view} refreshing={refreshing} onRetry={() => void load()} />;
@@ -542,10 +546,11 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
         {view === "settingsEmployees" || view === "settingsDepartments" || view === "settingsVehicles" || view === "settingsSpots" || view === "settingsData" || view === "settingsSystem" || view === "settingsScanner" || view === "settingsEmergency" ? <div className="space-y-5">
             <PageHeading eyebrow="管理設定" title={view === "settingsEmployees" ? "社員登録" : view === "settingsDepartments" ? "部署" : view === "settingsVehicles" ? "車両登録" : view === "settingsSpots" ? "駐車区画" : view === "settingsSystem" ? "システム状態" : view === "settingsScanner" ? "NFC・QR 接続ガイド" : view === "settingsEmergency" ? "緊急時" : "データ保存・復元"} description={view === "settingsEmployees" ? "利用者となる社員、社員証のNFCタグ、社員QRを管理します。" : view === "settingsDepartments" ? "社員が所属する部署の追加・名前の変更・並び順を管理します。" : view === "settingsVehicles" ? "利用する社用車、車両のNFCタグ、車両QRを管理します。" : view === "settingsSpots" ? "配置図で区画を選び、区画番号と用途（一時・お客様用・専用・仮置き）を変更します。" : view === "settingsSystem" ? "アプリ、データベース、バックアップ、NFC・QRの状態をまとめて確認します。" : view === "settingsScanner" ? "初回導入、接続復旧、アンインストールの手順を確認できます。" : view === "settingsEmergency" ? "システム障害時に手書き運用へ切り替えるための用紙を印刷します。" : "FleetFlowの全データをJSONで保存し、必要なときに一括復元します。"} />
             <SettingsNavigation view={view} />
-            {view === "settingsEmergency" ? <EmergencyToolsPanel /> : view === "settingsSystem" ? <SystemStatusPanel system={data.system} syncState={syncState} nfcStatus={nfcHealth} qrStatus={qrHealth} /> : view === "settingsScanner" ? <ScannerGuide /> : view === "settingsData" ? <DataBackupPanel /> : view === "settingsSpots" ? <SpotRoleSettings data={data} mutate={mutate} /> : view === "settingsDepartments" ? <DepartmentSettings data={data} mutate={mutate} /> : <><div className={cn("flex flex-wrap items-end justify-between gap-2", view === "settingsEmployees" ? "max-w-[1080px]" : "max-w-[1120px]")}><div><p className="text-xs font-bold text-blue-600">日常管理</p><h3 className="mt-0.5 text-lg font-black">{view === "settingsEmployees" ? "社員情報" : "車両情報"}</h3></div><p className="text-xs text-slate-500">検索・登録・変更をこの一覧から行えます</p></div><SettingsPanelV2 kind={view === "settingsEmployees" ? "employee" : "vehicle"} data={data} mutate={mutate} /></>}
+            {view === "settingsEmergency" ? <EmergencyToolsPanel /> : view === "settingsSystem" ? <><SystemStatusPanel system={data.system} syncState={syncState} nfcStatus={nfcHealth} qrStatus={qrHealth} /><FuelReturnNoticeSettings /></> : view === "settingsScanner" ? <ScannerGuide /> : view === "settingsData" ? <DataBackupPanel /> : view === "settingsSpots" ? <SpotRoleSettings data={data} mutate={mutate} /> : view === "settingsDepartments" ? <DepartmentSettings data={data} mutate={mutate} /> : <><div className={cn("flex flex-wrap items-end justify-between gap-2", view === "settingsEmployees" ? "max-w-[1080px]" : "max-w-[1120px]")}><div><p className="text-xs font-bold text-blue-600">日常管理</p><h3 className="mt-0.5 text-lg font-black">{view === "settingsEmployees" ? "社員情報" : "車両情報"}</h3></div><p className="text-xs text-slate-500">検索・登録・変更をこの一覧から行えます</p></div><SettingsPanelV2 kind={view === "settingsEmployees" ? "employee" : "vehicle"} data={data} mutate={mutate} /></>}
           </div> : null}
       </main>
 
+      {fuelNotice && dialog === null && !pendingAction ? <DialogShell title={`返却完了・ガソリン残量 ${fuelNotice.notice.level === 0 ? "E" : "1/4"}`} subtitle="返却時のガソリン残量についてのご案内" onClose={() => setFuelNotice(null)} footer={<Button className="min-h-12 w-full" onClick={() => setFuelNotice(null)}>確認しました</Button>}><FuelReturnNoticeMessage key={fuelNotice.operationId} notice={fuelNotice.notice} kiosk={fuelNotice.kiosk} /></DialogShell> : null}
       {dialog === "nfc" && <NfcDialog employees={activeEmployees} vehicles={activeVehicles} onEmployee={(person) => { authenticateEmployee(person); setDialog(null); }} onVehicle={(vehicle) => { setDialog(null); openVehicleFromNfc(vehicle); }} onClose={() => setDialog(null)} />}
       {dialog === "user" && <UserPickerDialog kiosk={kiosk} employees={activeEmployees} currentId={employee?.id ?? null} nfcEnabled={kiosk && nfcAvailable} onSelect={(person) => { authenticateEmployee(person); setDialog(null); }} onClose={() => setDialog(null)} />}
       {dialog === "start" && <StartDialog key={`${startIntent}:${selectedVehicleId}`} intent={startIntent} kiosk={kiosk} submitting={pendingAction} employees={activeEmployees} vehicles={startIntent === "scheduled" ? activeVehicles : available} trips={data.trips} initialEmployee={employee?.active ? employee : null} initialVehicleId={selectedVehicleId} onClose={() => setDialog(null)} onSubmit={async (values) => { const identifiedEmployee = activeEmployees.find((person) => person.id === values.employeeId) ?? null; const scheduled = values.plannedStart !== null; const ok = await mutate(scheduled ? { action: "reserve", employeeId: values.employeeId, vehicleId: values.vehicleId, plannedStart: values.plannedStart!, minutes: values.minutes, actorName: values.employeeName, actorEmployeeId: values.employeeId } : { action: "start", employeeId: values.employeeId, vehicleId: values.vehicleId, minutes: values.minutes, actorName: values.employeeName, actorEmployeeId: values.employeeId }, scheduled ? "予約を登録しました" : "利用を開始しました"); if (ok) { setParkingVehicleId(null); setDialog(null); } if (ok && identifiedEmployee) { if (kiosk) finishKioskCheck(); else if (!employee) selectEmployee(identifiedEmployee); if (!scheduled) window.location.assign(`/timeline?started=1&vehicleId=${encodeURIComponent(values.vehicleId)}&employeeId=${encodeURIComponent(values.employeeId)}`); } }} />}
@@ -1348,15 +1353,9 @@ function ParkingReturnDialog({ spot, spots, trips: allTrips, vehicles, submittin
   const trips = allTrips.filter((trip) => canUseSpot(trip.vehicle, spot));
   const selected = trips.find((trip) => trip.id === tripId);
   const fuelLevel = selected ? fuelChoice?.tripId === selected.id ? fuelChoice.level : selected.vehicle.fuelLevel : null;
-  useEffect(() => {
-    stopFuelReturnVoice();
-    return () => stopFuelReturnVoice();
-  }, [selected?.id]);
   const changeFuelLevel = (level: number) => {
     if (!selected) return;
     setFuelChoice({ tripId: selected.id, level });
-    if (needsReturnFuelReminder(level)) playFuelReturnVoice();
-    else stopFuelReturnVoice();
   };
   const bridgeStatus = useScannerBridge(method === "nfc", async (scan) => {
     try {
@@ -1394,11 +1393,8 @@ function ParkingReturnDialog({ spot, spots, trips: allTrips, vehicles, submittin
 // 返却の確認画面。配置図で区画を選んできた場合は結果だけを示し、「変更」で配置図の区画選びへ戻る。
 function EndDialog({ trip, spots, initialSpotId = "", onChangeSpot, submitting, onClose, onSubmit }: { trip: Trip; spots: ParkingSpot[]; initialSpotId?: string; onChangeSpot?: () => void; submitting: boolean; onClose: () => void; onSubmit: (spotId: string, fuelLevel: number | null) => void }) {
   const free = spots.filter((spot) => !spot.vehicle && canUseSpot(trip.vehicle, spot)); const [spotId, setSpotId] = useState(initialSpotId); const [fuelLevel, setFuelLevel] = useState(trip.vehicle.fuelLevel);
-  useEffect(() => () => stopFuelReturnVoice(), []);
   const changeFuelLevel = (level: number) => {
     setFuelLevel(level);
-    if (needsReturnFuelReminder(level)) playFuelReturnVoice();
-    else stopFuelReturnVoice();
   };
   const selected = free.find((spot) => spot.id === spotId);
   const [choosing, setChoosing] = useState(!selected);
