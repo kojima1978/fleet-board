@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { isWinterTireSeason, parkingSpotClass, VehicleMapIcon } from "../components/fleet-dashboard";
@@ -6,6 +7,7 @@ import { CustomerSpotNotice } from "../components/customer-spot-notice";
 import { FrontSpotNotice } from "../components/front-spot-notice";
 import { blockingFrontSpots, freeRegularSpots, isCustomerSpot } from "../lib/parking-spots";
 import type { ParkingSpot, Vehicle } from "../lib/types";
+import { defaultFrontSpotCodes, parkingSpotGeometry } from "../prisma/parking-spot-seed";
 
 const spot: ParkingSpot = { id: "s1", code: "01", x: 0, y: 0, width: 5, height: 5, orientation: "vertical", enabled: true, version: 1, vehicle: null, role: "REGULAR", dedicatedVehicleId: null, dedicatedVehicleName: null, label: null, frontSpotIds: [] };
 const vehicle: Vehicle = { id: "v1", code: "C001", name: "テスト車", plateNumber: "テスト001", nfcUid: "", qrCode: "", hasEtc: false, hasNavigation: false, hasWinterTires: false, hasBackMonitor: false, isKei: false, fuelCard: "", fuelLevel: null, color: "#2563eb", status: "AVAILABLE", parkingSpotId: spot.id, active: true, version: 1 };
@@ -68,4 +70,13 @@ const inNotice = renderToStaticMarkup(createElement(FrontSpotNotice, { spot: fro
 assert.match(inNotice, /手前の区画15（タウンエース）に車があります/);
 assert.match(inNotice, /入庫するには/);
 assert.equal(renderToStaticMarkup(createElement(FrontSpotNotice, { spot: frontSpots[0], spots: frontSpots, direction: "in" })), "", "手前に車がなければ何も出さない");
-console.log("Parking appearance tests passed: empty background only, back monitor camera mark, unchanged borders/occupied/maintenance/off-site, customer spot notice, front spot notice");
+const geometryCodes = new Set<string>(parkingSpotGeometry.map((item) => item.code));
+for (const [code, fronts] of Object.entries(defaultFrontSpotCodes)) {
+  assert.ok(geometryCodes.has(code), `手前の区画の初期値に存在しない区画 ${code}`);
+  assert.ok(fronts.length && fronts.every((front) => geometryCodes.has(front) && front !== code), `区画 ${code} の手前の区画の初期値`);
+}
+assert.deepEqual(defaultFrontSpotCodes["15"], ["13", "14"], "READMEの例と同じ");
+for (const code of ["22", "23", "24", "26", "32", "08", "13", "17"]) assert.equal(defaultFrontSpotCodes[code], undefined, "道路に面する区画には手前の区画を入れない");
+const migrationDefaults = Object.fromEntries([...readFileSync("prisma/migrations/20261109100000_default_front_spots/migration.sql", "utf8").matchAll(/\('(\d+)', ARRAY\[([^\]]*)\]\)/g)].map(([, code, list]) => [code, list.match(/\d+/g) ?? []]));
+assert.deepEqual(migrationDefaults, Object.fromEntries(Object.entries(defaultFrontSpotCodes).map(([code, fronts]) => [code, [...fronts]])), "既存DB向けの移行と初期値の表をそろえる");
+console.log("Parking appearance tests passed: empty background only, back monitor camera mark, unchanged borders/occupied/maintenance/off-site, customer spot notice, front spot notice, default front spots");

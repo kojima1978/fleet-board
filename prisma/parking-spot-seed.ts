@@ -17,6 +17,17 @@ export const parkingSpotGeometry = [
   ...["23", "22"].map((code, i) => ({ code, x: 54.6 / 9.5, y: [16.6, 95.6][i] / 5.25, width: 110.8 / 9.5, height: 66.8 / 5.25, orientation: "horizontal" })),
 ] as const;
 
+// 手前の区画の初期値（初期の区画番号で書く）。道路は配置図の左にあり、車は道路側から順に出し入れする。
+// 既存DBには migrations/20261109100000_default_front_spots で同じ表を一度だけ入れている。変えるときは両方そろえる。
+const toTwelve = ["08", "09", "10", "11", "12"];
+export const defaultFrontSpotCodes: Record<string, readonly string[]> = {
+  "18": ["17"], "19": ["17", "18"],
+  "14": ["13"], "15": ["13", "14"], "16": ["13", "14", "15"],
+  "09": ["08"], "10": ["08", "09"], "11": ["08", "09", "10"], "12": ["08", "09", "10", "11"],
+  "20": ["17"], "21": ["17", "18"],
+  "01": ["08"], "02": ["08", "09"], "03": ["08", "09"], "04": ["08", "09", "10"], "05": ["08", "09", "10", "11"], "06": toTwelve, "07": toTwelve,
+};
+
 // 区画番号を固定する前の番号（01〜26）。この番号のままのDBだけ、今の番号へ一度付け直す。
 const legacySpotCodes = Array.from({ length: 26 }, (_, i) => String(i + 1).padStart(2, "0"));
 
@@ -42,10 +53,23 @@ export async function syncParkingSpots(prisma: PrismaClient) {
     return;
   }
   const usedCodes = new Set(codes);
+  const created = new Map<string, string>();
   for (const { geometry, spot } of positionedSpots) {
     // その位置に区画がない場合だけ作る。初期の番号が別の区画で使われていたら作らない。
     if (spot || usedCodes.has(geometry.code)) continue;
-    await prisma.parkingSpot.create({ data: { ...geometry, role: defaultSpotRoles[geometry.code] ?? "REGULAR" } });
+    const createdSpot = await prisma.parkingSpot.create({ data: { ...geometry, role: defaultSpotRoles[geometry.code] ?? "REGULAR" } });
+    created.set(geometry.code, createdSpot.id);
     usedCodes.add(geometry.code);
+  }
+  if (!created.size) return;
+  // 新しく作った区画にだけ手前の区画の初期値を入れる。手前の区画は位置で探す。
+  const spots = await prisma.parkingSpot.findMany({ select: { id: true, x: true, y: true } });
+  const idOf = (code: string) => {
+    const geometry = parkingSpotGeometry.find((item) => item.code === code)!;
+    return spots.find((spot) => Math.abs(spot.x - geometry.x) < 0.01 && Math.abs(spot.y - geometry.y) < 0.01)?.id;
+  };
+  for (const [code, id] of created) {
+    const frontSpotIds = (defaultFrontSpotCodes[code] ?? []).map(idOf).filter((item): item is string => !!item);
+    if (frontSpotIds.length) await prisma.parkingSpot.update({ where: { id }, data: { frontSpotIds } });
   }
 }
