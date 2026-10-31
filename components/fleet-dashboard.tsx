@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { AlertTriangle, CalendarClock, Camera, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Fuel, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Move, Nfc, Play, Plus, Printer, QrCode, RefreshCw, Snowflake, UserRound, Utensils, Wrench, X } from "lucide-react";
+import { AlertTriangle, CalendarClock, Camera, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Fuel, Gift, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Move, Nfc, Play, Plus, Printer, QrCode, RefreshCw, Snowflake, UserRound, Utensils, Wrench, X } from "lucide-react";
 import type { DashboardData, Employee, ParkingSpot, Trip, Vehicle, VehicleMaintenance } from "@/lib/types";
 import { normalizeNfcUid } from "@/lib/nfc";
 import { vehicleDotStyle, vehicleIconStyle } from "@/lib/vehicle-colors";
@@ -48,6 +48,7 @@ type StartContext = { vehicleId: string; employeeId: string };
 type UndoReturn = { tripId: string; vehicleId: string; vehicleName: string; returnedBy: string; expiresAt: number };
 type ReturnAnimation = { id: number; vehicleName: string; color: string; startX: number; startY: number; endX: number; endY: number };
 type FuelWaveRequest = { vehicleId: string; nonce: number };
+type FuelNoticeState = { operationId: string; notice: FuelReturnNotice; kiosk: boolean; kind: "notice" | "thankYou" };
 // 返却の取り消し案内を出しておく秒数。共用端末で次の人の画面に残らないよう短めにする（サーバーは2分まで受け付ける）。
 const UNDO_RETURN_SECONDS = 30;
 // 日常画面では使わない管理機能を初回のJavaScriptから外し、設定画面を開いた時だけ読み込む。
@@ -124,7 +125,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   const [fuelVehicle, setFuelVehicle] = useState<Vehicle | null>(null);
   const [startIntent, setStartIntent] = useState<"now" | "scheduled">("now");
   const [editTrip, setEditTrip] = useState<Trip | null>(null);
-  const [fuelNotice, setFuelNotice] = useState<{ operationId: string; notice: FuelReturnNotice; kiosk: boolean } | null>(null);
+  const [fuelNotice, setFuelNotice] = useState<FuelNoticeState | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: "success" | "error"; thanks?: string; brief?: boolean } | null>(null);
   const [undoReturn, setUndoReturn] = useState<UndoReturn | null>(null);
   const [returnAnimation, setReturnAnimation] = useState<ReturnAnimation | null>(null);
@@ -418,8 +419,8 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
       if (returnedWithFuelLevel) setFuelWaveRequest({ vehicleId: operation.vehicleId!, nonce: Date.now() });
       if (refueled && result.fuelThankYou) {
         const thankYou = result.fuelThankYou as FuelThankYouSetting;
-        setFuelNotice({ operationId, kiosk, notice: { ...defaultFuelReturnNotice(operation.fuelLevel! as 0 | 1 | 2 | 3 | 4), displayMode: "MESSAGE", enabled: true, animated: false, audioEnabled: thankYou.audioEnabled, message: thankYou.message, version: thankYou.version, audioName: thankYou.audioName, audioUrl: thankYou.audioUrl } });
-      } else if (response.ok && result.fuelReturnNotice) setFuelNotice({ operationId, notice: result.fuelReturnNotice, kiosk });
+        setFuelNotice({ operationId, kiosk, kind: "thankYou", notice: { ...defaultFuelReturnNotice(operation.fuelLevel! as 0 | 1 | 2 | 3 | 4), displayMode: "MESSAGE", enabled: true, animated: false, audioEnabled: thankYou.audioEnabled, message: thankYou.message, version: thankYou.version, audioName: thankYou.audioName, audioUrl: thankYou.audioUrl } });
+      } else if (response.ok && result.fuelReturnNotice) setFuelNotice({ operationId, notice: result.fuelReturnNotice, kiosk, kind: "notice" });
       return response.ok;
     } catch (error) {
       await load(true);
@@ -519,7 +520,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
       </>} />
 
       <main className="mx-auto max-w-[1600px] space-y-5 p-4 pb-28 md:p-8">
-        {fuelNotice && fuelNotice.notice.displayMode !== "MODAL" && dialog === null && !pendingAction ? <Card role="status" className="mx-auto w-full max-w-3xl border-slate-300 bg-white p-4 shadow-lg"><div className="flex items-start gap-3"><div className="min-w-0 flex-1"><p className="mb-2 text-xs font-black text-slate-500">返却完了・ガソリン残量 {formatFuelLevel(fuelNotice.notice.level)}</p><FuelReturnNoticeMessage key={fuelNotice.operationId} notice={fuelNotice.notice} kiosk={fuelNotice.kiosk} /></div><button type="button" aria-label="返却案内を閉じる" onClick={() => setFuelNotice(null)} className="grid size-9 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"><X className="size-4" /></button></div></Card> : null}
+        {fuelNotice && fuelNotice.kind === "notice" && fuelNotice.notice.displayMode !== "MODAL" && dialog === null && !pendingAction ? <Card role="status" className="mx-auto w-full max-w-3xl border-slate-300 bg-white p-4 shadow-lg"><div className="flex items-start gap-3"><div className="min-w-0 flex-1"><p className="mb-2 text-xs font-black text-slate-500">返却完了・ガソリン残量 {formatFuelLevel(fuelNotice.notice.level)}</p><FuelReturnNoticeMessage key={fuelNotice.operationId} notice={fuelNotice.notice} kiosk={fuelNotice.kiosk} /></div><button type="button" aria-label="返却案内を閉じる" onClick={() => setFuelNotice(null)} className="grid size-9 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"><X className="size-4" /></button></div></Card> : null}
         {/* 配置図では通知を見出しバーの中央に出し、地図の位置がずれないようにする。 */}
         {view !== "parking" ? <>
           {!isOnline ? <Card role="alert" className="flex flex-wrap items-center gap-3 border-amber-300 bg-amber-50 p-3 text-amber-950"><span className="grid size-9 shrink-0 place-items-center rounded-full bg-amber-500 text-white"><AlertTriangle className="size-4" /></span><div className="mr-auto"><p className="text-sm font-black">オフラインです</p><p className="text-xs text-amber-800">表示中の情報は更新されません。接続が戻ると自動的に再同期します。</p></div></Card> : null}
@@ -540,7 +541,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
             <div className="flex flex-1 basis-full flex-wrap justify-end gap-x-3 gap-y-1 md:basis-0">{activeVehicles.some((vehicle) => vehicle.hasBackMonitor) ? <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-bold text-slate-600" title="カメラマークはバックモニター付の車両です"><Camera className="size-3.5" />カメラ：バックモニター付</span> : null}{isWinterTireSeason() && activeVehicles.some((vehicle) => vehicle.hasWinterTires) ? <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-bold text-slate-600" title="雪マークはスタッドレスタイヤ装着中の車両です"><Snowflake className="size-3.5" />雪マーク：スタッドレスタイヤ</span> : null}</div>
           </div>
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_240px]">
-            <ParkingMap selectedVehicleId={parkingVehicleId} setSelectedVehicleId={setParkingVehicleId} data={data} trips={activeTrips} changedVehicleIds={changedVehicleIds} fuelWaveRequest={fuelWaveRequest} mutate={mutate} openStart={openStart} openReserve={openReserve} openReturn={openParkingReturn} openFuel={openFuel} openEdit={openEdit} openEnd={openEnd} actorName={employee?.name ?? "共用端末"} currentEmployeeId={employee?.id ?? null} returnRequest={mapReturnRequest} />
+            <ParkingMap selectedVehicleId={parkingVehicleId} setSelectedVehicleId={setParkingVehicleId} data={data} trips={activeTrips} changedVehicleIds={changedVehicleIds} fuelWaveRequest={fuelWaveRequest} fuelThankYou={fuelNotice?.kind === "thankYou" && dialog === null && !pendingAction ? fuelNotice : null} onCloseFuelThankYou={(operationId) => setFuelNotice((current) => current?.operationId === operationId ? null : current)} mutate={mutate} openStart={openStart} openReserve={openReserve} openReturn={openParkingReturn} openFuel={openFuel} openEdit={openEdit} openEnd={openEnd} actorName={employee?.name ?? "共用端末"} currentEmployeeId={employee?.id ?? null} returnRequest={mapReturnRequest} />
           </div>
         </section> : null}
 
@@ -563,7 +564,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
           </div> : null}
       </main>
 
-      {fuelNotice?.notice.displayMode === "MODAL" && dialog === null && !pendingAction ? <FuelReturnNoticeDialog key={fuelNotice.operationId} notice={fuelNotice.notice} kiosk={fuelNotice.kiosk} onClose={() => setFuelNotice(null)} /> : null}
+      {fuelNotice?.kind === "notice" && fuelNotice.notice.displayMode === "MODAL" && dialog === null && !pendingAction ? <FuelReturnNoticeDialog key={fuelNotice.operationId} notice={fuelNotice.notice} kiosk={fuelNotice.kiosk} onClose={() => setFuelNotice(null)} /> : null}
       {dialog === "nfc" && <NfcDialog employees={activeEmployees} vehicles={activeVehicles} onEmployee={(person) => { authenticateEmployee(person); setDialog(null); }} onVehicle={(vehicle) => { setDialog(null); openVehicleFromNfc(vehicle); }} onClose={() => setDialog(null)} />}
       {dialog === "user" && <UserPickerDialog kiosk={kiosk} employees={activeEmployees} currentId={employee?.id ?? null} nfcEnabled={kiosk && nfcAvailable} onSelect={(person) => { authenticateEmployee(person); setDialog(null); }} onClose={() => setDialog(null)} />}
       {dialog === "start" && <StartDialog key={`${startIntent}:${selectedVehicleId}`} intent={startIntent} kiosk={kiosk} submitting={pendingAction} employees={activeEmployees} vehicles={startIntent === "scheduled" ? activeVehicles : available} trips={data.trips} spots={data.spots} initialEmployee={employee?.active ? employee : null} initialVehicleId={selectedVehicleId} onClose={() => setDialog(null)} onSubmit={async (values) => { const identifiedEmployee = activeEmployees.find((person) => person.id === values.employeeId) ?? null; const scheduled = values.plannedStart !== null; const ok = await mutate(scheduled ? { action: "reserve", employeeId: values.employeeId, vehicleId: values.vehicleId, plannedStart: values.plannedStart!, minutes: values.minutes, actorName: values.employeeName, actorEmployeeId: values.employeeId } : { action: "start", employeeId: values.employeeId, vehicleId: values.vehicleId, minutes: values.minutes, actorName: values.employeeName, actorEmployeeId: values.employeeId }, scheduled ? "予約を登録しました" : "利用を開始しました"); if (ok) { setParkingVehicleId(null); setDialog(null); } if (ok && identifiedEmployee) { if (kiosk) finishKioskCheck(); else if (!employee) selectEmployee(identifiedEmployee); if (!scheduled) window.location.assign(`/timeline?started=1&vehicleId=${encodeURIComponent(values.vehicleId)}&employeeId=${encodeURIComponent(values.employeeId)}`); } }} />}
@@ -585,6 +586,25 @@ function SettingsSectionLoading() {
 }
 
 const FUEL_NOTICE_AUTO_CLOSE_SECONDS = 10;
+const FUEL_THANK_YOU_AUTO_CLOSE_MS = 4_000;
+export function FuelThankYouPopup({ state, onClose }: { state: FuelNoticeState; onClose: () => void }) {
+  const [minimumTimeElapsed, setMinimumTimeElapsed] = useState(false);
+  const [audioPlaying, setAudioPlaying] = useState(false);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    const timer = window.setTimeout(() => setMinimumTimeElapsed(true), FUEL_THANK_YOU_AUTO_CLOSE_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+  useEffect(() => { if (minimumTimeElapsed && !audioPlaying) onCloseRef.current(); }, [audioPlaying, minimumTimeElapsed]);
+  return <div className="pointer-events-none absolute inset-x-3 top-3 z-[65] flex justify-center">
+    <div role="status" aria-live="polite" className="pointer-events-auto flex w-full max-w-md items-start gap-3 rounded-2xl border border-slate-300 bg-white/95 p-3 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.65)] backdrop-blur-sm">
+      <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-700"><Gift className="size-4" /></span>
+      <div className="min-w-0 flex-1"><p className="mb-0.5 text-[11px] font-black text-emerald-700">給油のお礼</p><FuelReturnNoticeMessage notice={state.notice} kiosk={state.kiosk} compact onAudioPlaybackChange={setAudioPlaying} /></div>
+      <button type="button" aria-label="給油のお礼を閉じる" onClick={onClose} className="grid size-8 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800"><X className="size-4" /></button>
+    </div>
+  </div>;
+}
 function FuelReturnNoticeDialog({ notice, kiosk, onClose }: { notice: FuelReturnNotice; kiosk: boolean; onClose: () => void }) {
   const [remaining, setRemaining] = useState(FUEL_NOTICE_AUTO_CLOSE_SECONDS);
   const [pointerPaused, setPointerPaused] = useState(false);
@@ -1093,7 +1113,7 @@ function VehicleEquipmentBadges({ vehicle, compact = false, className }: { vehic
   </span>;
 }
 
-function ParkingMap({ selectedVehicleId, setSelectedVehicleId, data, trips, changedVehicleIds, fuelWaveRequest, mutate, openStart, openReserve, openReturn, openFuel, openEdit, openEnd, actorName, currentEmployeeId, returnRequest }: { selectedVehicleId: string | null; setSelectedVehicleId: React.Dispatch<React.SetStateAction<string | null>>; data: DashboardData; trips: Trip[]; changedVehicleIds: string[]; fuelWaveRequest: FuelWaveRequest | null; mutate: Mutate; openStart: (vehicle?: Vehicle) => void; openReserve: (vehicle: Vehicle) => void; openReturn: (spot: ParkingSpot) => void; openFuel: (vehicle: Vehicle) => void; openEdit: (trip: Trip) => void; openEnd: (trip: Trip, spotId?: string, changeSpot?: () => void) => void; actorName: string; currentEmployeeId: string | null; returnRequest: { tripId: string; nonce: number } | null }) {
+function ParkingMap({ selectedVehicleId, setSelectedVehicleId, data, trips, changedVehicleIds, fuelWaveRequest, fuelThankYou, onCloseFuelThankYou, mutate, openStart, openReserve, openReturn, openFuel, openEdit, openEnd, actorName, currentEmployeeId, returnRequest }: { selectedVehicleId: string | null; setSelectedVehicleId: React.Dispatch<React.SetStateAction<string | null>>; data: DashboardData; trips: Trip[]; changedVehicleIds: string[]; fuelWaveRequest: FuelWaveRequest | null; fuelThankYou: FuelNoticeState | null; onCloseFuelThankYou: (operationId: string) => void; mutate: Mutate; openStart: (vehicle?: Vehicle) => void; openReserve: (vehicle: Vehicle) => void; openReturn: (spot: ParkingSpot) => void; openFuel: (vehicle: Vehicle) => void; openEdit: (trip: Trip) => void; openEnd: (trip: Trip, spotId?: string, changeSpot?: () => void) => void; actorName: string; currentEmployeeId: string | null; returnRequest: { tripId: string; nonce: number } | null }) {
   // 車両移動モードでドラッグ中、またはタップで選んだ移動元の車両。
   const [movingVehicleId, setMovingVehicleId] = useState<string | null>(null);
   const idleTrafficEnabled = useIdleTrafficEnabled();
@@ -1240,6 +1260,7 @@ function ParkingMap({ selectedVehicleId, setSelectedVehicleId, data, trips, chan
     <div className="p-3 md:p-4">
       <div className="@container relative mx-auto aspect-[950/525] max-w-[1180px] overflow-hidden rounded-xl border border-slate-200 bg-white" style={{ width: "min(100%, calc((100vh - 270px) * 1.81))" }}>
         <img src="/parking-layout.svg" alt="" className="pointer-events-none absolute inset-0 size-full select-none" draggable={false} />
+        {fuelThankYou ? <FuelThankYouPopup key={fuelThankYou.operationId} state={fuelThankYou} onClose={() => onCloseFuelThankYou(fuelThankYou.operationId)} /> : null}
         <IdleTraffic enabled={idleTrafficEnabled} colors={data.vehicles.filter((vehicle) => vehicle.active).map((vehicle) => vehicle.color)} />
         {data.spots.map((spot) => <div key={spot.id} data-parking-spot-id={spot.id} onDragOver={(e) => { if (isTarget(spot)) e.preventDefault(); }} onDrop={(e) => { e.preventDefault(); if (returningTrip) returnTo(spot); else if (returningMaintenance) returnMaintenanceTo(spot); else moveTo(spot); }} className={cn("absolute grid place-items-center rounded-[4px] border-2 transition", parkingSpotClass(spot, !!spot.vehicle && offSiteVehicleIds.has(spot.vehicle.id)), spot.vehicle && reservationByVehicle.has(spot.vehicle.id) && "border-violet-500", sendOutBadgeOf(spot.vehicle) && "border-amber-500", isTarget(spot) && "border-dashed border-emerald-400 bg-emerald-50", (canReturnTo(spot) || canReturnMaintenanceTo(spot)) && !isCustomerSpot(spot) && "spot-beckon", pickingVehicle && !spot.vehicle && !canUseSpot(pickingVehicle, spot) && "cursor-not-allowed opacity-60", (spot.vehicle?.id === selectedVehicleId || spot.vehicle?.id === movingVehicleId) && "z-20 ring-4 ring-blue-700", spot.vehicle && changedVehicleIds.includes(spot.vehicle.id) && "z-10 ring-4 ring-amber-300 animate-pulse")} style={{ left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.width}%`, height: `${spot.height}%`, ...((canReturnTo(spot) || canReturnMaintenanceTo(spot)) ? { "--beckon-delay": `${(spot.x / 100) * 0.9}s` } as CSSProperties : {}) }}>
           {spot.vehicle && reservationByVehicle.has(spot.vehicle.id) ? <ParkingReservationBadge reservation={reservationByVehicle.get(spot.vehicle.id)!} /> : null}

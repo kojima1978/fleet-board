@@ -3,7 +3,7 @@ import { FuelReturnNoticeMessage } from "../components/fuel-return-notice-messag
 import { defaultFuelReturnNotice } from "../lib/fuel-return-notice";
 import { defaultFuelThankYouSetting, wasRefueled } from "../lib/fuel-thank-you";
 import { renderToStaticMarkup } from "react-dom/server";
-import { FuelLevelLabel, FuelReminder } from "../components/fleet-dashboard";
+import { FuelLevelLabel, FuelReminder, FuelThankYouPopup } from "../components/fleet-dashboard";
 import { FUEL_LEVEL_LABELS, needsReturnFuelReminder, needsStartFuelReminder } from "../lib/fuel-level";
 
 FUEL_LEVEL_LABELS.forEach((label, level) => {
@@ -51,3 +51,9 @@ assert.match(renderToStaticMarkup(<FuelReturnNoticeMessage notice={{ ...notice, 
 assert.doesNotMatch(renderToStaticMarkup(<FuelReturnNoticeMessage notice={notice} kiosk={false} />), /<audio/, "各自PCは音声を読み込まない");
 assert.match(renderToStaticMarkup(<FuelReturnNoticeMessage notice={notice} kiosk />), /<audio.*controls/, "共用端末は自動再生できない場合も手動再生できる");
 assert.doesNotMatch(renderToStaticMarkup(<FuelReturnNoticeMessage notice={{ ...notice, audioEnabled: false }} kiosk />), /<audio/, "音声なしでは登録済み音声を読み込まない");
+const compactThankYou = renderToStaticMarkup(<FuelReturnNoticeMessage notice={{ ...notice, message: "給油ありがとうございます！" }} kiosk={false} compact />);
+assert.match(compactThankYou, /給油ありがとうございます！/, "マップ上のお礼ポップにも設定した文面を表示する");
+assert.doesNotMatch(compactThankYou, /返却の登録が完了しました/, "マップ上のお礼ポップでは重複する完了見出しを省く");
+const mapPopup = renderToStaticMarkup(<FuelThankYouPopup state={{ operationId: "test-operation", kiosk: false, kind: "thankYou", notice: { ...notice, message: "給油ありがとうございます！" } }} onClose={() => undefined} />);
+assert.match(mapPopup, /absolute inset-x-3 top-3/, "お礼は配置図のレイアウトを動かさない絶対配置にする");
+assert.match(mapPopup, /給油のお礼/, "配置図上のお礼ポップだと分かる見出しを付ける");
