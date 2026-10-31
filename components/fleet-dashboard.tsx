@@ -585,7 +585,7 @@ function SettingsSectionLoading() {
   return <Card role="status" className="grid min-h-48 place-items-center"><div className="text-center"><LoaderCircle className="mx-auto size-7 animate-spin text-blue-600" /><p className="mt-2 text-sm font-bold text-slate-600">設定を読み込み中</p></div></Card>;
 }
 
-const FUEL_NOTICE_AUTO_CLOSE_SECONDS = 10;
+const FUEL_NOTICE_AUTO_CLOSE_SECONDS = 7;
 const FUEL_THANK_YOU_AUTO_CLOSE_MS = 4_000;
 export function FuelThankYouPopup({ state, onClose }: { state: FuelNoticeState; onClose: () => void }) {
   const [minimumTimeElapsed, setMinimumTimeElapsed] = useState(false);
