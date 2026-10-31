@@ -16,9 +16,8 @@ model FuelReturnNotice {
   parkingAnimationEnabled Boolean @default(false)
   parkingAnimationRefueledOnly Boolean @default(true)
   message     String
-  audioBase64 String?
-  audioMime   String?
-  audioName   String?
+  audioId     String?  @unique
+  audio       NoticeAudio? @relation(fields: [audioId], references: [id], onDelete: SetNull)
   version     Int      @default(1)
   updatedAt   DateTime @updatedAt
 }
@@ -30,9 +29,8 @@ model FuelStartNotice {
   animated     Boolean  @default(false)
   audioEnabled Boolean  @default(false)
   message      String
-  audioBase64  String?
-  audioMime    String?
-  audioName    String?
+  audioId      String?  @unique
+  audio        NoticeAudio? @relation(fields: [audioId], references: [id], onDelete: SetNull)
   version      Int      @default(1)
   updatedAt    DateTime @updatedAt
 }
@@ -42,9 +40,8 @@ model FuelThankYouSetting {
   enabled      Boolean  @default(true)
   audioEnabled Boolean  @default(true)
   message      String
-  audioBase64  String?
-  audioMime    String?
-  audioName    String?
+  audioId      String?  @unique
+  audio        NoticeAudio? @relation(fields: [audioId], references: [id], onDelete: SetNull)
   version      Int      @default(1)
   updatedAt    DateTime @updatedAt
 }
@@ -53,11 +50,23 @@ model ParkingGuidanceSetting {
   event        String   @id
   enabled      Boolean  @default(true)
   message      String
-  audioBase64  String?
-  audioMime    String?
-  audioName    String?
+  audioId      String?  @unique
+  audio        NoticeAudio? @relation(fields: [audioId], references: [id], onDelete: SetNull)
   version      Int      @default(1)
   updatedAt    DateTime @updatedAt
+}
+
+// 案内・お礼で流す音声ファイル。各設定から1件ずつ参照し、差し替え・削除で参照が外れたものは消す。
+model NoticeAudio {
+  id                     String                  @id @default(cuid())
+  data                   Bytes
+  mime                   String
+  name                   String
+  createdAt              DateTime                @default(now())
+  fuelReturnNotice       FuelReturnNotice?
+  fuelStartNotice        FuelStartNotice?
+  fuelThankYouSetting    FuelThankYouSetting?
+  parkingGuidanceSetting ParkingGuidanceSetting?
 }
 
 enum VehicleStatus {
@@ -74,6 +83,12 @@ enum ParkingSpotRole {
   CUSTOMER
   DEDICATED
   HOLDING
+}
+
+// 配置図での区画の向き。
+enum ParkingSpotOrientation {
+  vertical
+  horizontal
 }
 
 // 整備の種類。ON_SITEは故障で駐車場内に置いたまま、OFF_SITEは車検・修理で外出し、ほかの車を停められるよう区画を空ける。
@@ -102,8 +117,8 @@ model Employee {
   employeeNumber   EmployeeNumber @relation(fields: [employeeNumberId], references: [id])
   departmentId     String
   department       Department     @relation(fields: [departmentId], references: [id])
-    name             String
-    email            String?        @unique
+  name             String
+  email            String?        @unique
   // 社員番号とは独立したQRコード用の不変トークン。番号を再利用してもQRの割当先は変わらない。
   qrToken          String         @unique
   active           Boolean        @default(true)
@@ -213,16 +228,28 @@ model ParkingSpot {
   y           Float
   width       Float
   height      Float
-  orientation String
+  orientation ParkingSpotOrientation
   enabled     Boolean  @default(true)
   role        ParkingSpotRole @default(REGULAR)
   dedicatedVehicleId String?
   dedicatedVehicle Vehicle? @relation("DedicatedVehicle", fields: [dedicatedVehicleId], references: [id], onDelete: NoAction)
   label       String?
   // 中央の道路側にある区画。ここに車があると出庫・入庫できないので注意を出す。
-  frontSpotIds String[] @default([])
+  fronts      ParkingSpotFront[] @relation("SpotFronts")
+  behinds     ParkingSpotFront[] @relation("FrontOfSpots")
   vehicle     Vehicle?
   version     Int      @default(1)
+}
+
+// 手前の区画。spotIdの区画に出し入れするとき、frontSpotIdの区画に車があると通れない。
+model ParkingSpotFront {
+  spotId      String
+  spot        ParkingSpot @relation("SpotFronts", fields: [spotId], references: [id], onDelete: Cascade)
+  frontSpotId String
+  frontSpot   ParkingSpot @relation("FrontOfSpots", fields: [frontSpotId], references: [id], onDelete: Cascade)
+
+  @@id([spotId, frontSpotId])
+  @@index([frontSpotId])
 }
 
 model Trip {

@@ -3,7 +3,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { FUEL_NOTICE_LEVELS, fuelNoticeDisplayModeLabel, fuelNoticeLegacyFlags, fuelNoticePhase, fuelNoticeUpdateSchema } from "@/lib/fuel-return-notice";
 import { formatFuelLevel } from "@/lib/fuel-level";
-import { readFuelNotice, validateNoticeAudio } from "@/lib/fuel-return-notice-store";
+import { readFuelNotice } from "@/lib/fuel-return-notice-store";
+import { deleteUnusedNoticeAudio, noticeAudioData, parseNoticeAudio } from "@/lib/notice-audio-store";
 import { consumeRateLimit, isSameOriginRequest, readJsonBody, requestClientKey } from "@/lib/request-security";
 
 export const dynamic = "force-dynamic";
@@ -16,8 +17,9 @@ export async function POST(request: Request) {
   if (!consumeRateLimit("fuel-return-settings", requestClientKey(request), 20, 60_000).allowed) return NextResponse.json({ message: "操作が多すぎます。少し待ってください" }, { status: 429 });
   try {
     const input = fuelNoticeUpdateSchema.parse(await readJsonBody(request, 3 * 1024 * 1024));
-    const audio = input.audio === undefined ? {} : input.audio === null ? { audioBase64: null, audioMime: null, audioName: null } : { audioBase64: input.audio.base64, audioMime: validateNoticeAudio(input.audio.base64), audioName: input.audio.fileName };
+    const audioFile = parseNoticeAudio(input.audio);
     await prisma.$transaction(async (tx) => {
+      const audio = await noticeAudioData(tx, audioFile);
       const data = { displayMode: input.displayMode, ...fuelNoticeLegacyFlags(input.displayMode), audioEnabled: input.audioEnabled, message: input.message, ...audio };
       if (input.version === 0) {
         if (input.phase === "START") await tx.fuelStartNotice.create({ data: { level: input.level, ...data } });
@@ -26,6 +28,7 @@ export async function POST(request: Request) {
         const result = input.phase === "START" ? await tx.fuelStartNotice.updateMany({ where: { level: input.level, version: input.version }, data: { ...data, version: { increment: 1 } } }) : await tx.fuelReturnNotice.updateMany({ where: { level: input.level, version: input.version }, data: { ...data, parkingAnimationEnabled: input.parkingAnimationEnabled, parkingAnimationRefueledOnly: input.parkingAnimationRefueledOnly, version: { increment: 1 } } });
         if (result.count !== 1) throw new Error("CONFLICT");
       }
+      await deleteUnusedNoticeAudio(tx);
       await tx.auditLog.create({ data: { actorName: "設定画面", action: `${input.phase === "START" ? "利用開始時" : "返却時"}ガソリン案内変更`, targetType: input.phase === "START" ? "FuelStartNotice" : "FuelReturnNotice", targetId: String(input.level), description: `${formatFuelLevel(input.level)}を${fuelNoticeDisplayModeLabel[input.displayMode]}・音声${input.audioEnabled ? "あり" : "なし"}${input.phase === "RETURN" ? `・区画演出${input.parkingAnimationEnabled ? input.parkingAnimationRefueledOnly ? "あり（給油時のみ）" : "あり（毎回）" : "なし"}` : ""}に設定${input.audio !== undefined ? "・音声ファイルを変更" : ""}` } });
     });
     return NextResponse.json({ notice: await readFuelNotice(input.level, input.phase) });

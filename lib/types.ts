@@ -12,7 +12,7 @@ export type Vehicle = {
 };
 export type ParkingSpot = {
   id: string; code: string; x: number; y: number; width: number; height: number;
-  orientation: string; enabled: boolean; version: number; vehicle: Vehicle | null;
+  orientation: "vertical" | "horizontal"; enabled: boolean; version: number; vehicle: Vehicle | null;
   role: ParkingSpotRole; dedicatedVehicleId: string | null; dedicatedVehicleName: string | null; label: string | null;
   frontSpotIds: string[];
 };

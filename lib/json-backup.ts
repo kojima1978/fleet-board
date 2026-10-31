@@ -3,6 +3,7 @@ import { validateNoticeAudio } from "@/lib/fuel-return-notice-store";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@/prisma/generated/client";
 import { getApplicationSystemStatus } from "@/lib/system-status";
 import { FUEL_LEVEL_MAX } from "@/lib/fuel-level";
 import { upgradeLegacyCodes } from "@/lib/record-codes";
@@ -21,7 +22,7 @@ const nullableDateTime = dateTime.nullable();
 const departmentSchema = z.object({ id, name: z.string().min(1).max(100), active: z.boolean(), sortOrder: z.number().int().optional(), version: z.number().int().nonnegative().optional(), createdAt: dateTime, updatedAt: dateTime }).strict();
 const employeeNumberSchema = z.object({ id, code: z.string().min(1).max(100), createdAt: dateTime, updatedAt: dateTime }).strict();
 const vehicleNumberSchema = z.object({ id, code: z.string().min(1).max(100), createdAt: dateTime, updatedAt: dateTime }).strict();
-const parkingSpotSchema = z.object({ id, code: z.string().min(1).max(100), x: z.number().finite(), y: z.number().finite(), width: z.number().finite().positive(), height: z.number().finite().positive(), orientation: z.string().min(1).max(50), enabled: z.boolean(), role: z.enum(["REGULAR", "TEMPORARY", "CUSTOMER", "DEDICATED", "HOLDING"]).optional(), dedicatedVehicleId: id.nullable().optional(), label: z.string().max(100).nullable().optional(), frontSpotIds: z.array(id).max(100).optional(), version: z.number().int().nonnegative() }).strict();
+const parkingSpotSchema = z.object({ id, code: z.string().min(1).max(100), x: z.number().finite(), y: z.number().finite(), width: z.number().finite().positive(), height: z.number().finite().positive(), orientation: z.enum(["vertical", "horizontal"]), enabled: z.boolean(), role: z.enum(["REGULAR", "TEMPORARY", "CUSTOMER", "DEDICATED", "HOLDING"]).optional(), dedicatedVehicleId: id.nullable().optional(), label: z.string().max(100).nullable().optional(), frontSpotIds: z.array(id).max(100).optional(), version: z.number().int().nonnegative() }).strict();
 const nfcTagSchema = z.object({ id, uid: z.string().min(1).max(100), createdAt: dateTime, updatedAt: dateTime }).strict();
 const employeeSchema = z.object({ id, employeeNumberId: id, departmentId: id, name: z.string().min(1).max(100), email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()).nullable().optional(), qrToken: z.string().min(16).max(100).optional(), active: z.boolean(), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
 const fuelLevelSchema = z.number().int().min(0).max(FUEL_LEVEL_MAX).nullable().optional();
@@ -220,7 +221,7 @@ export async function createFleetBackup(): Promise<FleetBackup> {
       tx.department.findMany({ orderBy: { id: "asc" } }),
       tx.employeeNumber.findMany({ orderBy: { id: "asc" } }),
       tx.vehicleNumber.findMany({ orderBy: { id: "asc" } }),
-      tx.parkingSpot.findMany({ orderBy: { id: "asc" } }),
+      tx.parkingSpot.findMany({ orderBy: { id: "asc" }, include: { fronts: { select: { frontSpotId: true }, orderBy: { frontSpotId: "asc" } } } }),
       tx.nfcTag.findMany({ orderBy: { id: "asc" } }),
       tx.employee.findMany({ orderBy: { id: "asc" } }),
       tx.vehicle.findMany({ orderBy: { id: "asc" } }),
@@ -228,17 +229,23 @@ export async function createFleetBackup(): Promise<FleetBackup> {
       tx.trip.findMany({ orderBy: { id: "asc" } }),
       tx.vehicleMaintenance.findMany({ orderBy: { id: "asc" } }),
       tx.auditLog.findMany({ orderBy: { id: "asc" } }),
-      tx.fuelReturnNotice.findMany({ orderBy: { level: "asc" } }),
-      tx.fuelStartNotice.findMany({ orderBy: { level: "asc" } }),
-      tx.parkingGuidanceSetting.findMany({ orderBy: { event: "asc" } }),
-      tx.fuelThankYouSetting.findMany({ orderBy: { id: "asc" } }),
+      tx.fuelReturnNotice.findMany({ orderBy: { level: "asc" }, include: { audio: true } }),
+      tx.fuelStartNotice.findMany({ orderBy: { level: "asc" }, include: { audio: true } }),
+      tx.parkingGuidanceSetting.findMany({ orderBy: { event: "asc" }, include: { audio: true } }),
+      tx.fuelThankYouSetting.findMany({ orderBy: { id: "asc" }, include: { audio: true } }),
     ]);
-    return { departments, employeeNumbers, vehicleNumbers, parkingSpots, nfcTags, employees, vehicles, nfcAssignments, trips, vehicleMaintenances, auditLogs, fuelReturnNotices, fuelStartNotices, parkingGuidanceSettings, fuelThankYouSettings };
+    // バックアップの形式は変えず、手前の区画はID配列、音声はbase64で書き出す。
+    return { departments, employeeNumbers, vehicleNumbers, parkingSpots: parkingSpots.map(({ fronts, ...spot }) => ({ ...spot, frontSpotIds: fronts.map((item) => item.frontSpotId) })), nfcTags, employees, vehicles, nfcAssignments, trips, vehicleMaintenances, auditLogs, fuelReturnNotices: fuelReturnNotices.map(withBackupAudio), fuelStartNotices: fuelStartNotices.map(withBackupAudio), parkingGuidanceSettings: parkingGuidanceSettings.map(withBackupAudio), fuelThankYouSettings: fuelThankYouSettings.map(withBackupAudio) };
   }, { isolationLevel: "RepeatableRead", timeout: 30_000 });
   const system = await systemPromise;
   return JSON.parse(JSON.stringify({ format: "fleetflow-json-backup", formatVersion: JSON_BACKUP_FORMAT_VERSION, exportedAt: new Date().toISOString(), source: { appVersion: system.appVersion, schemaVersion: system.schemaVersion }, data })) as FleetBackup;
 }
 
+const withBackupAudio = <T extends { audioId: string | null; audio: { data: Uint8Array; mime: string; name: string } | null }>({ audioId: _audioId, audio, ...item }: T) =>
+  ({ ...item, audioBase64: audio ? Buffer.from(audio.data).toString("base64") : null, audioMime: audio?.mime ?? null, audioName: audio?.name ?? null });
+// バックアップの音声を保存し、設定の音声列を音声のIDへ置き換える。
+const withRestoredAudio = async <T extends { audioBase64: string | null; audioMime: string | null; audioName: string | null }>(tx: Prisma.TransactionClient, { audioBase64, audioMime, audioName, ...item }: T) =>
+  ({ ...item, audioId: audioBase64 && audioMime && audioName ? (await tx.noticeAudio.create({ data: { data: new Uint8Array(Buffer.from(audioBase64, "base64")), mime: audioMime, name: audioName }, select: { id: true } })).id : null });
 const asDate = (value: string) => new Date(value);
 // 役割を持たない以前のバックアップは、当時コードで固定していた役割で復元する。
 const legacySpotRole = (code: string, data: FleetBackup["data"]) => {
@@ -255,11 +262,12 @@ export async function restoreFleetBackup(backup: FleetBackup) {
   const data = backup.data;
   await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('fleetflow-json-restore'))::text AS restore_lock`;
-    await tx.$executeRawUnsafe('LOCK TABLE "FuelThankYouSetting", "ParkingGuidanceSetting", "FuelStartNotice", "FuelReturnNotice", "AuditLog", "NfcAssignment", "Trip", "VehicleMaintenance", "Employee", "Vehicle", "NfcTag", "EmployeeNumber", "VehicleNumber", "Department", "ParkingSpot" IN ACCESS EXCLUSIVE MODE');
+    await tx.$executeRawUnsafe('LOCK TABLE "FuelThankYouSetting", "ParkingGuidanceSetting", "FuelStartNotice", "FuelReturnNotice", "NoticeAudio", "AuditLog", "NfcAssignment", "Trip", "VehicleMaintenance", "Employee", "Vehicle", "NfcTag", "EmployeeNumber", "VehicleNumber", "Department", "ParkingSpotFront", "ParkingSpot" IN ACCESS EXCLUSIVE MODE');
     await tx.fuelThankYouSetting.deleteMany();
     await tx.parkingGuidanceSetting.deleteMany();
     await tx.fuelStartNotice.deleteMany();
     await tx.fuelReturnNotice.deleteMany();
+    await tx.noticeAudio.deleteMany();
     await tx.auditLog.deleteMany();
     await tx.nfcAssignment.deleteMany();
     await tx.trip.deleteMany();
@@ -270,22 +278,25 @@ export async function restoreFleetBackup(backup: FleetBackup) {
     await tx.employeeNumber.deleteMany();
     await tx.vehicleNumber.deleteMany();
     await tx.department.deleteMany();
+    await tx.parkingSpotFront.deleteMany();
     await tx.parkingSpot.deleteMany();
 
     if (data.departments.length) await tx.department.createMany({ data: data.departments.map((item) => ({ ...item, createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
     if (data.employeeNumbers.length) await tx.employeeNumber.createMany({ data: data.employeeNumbers.map((item) => ({ ...item, createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
     if (data.vehicleNumbers.length) await tx.vehicleNumber.createMany({ data: data.vehicleNumbers.map((item) => ({ ...item, createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
-    if (data.parkingSpots.length) await tx.parkingSpot.createMany({ data: data.parkingSpots.map((item) => ({ ...item, ...(item.role === undefined ? legacySpotRole(item.code, data) : {}) })) });
+    if (data.parkingSpots.length) await tx.parkingSpot.createMany({ data: data.parkingSpots.map(({ frontSpotIds: _frontSpotIds, ...item }) => ({ ...item, ...(item.role === undefined ? legacySpotRole(item.code, data) : {}) })) });
+    const fronts = data.parkingSpots.flatMap((spot) => [...new Set(spot.frontSpotIds ?? [])].filter((frontSpotId) => frontSpotId !== spot.id).map((frontSpotId) => ({ spotId: spot.id, frontSpotId })));
+    if (fronts.length) await tx.parkingSpotFront.createMany({ data: fronts });
     if (data.nfcTags.length) await tx.nfcTag.createMany({ data: data.nfcTags.map((item) => ({ ...item, createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
     if (data.employees.length) await tx.employee.createMany({ data: data.employees.map((item) => ({ ...item, qrToken: item.qrToken!, createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
     if (data.vehicles.length) await tx.vehicle.createMany({ data: data.vehicles.map((item) => ({ ...item, qrToken: item.qrToken!, createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
     if (data.nfcAssignments.length) await tx.nfcAssignment.createMany({ data: data.nfcAssignments.map((item) => ({ ...item, validFrom: asDate(item.validFrom), validTo: asNullableDate(item.validTo), createdAt: asDate(item.createdAt) })) });
     if (data.trips.length) await tx.trip.createMany({ data: data.trips.map((item) => ({ ...item, plannedStart: asDate(item.plannedStart), plannedEnd: asDate(item.plannedEnd), actualStart: asNullableDate(item.actualStart), actualEnd: asNullableDate(item.actualEnd), snapshotCapturedAt: asNullableDate(item.snapshotCapturedAt), createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
     if (data.vehicleMaintenances.length) await tx.vehicleMaintenance.createMany({ data: data.vehicleMaintenances.map((item) => ({ ...item, plannedStart: asDate(item.plannedStart), plannedEnd: asNullableDate(item.plannedEnd), actualStart: asNullableDate(item.actualStart), actualEnd: asNullableDate(item.actualEnd), createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
-    if (data.fuelReturnNotices.length) await tx.fuelReturnNotice.createMany({ data: data.fuelReturnNotices.map((item) => ({ ...item, updatedAt: asDate(item.updatedAt) })) });
-    if (data.fuelStartNotices.length) await tx.fuelStartNotice.createMany({ data: data.fuelStartNotices.map((item) => ({ ...item, updatedAt: asDate(item.updatedAt) })) });
-    if (data.parkingGuidanceSettings.length) await tx.parkingGuidanceSetting.createMany({ data: data.parkingGuidanceSettings.map((item) => ({ ...item, updatedAt: asDate(item.updatedAt) })) });
-    if (data.fuelThankYouSettings.length) await tx.fuelThankYouSetting.createMany({ data: data.fuelThankYouSettings.map((item) => ({ ...item, updatedAt: asDate(item.updatedAt) })) });
+    for (const item of data.fuelReturnNotices) await tx.fuelReturnNotice.create({ data: { ...(await withRestoredAudio(tx, item)), updatedAt: asDate(item.updatedAt) } });
+    for (const item of data.fuelStartNotices) await tx.fuelStartNotice.create({ data: { ...(await withRestoredAudio(tx, item)), updatedAt: asDate(item.updatedAt) } });
+    for (const item of data.parkingGuidanceSettings) await tx.parkingGuidanceSetting.create({ data: { ...(await withRestoredAudio(tx, item)), updatedAt: asDate(item.updatedAt) } });
+    for (const item of data.fuelThankYouSettings) await tx.fuelThankYouSetting.create({ data: { ...(await withRestoredAudio(tx, item)), updatedAt: asDate(item.updatedAt) } });
     if (data.auditLogs.length) await tx.auditLog.createMany({ data: data.auditLogs.map((item) => ({ ...item, createdAt: asDate(item.createdAt) })) });
     await tx.auditLog.create({ data: { operationId: randomUUID(), actorName: "設定画面", action: "JSON一括復元", targetType: "System", targetId: backup.exportedAt, description: `${backup.exportedAt}に書き出したJSONバックアップを復元` } });
   }, { isolationLevel: "Serializable", maxWait: 10_000, timeout: 120_000 });

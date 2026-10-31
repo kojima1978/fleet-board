@@ -39,7 +39,7 @@ async function main() {
     assert.equal(sound.status, 200); assert.equal(sound.headers.get("Content-Type"), "audio/wav"); assert.deepEqual(Buffer.from(await sound.arrayBuffer()), wav);
     assert.equal((await save(request(base))).status, 409, "stale create rejected");
     response = await save(request({ ...base, version: 1, displayMode: "NONE", audioEnabled: false, audio: undefined })); assert.equal(response.status, 200); assert.equal((await response.json()).notice.audioEnabled, false);
-    assert.equal((await prisma.fuelReturnNotice.findUniqueOrThrow({ where: { level: 0 } })).audioBase64, upload.base64, "text-only save keeps audio");
+    assert.equal(Buffer.from((await prisma.fuelReturnNotice.findUniqueOrThrow({ where: { level: 0 }, include: { audio: true } })).audio!.data).toString("base64"), upload.base64, "text-only save keeps audio");
     assert.equal((await save(request({ ...base, level: 1, message: "1/4の案内テスト" }))).status, 200);
     assert.equal((await save(request({ ...base, level: 4, displayMode: "MESSAGE", audioEnabled: false, parkingAnimationEnabled: true, message: "Fの案内テスト", audio: undefined }))).status, 200);
     const startResponse = await save(request({ phase: "START", level: 2, version: 0, displayMode: "MODAL", audioEnabled: false, message: "利用開始時の確認テスト" }));
@@ -95,7 +95,7 @@ async function main() {
     assert.equal((await save(request({ ...base, version: 2, audio: null }))).status, 200);
     assert.equal((await audio(new Request("http://localhost"), { params: Promise.resolve({ level: "0" }) })).status, 404);
     await restoreFleetBackup(backup);
-    assert.equal((await prisma.fuelReturnNotice.findUniqueOrThrow({ where: { level: 0 } })).audioBase64, upload.base64);
+    assert.equal(Buffer.from((await prisma.fuelReturnNotice.findUniqueOrThrow({ where: { level: 0 }, include: { audio: true } })).audio!.data).toString("base64"), upload.base64);
     assert.equal((await prisma.fuelStartNotice.findUniqueOrThrow({ where: { level: 2 } })).message, "利用開始時の確認テスト");
     await restoreFleetBackup(parseFleetBackup(old));
     assert.equal(await prisma.fuelReturnNotice.count(), 0);

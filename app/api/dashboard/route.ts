@@ -305,7 +305,7 @@ export async function GET(request: Request) {
     prisma.department.findMany({ include: { _count: { select: { employees: { where: { active: true } } } } }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
     prisma.vehicle.findMany({ include: { vehicleNumber: true, nfcAssignments: { include: { nfcTag: true }, orderBy: { validFrom: "desc" }, take: 1 } }, orderBy: { vehicleNumber: { code: "asc" } } }),
     // 車両本体は直前の一覧で取得済み。区画側はIDだけ取得し、重複したJOINとNFC検索を避ける。
-    prisma.parkingSpot.findMany({ include: { vehicle: { select: { id: true } } }, orderBy: { code: "asc" } }),
+    prisma.parkingSpot.findMany({ include: { vehicle: { select: { id: true } }, fronts: { select: { frontSpotId: true }, orderBy: { frontSpot: { code: "asc" } } } }, orderBy: { code: "asc" } }),
     prisma.trip.findMany({
       where: scope === "settings" ? { status: "IN_USE" } : { OR: [
         { status: "RESERVED", plannedStart: { lt: dayEnd }, plannedEnd: { gt: dayStart } },
@@ -334,7 +334,7 @@ export async function GET(request: Request) {
     employees: employees.map((employee) => withEmployeeCode(employee)),
     departments: departments.map((department) => ({ id: department.id, name: department.name, active: department.active, version: department.version, employeeCount: department._count.employees })),
     vehicles: vehiclePayload,
-    spots: spots.map((spot) => ({ ...spot, dedicatedVehicleName: spot.dedicatedVehicleId ? vehicleById.get(spot.dedicatedVehicleId)?.name ?? null : null, vehicle: spot.vehicle ? vehicleById.get(spot.vehicle.id) ?? null : null })),
+    spots: spots.map(({ fronts, ...spot }) => ({ ...spot, frontSpotIds: fronts.map((item) => item.frontSpotId), dedicatedVehicleName: spot.dedicatedVehicleId ? vehicleById.get(spot.dedicatedVehicleId)?.name ?? null : null, vehicle: spot.vehicle ? vehicleById.get(spot.vehicle.id) ?? null : null })),
     trips: trips.map((trip) => ({ ...trip, employee: withEmployeeCode(trip.employee), vehicle: withVehicleCode(trip.vehicle) })),
     nextReservations: nextReservations.map((trip) => ({ ...trip, employee: withEmployeeCode(trip.employee), vehicle: withVehicleCode(trip.vehicle) })),
     maintenances,
@@ -1084,7 +1084,8 @@ export async function POST(request: Request) {
         // 番号の取り合いは区画番号用のロックで順番にする。
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('fleet-spot-codes'))::text AS spot_code_lock`;
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-spot:${input.id}`}))::text AS spot_lock`;
-        const spot = await tx.parkingSpot.findUniqueOrThrow({ where: { id: input.id }, include: { vehicle: { select: { id: true, name: true } } } });
+        const spot = await tx.parkingSpot.findUniqueOrThrow({ where: { id: input.id }, include: { vehicle: { select: { id: true, name: true } }, fronts: { select: { frontSpotId: true } } } });
+        const savedFrontSpotIds = spot.fronts.map((item) => item.frontSpotId);
         const dedicatedVehicleId = input.role === "DEDICATED" ? input.dedicatedVehicleId : null;
         let dedicatedVehicleName: string | null = null;
         if (input.role === "DEDICATED") {
@@ -1098,17 +1099,21 @@ export async function POST(request: Request) {
         const roleChanged = spot.role !== input.role || spot.dedicatedVehicleId !== dedicatedVehicleId;
         const labelChanged = spot.label !== input.label;
         // 手前の区画は送られたときだけ変える。自分自身と重複は除き、存在する区画だけを受け付ける。
-        const frontSpotIds = input.frontSpotIds ? [...new Set(input.frontSpotIds)].filter((id) => id !== input.id) : spot.frontSpotIds;
+        const frontSpotIds = input.frontSpotIds ? [...new Set(input.frontSpotIds)].filter((id) => id !== input.id) : savedFrontSpotIds;
         const frontSpots = frontSpotIds.length ? await tx.parkingSpot.findMany({ where: { id: { in: frontSpotIds } }, select: { id: true, code: true }, orderBy: { code: "asc" } }) : [];
         if (frontSpots.length !== frontSpotIds.length) throw new Error("手前の区画に存在しない区画が含まれています");
-        const frontSpotsChanged = [...spot.frontSpotIds].sort().join() !== [...frontSpotIds].sort().join();
+        const frontSpotsChanged = [...savedFrontSpotIds].sort().join() !== [...frontSpotIds].sort().join();
         if (!codeChanged && !roleChanged && !labelChanged && !frontSpotsChanged) throw new Error("区画番号・用途・表示名・手前の区画は変更されていません");
         if (codeChanged) {
           const sameCode = await tx.parkingSpot.findUnique({ where: { code: input.code }, select: { id: true } });
           if (sameCode) throw new Error(`区画番号${input.code}はすでに使われています`);
         }
-        const updated = await tx.parkingSpot.updateMany({ where: { id: input.id, version: input.version }, data: { code: input.code, role: input.role, dedicatedVehicleId, label: input.label, frontSpotIds: frontSpots.map((item) => item.id), version: { increment: 1 } } });
+        const updated = await tx.parkingSpot.updateMany({ where: { id: input.id, version: input.version }, data: { code: input.code, role: input.role, dedicatedVehicleId, label: input.label, version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
+        if (frontSpotsChanged) {
+          await tx.parkingSpotFront.deleteMany({ where: { spotId: input.id } });
+          await tx.parkingSpotFront.createMany({ data: frontSpots.map((item) => ({ spotId: input.id, frontSpotId: item.id })) });
+        }
         const previousName = spot.dedicatedVehicleId ? (await tx.vehicle.findUnique({ where: { id: spot.dedicatedVehicleId }, select: { name: true } }))?.name ?? null : null;
         const describe = (role: typeof input.role, name: string | null) => role === "DEDICATED" ? `${name ?? "車両未設定"}専用` : SPOT_ROLE_LABELS[role];
         const changes = [codeChanged ? `番号を${input.code}へ` : "", roleChanged ? `用途を「${describe(spot.role, previousName)}」から「${describe(input.role, dedicatedVehicleName)}」へ` : "", labelChanged ? `表示名を${input.label ? `「${input.label}」` : "自動"}へ` : "", frontSpotsChanged ? `手前の区画を${frontSpots.length ? frontSpots.map((item) => item.code).join("・") : "なし"}へ` : ""].filter(Boolean).join("、");

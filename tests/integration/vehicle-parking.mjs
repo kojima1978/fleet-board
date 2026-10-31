@@ -22,7 +22,7 @@ async function post(body) {
   return { status: response.status, body: await response.json() };
 }
 const create = (i, spotId) => post({ action: "createVehicle", code: codes[i], name: `駐車登録テスト${i}`, plateNumber: plates[i], color: "#2563eb", nfcUid: "", ...(spotId ? { spotId } : {}) });
-const spotRow = async (id) => (await client.query('SELECT * FROM "ParkingSpot" WHERE id=$1', [id])).rows[0];
+const spotRow = async (id) => (await client.query('SELECT s.*, COALESCE((SELECT array_agg(f."frontSpotId") FROM "ParkingSpotFront" f WHERE f."spotId"=s.id), ARRAY[]::text[]) AS "frontSpotIds" FROM "ParkingSpot" s WHERE s.id=$1', [id])).rows[0];
 const updateSpot = async (id, changes, version) => { const row = await spotRow(id); return post({ action: "updateSpot", id, version: version ?? row.version, code: row.code, label: row.label, role: row.role, dedicatedVehicleId: row.dedicatedVehicleId, frontSpotIds: row.frontSpotIds, ...changes }); };
 const setRole = (id, role, dedicatedVehicleId = null, version) => updateSpot(id, { role, dedicatedVehicleId }, version);
 const importItem = (i, spotId) => ({ code: codes[i], name: `駐車取込テスト${i}`, plateNumber: plates[i], ...(spotId ? { spotId } : {}) });
