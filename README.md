@@ -652,6 +652,9 @@ IPが変わると、古いIPを前提にした設定が次のように影響し�
 # TypeScript
 docker compose exec app npm run lint
 
+# 移行SQLを適用した開発DBとschema.prismaのずれ（ずれがあれば差分を表示して終了コード2）
+docker compose exec app npm run db:check-drift
+
 # 利用開始、二重送信、返却、ガソリン残量と残量修正、予約、変更、取消
 docker compose exec app npm run test:integration
 
@@ -694,7 +697,7 @@ docker compose exec app npm audit
 & '.\FleetFlow Production Update.cmd' -NoUi
 ```
 
-DBスキーマは`prisma/migrations`の番号付きSQLで管理し、開発・本番とも`prisma migrate deploy`を使用します。CHECK制約・部分一意索引・履歴保護トリガー・遅延外部キーを維持するため、`prisma db push`は使用しません。新しい変更は既存の適用済みSQLを書き換えず、追加移行で管理します。
+DBスキーマは`prisma/migrations`の番号付きSQLで管理し、開発・本番とも`prisma migrate deploy`を使用します。CHECK制約・部分一意索引・履歴保護トリガー・遅延外部キーを維持するため、`prisma db push`は使用しません。新しい変更は既存の適用済みSQLを書き換えず、追加移行で管理します。移行SQLは手書きするため、追加したら開発DBへ適用したあと`npm run db:check-drift`でschema.prismaとずれていないことを確認します。
 
 ### 依存関係の監査方針
 

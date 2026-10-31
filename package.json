@@ -47,6 +47,7 @@
     "nfc:build": "docker compose --profile tools run --rm nfc-bridge-build",
     "db:generate": "prisma generate",
     "db:migrate:deploy": "prisma migrate deploy",
+    "db:check-drift": "prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:production": "tsx prisma/seed-production.ts"
   },
