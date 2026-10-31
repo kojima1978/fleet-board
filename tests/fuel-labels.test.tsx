@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { FuelReturnNoticeMessage } from "../components/fuel-return-notice-message";
 import { defaultFuelReturnNotice } from "../lib/fuel-return-notice";
+import { defaultFuelThankYouSetting, wasRefueled } from "../lib/fuel-thank-you";
 import { renderToStaticMarkup } from "react-dom/server";
 import { FuelLevelLabel, FuelReminder } from "../components/fleet-dashboard";
 import { FUEL_LEVEL_LABELS, needsReturnFuelReminder, needsStartFuelReminder } from "../lib/fuel-level";
@@ -39,6 +40,11 @@ assert.deepEqual([4, 3, 2, 1, 0].map((level) => defaultFuelReturnNotice(level as
 assert.deepEqual([4, 3, 2, 1, 0].map((level) => defaultFuelReturnNotice(level as 0 | 1 | 2 | 3 | 4).displayMode), ["NONE", "NONE", "NONE", "MODAL", "MODAL"], "初期設定は1/4以下だけポップ表示する");
 assert.deepEqual([4, 3, 2, 1, 0].map((level) => defaultFuelReturnNotice(level as 0 | 1 | 2 | 3 | 4, "START").displayMode), ["NONE", "NONE", "MESSAGE", "EMPHASIZED", "EMPHASIZED"], "利用開始時は1/2をメッセージ、1/4以下を強調表示する");
 assert.ok([4, 3, 2, 1, 0].every((level) => !defaultFuelReturnNotice(level as 0 | 1 | 2 | 3 | 4, "START").audioEnabled), "利用開始時の音声は初期状態で無効");
+assert.equal(defaultFuelThankYouSetting().message, "給油ありがとうございます！", "給油時のお礼は分かりやすい初期文面にする");
+assert.equal(wasRefueled(0, 4), true, "Eで出庫してFで返却した場合は給油と判断する");
+assert.equal(wasRefueled(1, 3), true, "満タン以外でも残量が増えれば給油と判断する");
+assert.equal(wasRefueled(4, 4), false, "同じ残量では給油と判断しない");
+assert.equal(wasRefueled(null, 4), false, "出庫時の残量が不明なら給油したと断定しない");
 assert.match(renderToStaticMarkup(<FuelReturnNoticeMessage notice={notice} kiosk={false} />), /fuel-reminder-attention/, "強調ONではアニメーション用クラスを付ける");
 assert.doesNotMatch(renderToStaticMarkup(<FuelReturnNoticeMessage notice={{ ...notice, displayMode: "MESSAGE", animated: false }} kiosk={false} />), /fuel-reminder-attention/, "メッセージ表示では静止表示にする");
 assert.match(renderToStaticMarkup(<FuelReturnNoticeMessage notice={{ ...notice, displayMode: "EMPHASIZED" }} kiosk={false} />), /fuel-reminder-attention/, "強調表示ではアニメーション用クラスを付ける");

@@ -56,14 +56,15 @@ const maintenance = (id: string, offset: number, status: VehicleMaintenance["sta
 const jst = (value: string) => Date.parse(`${value}+09:00`);
 const at = (id: string, value: string, status: VehicleMaintenance["status"] = "SCHEDULED") => ({ ...maintenance(id, 0, status), plannedStart: new Date(jst(value)).toISOString() });
 const maintenances = [at("m2", "2026-10-29T00:00:00"), at("mt", "2026-10-28T23:59:00"), maintenance("m1", -day), at("ma", "2026-10-28T09:00:00", "ACTIVE"), at("mc", "2026-10-28T09:00:00", "CANCELLED"), maintenance("m0", 0)];
-assert.deepEqual(getUpcomingMaintenances(maintenances, start).map((item) => item.id), ["m1", "m0", "mt"], "開始予定日の前日から、未開始の予定を開始予定の近い順に出す（開始予定を過ぎた未開始も含める）");
+assert.deepEqual(getUpcomingMaintenances(maintenances, start).map((item) => item.id), ["m1", "m0", "mt", "m2"], "開始予定日の2日前から、未開始の予定を開始予定の近い順に出す（開始予定を過ぎた未開始も含める）");
 assert.equal(renderToStaticMarkup(<UpcomingMaintenances items={[]} vehicles={[vehicle]} spots={[spot]} now={start} onOpen={() => {}} />), "", "予定がなければ欄ごと出さない");
 const upcomingHtml = renderToStaticMarkup(<UpcomingMaintenances items={[maintenance("u1", 0), maintenance("u2", day), maintenance("u3", 2 * day), maintenance("u4", 3 * day)]} vehicles={[vehicle]} spots={[spot]} now={start} onOpen={() => {}} />);
 assert.match(upcomingHtml, /車検・整備の予定/);
+assert.match(upcomingHtml, /2日前から/);
 assert.match(upcomingHtml, /C001　予約テスト車両/);
 assert.match(upcomingHtml, /区画 A01 ・ 戻り/, "予約と同じく今の区画を出す");
-assert.match(upcomingHtml, /出庫待ち/, "今日の予定は出庫待ち");
-assert.match(upcomingHtml, /出庫予定/, "明日の予定は出庫予定");
+assert.match(upcomingHtml, /車検開始待ち/, "今日の予定は車検開始待ち");
+assert.match(upcomingHtml, /車検予定/, "翌日以降の予定は車検予定");
 assert.equal(upcomingHtml.match(/の車検・整備の予定を確認/g)?.length, 3, "最大3件まで表示");
 assert.match(upcomingHtml, /ほか1件/);
 assert.equal(canSendOutMaintenance({ status: "SCHEDULED", plannedStart: new Date(jst("2026-10-27T23:59:00")).toISOString() }, start), true, "今日中に始まる予定は出せる");
@@ -71,7 +72,7 @@ assert.equal(canSendOutMaintenance({ status: "SCHEDULED", plannedStart: new Date
 assert.equal(canSendOutMaintenance({ status: "SCHEDULED", plannedStart: new Date(start - 3 * day).toISOString() }, start), true, "開始予定を過ぎた予定も出せる");
 assert.equal(canSendOutMaintenance({ status: "ACTIVE", plannedStart: new Date(start).toISOString() }, start), false, "始まった整備には出さない");
 assert.equal(canSendOutMaintenance({ status: "SCHEDULED", plannedStart: new Date(jst("2026-10-28T08:00:00")).toISOString() }, jst("2026-10-28T00:30:00")), true, "日付が変わったら東京時間の今日で判断する");
-assert.doesNotMatch(upcomingHtml, />出庫</, "出庫は配置図から行うため、予定欄には操作を出さない");
+assert.doesNotMatch(upcomingHtml, />車検を開始</, "車検開始は配置図の詳細から行うため、予定一覧の行には操作を出さない");
 const onSiteHtml = renderToStaticMarkup(<UpcomingMaintenances items={[{ ...maintenance("o1", 0), kind: "ON_SITE" }]} vehicles={[vehicle]} spots={[spot]} now={start} onOpen={() => {}} />);
 assert.match(onSiteHtml, /開始待ち/, "駐車場内の故障は「開始待ち」");
 const inUseHtml = renderToStaticMarkup(<UpcomingMaintenances items={[maintenance("i1", 0)]} vehicles={[{ ...vehicle, status: "IN_USE" }]} spots={[spot]} now={start} onOpen={() => {}} />);

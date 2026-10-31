@@ -5,6 +5,7 @@ import { Check, Fuel, LoaderCircle, Play, Save, Trash2, Upload, Volume2, VolumeX
 import { FUEL_NOTICE_AUDIO_MAX_BYTES, FUEL_NOTICE_DISPLAY_MODES, fuelNoticeDisplayModeLabel, type FuelNoticeDisplayMode, type FuelNoticePhase, type FuelReturnNotice } from "@/lib/fuel-return-notice";
 import { formatFuelLevel } from "@/lib/fuel-level";
 import { Button, Card, cn } from "./ui";
+import { FuelThankYouSettings } from "./fuel-thank-you-settings";
 
 type UploadFile = { fileName: string; base64: string };
 
@@ -43,6 +44,7 @@ export function FuelReturnNoticeSettings() {
     {!error && !notices.length ? <div role="status" className="flex items-center gap-2 px-5 py-8 text-sm text-slate-500"><LoaderCircle className="size-4 animate-spin" />設定を読み込んでいます</div> : null}
     {notices.length ? <div role="tablist" aria-label="ガソリン残量" className="grid grid-cols-5 gap-1 border-b border-slate-100 bg-slate-50/70 p-2 sm:gap-2 sm:px-5">{notices.map((notice) => <button key={notice.level} type="button" role="tab" aria-selected={selectedLevel === notice.level} aria-controls={`fuel-notice-panel-${notice.level}`} onClick={() => setSelectedLevel(notice.level)} className={cn("flex min-h-12 items-center justify-center gap-1.5 rounded-xl border text-sm font-black transition", selectedLevel === notice.level ? "border-slate-300 bg-white text-slate-900 shadow-sm" : "border-transparent text-slate-500 hover:border-slate-200 hover:bg-white")}><span className={cn("size-2 rounded-full", notice.displayMode !== "NONE" ? "bg-emerald-500" : "bg-slate-300")} /><span className="tabular-nums">{formatFuelLevel(notice.level)}</span><span className="hidden text-[10px] font-bold sm:inline">{notice.displayMode !== "NONE" ? "ON" : "OFF"}</span></button>)}</div> : null}
     <div>{notices.map((notice) => <div key={notice.level} id={`fuel-notice-panel-${notice.level}`} role="tabpanel" hidden={selectedLevel !== notice.level}><NoticeEditor key={`${notice.level}:${notice.version}`} notice={notice} onSaved={(saved) => setNotices((items) => items.map((item) => item.level === saved.level ? saved : item))} /></div>)}</div>
+    {phase === "RETURN" ? <FuelThankYouSettings /> : null}
     <div className="border-t border-slate-100 bg-slate-50/70 px-4 py-3 text-xs leading-5 text-slate-500 sm:px-5">音声はMP3・WAV（各2MBまで）に対応しています。設定は全端末で共有され、JSONバックアップにも保存されます。</div>
   </Card>;
 }
@@ -83,7 +85,7 @@ function NoticeEditor({ notice, onSaved }: { notice: FuelReturnNotice; onSaved: 
     const timer = window.setTimeout(() => controller.abort(), 10_000);
     try {
       player.current?.pause();
-      const response = await fetch("/api/settings/fuel-return", { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ phase: notice.phase, level: notice.level, version: notice.version, displayMode, audioEnabled, message, ...(audio !== undefined ? { audio } : {}) }) });
+      const response = await fetch("/api/settings/fuel-return", { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ phase: notice.phase, level: notice.level, version: notice.version, displayMode, audioEnabled, parkingAnimationEnabled: notice.parkingAnimationEnabled, parkingAnimationRefueledOnly: notice.parkingAnimationRefueledOnly, message, ...(audio !== undefined ? { audio } : {}) }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.message);
       onSaved(result.notice);

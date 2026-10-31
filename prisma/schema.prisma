@@ -13,6 +13,8 @@ model FuelReturnNotice {
   enabled     Boolean  @default(true)
   animated    Boolean  @default(true)
   audioEnabled Boolean @default(true)
+  parkingAnimationEnabled Boolean @default(false)
+  parkingAnimationRefueledOnly Boolean @default(true)
   message     String
   audioBase64 String?
   audioMime   String?
@@ -27,6 +29,29 @@ model FuelStartNotice {
   enabled      Boolean  @default(false)
   animated     Boolean  @default(false)
   audioEnabled Boolean  @default(false)
+  message      String
+  audioBase64  String?
+  audioMime    String?
+  audioName    String?
+  version      Int      @default(1)
+  updatedAt    DateTime @updatedAt
+}
+
+model FuelThankYouSetting {
+  id           String   @id @default("default")
+  enabled      Boolean  @default(true)
+  audioEnabled Boolean  @default(true)
+  message      String
+  audioBase64  String?
+  audioMime    String?
+  audioName    String?
+  version      Int      @default(1)
+  updatedAt    DateTime @updatedAt
+}
+
+model ParkingGuidanceSetting {
+  event        String   @id
+  enabled      Boolean  @default(true)
   message      String
   audioBase64  String?
   audioMime    String?

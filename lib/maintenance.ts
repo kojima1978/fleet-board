@@ -22,11 +22,11 @@ const isTokyoToday = (value: string, now: number) => { const time = Date.parse(v
 const tokyoTime = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false });
 const tokyoDate = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric" });
 
-// 駐車場の画面に出す整備予定は、開始予定日の前日から。
-export const UPCOMING_MAINTENANCE_DAYS_BEFORE = 1;
+// 駐車場の画面に出す整備予定は、準備に余裕を持てるよう開始予定日の2日前から。
+export const UPCOMING_MAINTENANCE_DAYS_BEFORE = 2;
 export const UPCOMING_MAINTENANCE_LIMIT = 3;
 
-// まだ始めていない整備予定のうち、開始予定日の前日になったものを開始予定の近い順に返す。開始予定を過ぎても始めていない予定も含める。
+// まだ始めていない整備予定のうち、開始予定日の2日前になったものを開始予定の近い順に返す。開始予定を過ぎても始めていない予定も含める。
 export function getUpcomingMaintenances<T extends { status: string; plannedStart: string }>(maintenances: readonly T[], now: number, daysBefore = UPCOMING_MAINTENANCE_DAYS_BEFORE) {
   const until = tokyoDayEnd(now, daysBefore);
   return maintenances.filter((item) => item.status === "SCHEDULED" && Date.parse(item.plannedStart) < until).sort((a, b) => a.plannedStart.localeCompare(b.plannedStart));

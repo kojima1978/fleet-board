@@ -23,11 +23,13 @@ async function main() {
     assert.deepEqual(defaults.notices.map((notice: { level: number }) => notice.level), [4, 3, 2, 1, 0]);
     assert.deepEqual(defaults.notices.map((notice: { enabled: boolean }) => notice.enabled), [false, false, false, true, true]);
     assert.deepEqual(defaults.notices.map((notice: { displayMode: string }) => notice.displayMode), ["NONE", "NONE", "NONE", "MODAL", "MODAL"]);
+    assert.deepEqual(defaults.notices.map((notice: { parkingAnimationEnabled: boolean }) => notice.parkingAnimationEnabled), [true, false, false, false, false]);
+    assert.ok(defaults.notices.every((notice: { parkingAnimationRefueledOnly: boolean }) => notice.parkingAnimationRefueledOnly));
     const startDefaults = await (await settings(new Request("http://localhost/api/settings/fuel-return?phase=START"))).json();
     assert.deepEqual(startDefaults.notices.map((notice: { displayMode: string }) => notice.displayMode), ["NONE", "NONE", "MESSAGE", "EMPHASIZED", "EMPHASIZED"]);
     assert.ok(startDefaults.notices.every((notice: { phase: string; audioEnabled: boolean }) => notice.phase === "START" && !notice.audioEnabled));
     assert.equal(defaults.notices[0].version, 0);
-    const base = { level: 0, version: 0, displayMode: "MODAL", audioEnabled: true, message: "Eの案内テスト", audio: upload };
+    const base = { level: 0, version: 0, displayMode: "MODAL", audioEnabled: true, parkingAnimationEnabled: false, parkingAnimationRefueledOnly: true, message: "Eの案内テスト", audio: upload };
     assert.equal((await save(request(base, "http://evil.invalid"))).status, 403);
     for (const change of [{ level: 5 }, { message: " " }, { audio: { ...upload, base64: Buffer.from("<html>bad</html>").toString("base64") } }, { audio: { ...upload, base64: Buffer.alloc(FUEL_NOTICE_AUDIO_MAX_BYTES + 1).toString("base64") } }]) assert.equal((await save(request({ ...base, ...change }))).status, 400);
     let response = await save(request(base)); assert.equal(response.status, 200);
@@ -39,7 +41,7 @@ async function main() {
     response = await save(request({ ...base, version: 1, displayMode: "NONE", audioEnabled: false, audio: undefined })); assert.equal(response.status, 200); assert.equal((await response.json()).notice.audioEnabled, false);
     assert.equal((await prisma.fuelReturnNotice.findUniqueOrThrow({ where: { level: 0 } })).audioBase64, upload.base64, "text-only save keeps audio");
     assert.equal((await save(request({ ...base, level: 1, message: "1/4の案内テスト" }))).status, 200);
-    assert.equal((await save(request({ ...base, level: 4, displayMode: "MESSAGE", audioEnabled: false, message: "Fの案内テスト", audio: undefined }))).status, 200);
+    assert.equal((await save(request({ ...base, level: 4, displayMode: "MESSAGE", audioEnabled: false, parkingAnimationEnabled: true, message: "Fの案内テスト", audio: undefined }))).status, 200);
     const startResponse = await save(request({ phase: "START", level: 2, version: 0, displayMode: "MODAL", audioEnabled: false, message: "利用開始時の確認テスト" }));
     assert.equal(startResponse.status, 200); assert.equal((await startResponse.json()).notice.phase, "START");
 
@@ -61,7 +63,7 @@ async function main() {
         assert.equal(result.data.fuelReturnNotice.message, "1/4の案内テスト");
         assert.ok(result.data.fuelReturnNotice.audioUrl);
         const replay = await post(end, operationId); assert.equal(replay.data.replayed, true); assert.equal(replay.data.fuelReturnNotice.level, 1);
-      } else if (level === 4) { assert.equal(result.data.fuelReturnNotice.message, "Fの案内テスト"); assert.equal(result.data.fuelReturnNotice.displayMode, "MESSAGE"); assert.equal(result.data.fuelReturnNotice.animated, false); assert.equal(result.data.fuelReturnNotice.audioEnabled, false); }
+      } else if (level === 4) { assert.equal(result.data.fuelReturnNotice.message, "Fの案内テスト"); assert.equal(result.data.fuelReturnNotice.displayMode, "MESSAGE"); assert.equal(result.data.fuelReturnNotice.animated, false); assert.equal(result.data.fuelReturnNotice.audioEnabled, false); assert.equal(result.data.fuelThankYou.message, "給油ありがとうございます！"); }
       else assert.equal(result.data.fuelReturnNotice, undefined, "disabled/other/unknown level has no notice");
     }
     await prisma.vehicle.update({ where: { id: vehicle.id }, data: { status: "MAINTENANCE", parkingSpotId: null } });
@@ -82,6 +84,10 @@ async function main() {
     assert.deepEqual(parseFleetBackup(oldWithoutDisplayMode).data.fuelReturnNotices.map((notice) => notice.displayMode), ["NONE", "MODAL", "MESSAGE"], "旧バックアップは有効・強調設定から表示方法を復元");
     const oldWithoutAudioToggle = JSON.parse(JSON.stringify(backup)); for (const notice of oldWithoutAudioToggle.data.fuelReturnNotices) delete notice.audioEnabled;
     assert.ok(parseFleetBackup(oldWithoutAudioToggle).data.fuelReturnNotices.every((notice) => notice.audioEnabled), "旧バックアップは音声ONとして復元");
+    const oldWithoutParkingAnimation = JSON.parse(JSON.stringify(backup)); for (const notice of oldWithoutParkingAnimation.data.fuelReturnNotices) delete notice.parkingAnimationEnabled;
+    assert.equal(parseFleetBackup(oldWithoutParkingAnimation).data.fuelReturnNotices.find((notice) => notice.level === 4)?.parkingAnimationEnabled, true, "旧バックアップの満タンは区画演出ONとして復元");
+    const oldWithoutAnimationCondition = JSON.parse(JSON.stringify(backup)); for (const notice of oldWithoutAnimationCondition.data.fuelReturnNotices) delete notice.parkingAnimationRefueledOnly;
+    assert.ok(parseFleetBackup(oldWithoutAnimationCondition).data.fuelReturnNotices.every((notice) => notice.parkingAnimationRefueledOnly), "旧バックアップの区画演出は給油時のみとして復元");
     const broken = JSON.parse(JSON.stringify(backup)); broken.data.fuelReturnNotices[0].audioMime = null;
     assert.throws(() => parseFleetBackup(broken));
     const duplicate = JSON.parse(JSON.stringify(backup)); duplicate.data.fuelReturnNotices = [backup.data.fuelReturnNotices[0], backup.data.fuelReturnNotices[0]];

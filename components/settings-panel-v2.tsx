@@ -83,6 +83,19 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
   const [vehicleForm, setVehicleForm] = useState(emptyVehicle);
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);
   const [maintenanceVehicleId, setMaintenanceVehicleId] = useState<string | null>(null);
+  const [maintenancePlanId, setMaintenancePlanId] = useState<string | null>(null);
+  const closeMaintenance = useCallback(() => {
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has("maintenanceVehicleId") || url.searchParams.has("maintenancePlanId")) {
+        url.searchParams.delete("maintenanceVehicleId");
+        url.searchParams.delete("maintenancePlanId");
+        window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+      }
+    }
+    setMaintenanceVehicleId(null);
+    setMaintenancePlanId(null);
+  }, []);
   const [submitting, setSubmitting] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [highlightId, setHighlightId] = useState("");
@@ -137,6 +150,18 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
     const suffix = params.toString();
     window.history.replaceState({}, "", `${window.location.pathname}${suffix ? `?${suffix}` : ""}`);
   }, [department, email, kind, nfc, pageSize, query, status, urlHydrated]);
+
+  useEffect(() => {
+    if (!urlHydrated || kind !== "vehicle" || maintenanceVehicleId) return;
+    const requestedId = new URLSearchParams(window.location.search).get("maintenanceVehicleId");
+    if (requestedId && data.vehicles.some((vehicle) => vehicle.id === requestedId)) {
+      const requestedPlanId = new URLSearchParams(window.location.search).get("maintenancePlanId");
+      const validPlanId = data.maintenances.some((item) => item.id === requestedPlanId && item.vehicleId === requestedId && item.status === "SCHEDULED") ? requestedPlanId : null;
+      setMaintenanceVehicleId(requestedId);
+      setMaintenancePlanId(validPlanId);
+      setHighlightId(requestedId);
+    }
+  }, [data.maintenances, data.vehicles, kind, maintenanceVehicleId, urlHydrated]);
 
   useEffect(() => {
     if (!highlightId) return;
@@ -284,7 +309,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
           return;
         }
         if (maintenanceVehicleId) {
-          setMaintenanceVehicleId(null);
+          closeMaintenance();
           return;
         }
         if (confirmTarget) {
@@ -321,7 +346,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [closeDrawer, confirmTarget, discardConfirm, drawerOpen, maintenanceVehicleId, nfcChangeConfirm, nfcEmployee, nfcVehicle, submitting]);
+  }, [closeDrawer, closeMaintenance, confirmTarget, discardConfirm, drawerOpen, maintenanceVehicleId, nfcChangeConfirm, nfcEmployee, nfcVehicle, submitting]);
   const openCreate = () => {
     closeDrawer(true);
     setDrawerOpen(true);
@@ -1575,7 +1600,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
           </div>
         </div>
       ) : null}
-      {maintenanceVehicle ? <MaintenanceDialog vehicle={maintenanceVehicle} data={data} mutate={mutate} fromSettings onClose={() => setMaintenanceVehicleId(null)} onDone={() => setHighlightId(maintenanceVehicle.id)} /> : null}
+      {maintenanceVehicle ? <MaintenanceDialog vehicle={maintenanceVehicle} data={data} mutate={mutate} fromSettings initialMaintenanceId={maintenancePlanId ?? undefined} onClose={closeMaintenance} onDone={() => setHighlightId(maintenanceVehicle.id)} /> : null}
       {discardConfirm ? (
         <div className="fixed inset-0 z-[70] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm">
           <div role="alertdialog" aria-modal="true" className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl">

@@ -5,7 +5,8 @@ import { CalendarClock, CarFront, Check, MapPin, Wrench, X } from "lucide-react"
 import type { DashboardData, Vehicle, VehicleMaintenance } from "@/lib/types";
 import { needsReturnFuelReminder } from "@/lib/fuel-level";
 import { formatMaintenanceTime, MAINTENANCE_KIND_LABELS, MAINTENANCE_KIND_SHORT_LABELS,MAINTENANCE_MAX_DAYS, MAINTENANCE_NOTE_MAX, MAINTENANCE_SCHEDULE_DAYS_AHEAD, type MaintenanceKind } from "@/lib/maintenance";
-import { canUseSpot, formatSpotLabel, isCustomerSpot } from "@/lib/parking-spots";
+import { blockingFrontSpots, canUseSpot, formatSpotLabel, isCustomerSpot } from "@/lib/parking-spots";
+import { useParkingGuidanceAnnouncement } from "@/lib/use-parking-guidance";
 import { CustomerSpotNotice } from "./customer-spot-notice";
 import { FrontSpotNotice } from "./front-spot-notice";
 import { FuelLevelPicker, FuelReminder } from "./fuel-controls";
@@ -73,7 +74,7 @@ export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, current
     return run({ action: "scheduleMaintenance", vehicleId: vehicle.id, kind, note, plannedStart: fromLocalInput(start), plannedEnd: fromLocalInput(end) }, `${vehicle.name}の整備予定を登録しました`);
   };
   const startScheduled = (item: VehicleMaintenance) => run({ action: "startMaintenance", vehicleId: vehicle.id, version: vehicle.version, kind: item.kind, note: item.note, plannedEnd: item.plannedEnd && new Date(item.plannedEnd) > new Date() ? item.plannedEnd : null, maintenanceId: item.id, ...actorBody }, `${vehicle.name}を${MAINTENANCE_KIND_SHORT_LABELS[item.kind]}にしました`);
-  const finish = () => run({ action: "endMaintenance", vehicleId: vehicle.id, version: vehicle.version, ...(active?.kind === "OFF_SITE" ? { spotId, fuelLevel } : {}), ...actorBody }, active?.kind === "OFF_SITE" ? `${vehicle.name}を返却しました` : `${vehicle.name}を利用可能に戻しました`);
+  const finish = () => run({ action: "endMaintenance", vehicleId: vehicle.id, version: vehicle.version, ...(active?.kind === "OFF_SITE" ? { spotId, fuelLevel } : {}), ...actorBody }, active?.kind === "OFF_SITE" ? `${vehicle.name}の車検を終了しました` : `${vehicle.name}を利用可能に戻しました`);
   const now = toLocalInput(new Date());
   const nowEndMax = addDays(now, MAINTENANCE_MAX_DAYS);
   const startMax = addDays(now, MAINTENANCE_SCHEDULE_DAYS_AHEAD);
@@ -134,15 +135,15 @@ export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, current
         <MaintenanceSummary items={active ? [{ label: "状態", value: MAINTENANCE_KIND_LABELS[active.kind] }, { label: "車両", value: `${vehicle.code}・${vehicle.name}` }, { label: "開始", value: formatMaintenanceTime(active.actualStart ?? active.plannedStart) }, { label: "戻り予定", value: active.plannedEnd ? formatMaintenanceTime(active.plannedEnd) : "未定" }] : [{ label: "状態", value: "整備中" }, { label: "車両", value: `${vehicle.code}・${vehicle.name}` }]} />
         {active?.note ? <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-600"><span className="mr-2 font-bold text-slate-500">備考</span>{active.note}</p> : null}
         {active?.kind === "OFF_SITE" ? <fieldset disabled={submitting} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <legend className="px-1 text-sm font-black text-slate-800">車検終了・返却</legend>
-          <div className={cn("flex items-center gap-2 rounded-xl border px-3 py-2", selectedSpot ? "border-slate-200 bg-slate-50" : "border-amber-200 bg-amber-50 text-amber-800")}><MapPin className="size-4 shrink-0" /><p className="mr-auto text-sm font-black"><span className="mr-2 text-xs font-bold opacity-70">返却先</span>{selectedSpot ? formatSpotLabel(selectedSpot) : "未選択"}</p>{selectedSpot && onChooseSpot ? <Button variant="ghost" className="min-h-9 shrink-0 px-3 text-xs" onClick={onChooseSpot}>変更</Button> : null}</div>
-          {onChooseSpot ? !selectedSpot ? <Button className="min-h-12 w-full" onClick={onChooseSpot}><MapPin className="size-4" />配置図で返却先を選ぶ</Button> : null : <label className="block"><span className="mb-1 block text-xs font-bold text-slate-600">返却先を選択</span><select className={field} value={spotId} onChange={(event) => setSpotId(event.target.value)}><option value="">選んでください</option>{freeSpots.map((spot) => <option key={spot.id} value={spot.id}>{formatSpotLabel(spot)}</option>)}</select></label>}
+          <legend className="px-1 text-sm font-black text-slate-800">車検を終了</legend>
+          <div className={cn("flex items-center gap-2 rounded-xl border px-3 py-2", selectedSpot ? "border-slate-200 bg-slate-50" : "border-amber-200 bg-amber-50 text-amber-800")}><MapPin className="size-4 shrink-0" /><p className="mr-auto text-sm font-black"><span className="mr-2 text-xs font-bold opacity-70">駐車区画</span>{selectedSpot ? formatSpotLabel(selectedSpot) : "未選択"}</p>{selectedSpot && onChooseSpot ? <Button variant="ghost" className="min-h-9 shrink-0 px-3 text-xs" onClick={onChooseSpot}>変更</Button> : null}</div>
+          {onChooseSpot ? !selectedSpot ? <Button className="min-h-12 w-full" onClick={onChooseSpot}><MapPin className="size-4" />配置図で駐車区画を選ぶ</Button> : null : <label className="block"><span className="mb-1 block text-xs font-bold text-slate-600">駐車区画を選択</span><select className={field} value={spotId} onChange={(event) => setSpotId(event.target.value)}><option value="">選んでください</option>{freeSpots.map((spot) => <option key={spot.id} value={spot.id}>{formatSpotLabel(spot)}</option>)}</select></label>}
           {selectedSpot && isCustomerSpot(selectedSpot) ? <CustomerSpotNotice spots={data.spots} vehicle={vehicle} /> : null}
           <FrontSpotNotice spot={selectedSpot} spots={data.spots} vehicleId={vehicle.id} direction="in" />
           {selectedSpot ? <><FuelLevelPicker value={fuelLevel} onChange={changeFuelLevel} />
             {needsReturnFuelReminder(fuelLevel) ? <FuelReminder key={fuelLevel} context="return" attention /> : null}
-            <Button className="min-h-12 w-full" disabled={submitting} onClick={() => void finish()}><Check className="size-4" />{submitting ? "返却登録中…" : `${formatSpotLabel(selectedSpot)}へ返却する`}</Button>
-            <p className="text-center text-[11px] text-slate-500">このボタンを押すまで返却は確定しません。</p></> : <p className="text-[11px] leading-5 text-slate-500">返却先は配置図をタップ、または車検中の車を空き区画へドラッグして選べます。</p>}
+            <Button className="min-h-12 w-full" disabled={submitting} onClick={() => void finish()}><Check className="size-4" />{submitting ? "終了登録中…" : `${formatSpotLabel(selectedSpot)}に停めて終了`}</Button>
+            <p className="text-center text-[11px] text-slate-500">このボタンを押すまで車検終了は確定しません。</p></> : <p className="text-[11px] leading-5 text-slate-500">駐車区画は配置図をタップ、または車検中の車を空き区画へドラッグして選べます。</p>}
         </fieldset> : null}
         {active ? <fieldset disabled={submitting} className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/50 p-4">
           <legend className="px-1 text-sm font-black text-slate-700">戻り予定を延長</legend>
@@ -173,22 +174,24 @@ export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, current
   </div>;
 }
 
-// 駐車場の画面から、登録済みの予定どおり車検に出庫する（故障は整備を始める）。予定は予約を止めるためのもので、実際に出たことはこの操作で記録する。
+// 駐車場の画面から、登録済みの予定どおり車検を開始する（故障は整備を始める）。予定は予約を止めるためのもので、実際に車検へ出たことはこの操作で記録する。
 export function SendOutDialog({ vehicle, maintenance, data, mutate, currentEmployeeId, onClose }: { vehicle: Vehicle; maintenance: VehicleMaintenance; data: DashboardData; mutate: Mutate; currentEmployeeId: string | null; onClose: () => void }) {
   const [end, setEnd] = useState(toLocalInput(maintenance.plannedEnd && new Date(maintenance.plannedEnd) > new Date() ? maintenance.plannedEnd : null));
   const [submitting, setSubmitting] = useState(false);
   const offSite = maintenance.kind === "OFF_SITE";
   const spot = data.spots.find((item) => item.id === vehicle.parkingSpotId);
+  const departureBlocked = offSite && blockingFrontSpots(spot, data.spots, vehicle.id).length > 0;
+  useParkingGuidanceAnnouncement(offSite ? departureBlocked ? "BLOCKED_OUT" : "DEPARTURE" : null);
   const now = toLocalInput(new Date());
   const nowEndMax = addDays(now, MAINTENANCE_MAX_DAYS);
   const canStartNow = vehicle.status === "AVAILABLE";
   const ready = canStartNow && inRange(end, now, nowEndMax);
-  const actionLabel = offSite ? "出庫する" : "整備中にする";
+  const actionLabel = offSite ? "車検を開始" : "整備中にする";
   const submit = async () => {
     if (submitting || !ready) return;
     setSubmitting(true);
     try {
-      if (await mutate({ action: "startMaintenance", vehicleId: vehicle.id, version: vehicle.version, kind: maintenance.kind, note: maintenance.note, plannedEnd: fromLocalInput(end), maintenanceId: maintenance.id, ...auditActorBody(currentEmployeeId) }, offSite ? `${vehicle.name}を車検に出庫しました` : `${vehicle.name}を${MAINTENANCE_KIND_SHORT_LABELS[maintenance.kind]}にしました`)) onClose();
+      if (await mutate({ action: "startMaintenance", vehicleId: vehicle.id, version: vehicle.version, kind: maintenance.kind, note: maintenance.note, plannedEnd: fromLocalInput(end), maintenanceId: maintenance.id, ...auditActorBody(currentEmployeeId) }, offSite ? `${vehicle.name}の車検を開始しました` : `${vehicle.name}を${MAINTENANCE_KIND_SHORT_LABELS[maintenance.kind]}にしました`)) onClose();
     } finally { setSubmitting(false); }
   };
   return <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm" onKeyDown={(event) => { if (event.key === "Escape" && !submitting) onClose(); }}>

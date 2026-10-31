@@ -9,6 +9,7 @@ import { upgradeLegacyCodes } from "@/lib/record-codes";
 import { defaultSpotRoles } from "@/prisma/parking-spot-seed";
 import { createQrToken } from "@/lib/qr-code";
 import { validateBackupIntegrity } from "@/lib/backup-integrity";
+import { parkingGuidanceEvent } from "@/lib/parking-guidance";
 
 export const JSON_BACKUP_FORMAT_VERSION = 1;
 export const JSON_BACKUP_MAX_BYTES = 50 * 1024 * 1024;
@@ -40,13 +41,28 @@ const tripSchema = z.object({ id, employeeId: id, vehicleId: id, plannedStart: d
 const vehicleMaintenanceSchema = z.object({ id, vehicleId: id, kind: z.enum(["ON_SITE", "OFF_SITE"]), status: z.enum(["SCHEDULED", "ACTIVE", "COMPLETED", "CANCELLED"]), note: z.string().max(500).nullable(), plannedStart: dateTime, plannedEnd: nullableDateTime, actualStart: nullableDateTime, actualEnd: nullableDateTime, returnSpotCode: z.string().max(100).nullable(), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
 const auditLogSchema = z.object({ id, operationId: z.string().max(100).nullable(), actorEmployeeId: id.nullable(), actorName: z.string().max(100), action: z.string().max(100), targetType: z.string().max(100), targetId: z.string().max(100), description: z.string().max(1000), createdAt: dateTime }).strict();
 
-const fuelReturnNoticeSchema = z.object({ level: fuelNoticeLevel, displayMode: fuelNoticeDisplayMode.optional(), enabled: z.boolean(), animated: z.boolean().default(true), audioEnabled: z.boolean().default(true), message: fuelNoticeMessage, version: z.number().int().positive(), updatedAt: dateTime,
+const fuelReturnNoticeSchema = z.object({ level: fuelNoticeLevel, displayMode: fuelNoticeDisplayMode.optional(), enabled: z.boolean(), animated: z.boolean().default(true), audioEnabled: z.boolean().default(true), parkingAnimationEnabled: z.boolean().optional(), parkingAnimationRefueledOnly: z.boolean().optional(), message: fuelNoticeMessage, version: z.number().int().positive(), updatedAt: dateTime,
   audioBase64: z.string().max(Math.ceil(FUEL_NOTICE_AUDIO_MAX_BYTES / 3) * 4).nullable(), audioMime: z.enum(["audio/mpeg", "audio/wav"]).nullable(), audioName: z.string().min(1).max(100).nullable(),
 }).strict().superRefine((item, context) => {
   if (item.audioBase64 === null && item.audioMime === null && item.audioName === null) return;
   try { if (!item.audioBase64 || !item.audioName || validateNoticeAudio(item.audioBase64) !== item.audioMime) throw new Error(); }
   catch { context.addIssue({code:"custom",message:"返却時案内の音声データが不正です"}); }
-}).transform((item) => ({ ...item, displayMode: item.displayMode ?? (!item.enabled ? "NONE" as const : item.animated ? "MODAL" as const : "MESSAGE" as const) }));
+}).transform((item) => ({ ...item, displayMode: item.displayMode ?? (!item.enabled ? "NONE" as const : item.animated ? "MODAL" as const : "MESSAGE" as const), parkingAnimationEnabled: item.parkingAnimationEnabled ?? item.level === 4, parkingAnimationRefueledOnly: item.parkingAnimationRefueledOnly ?? true }));
+const fuelStartNoticeSchema = fuelReturnNoticeSchema.transform(({ parkingAnimationEnabled: _parkingAnimationEnabled, parkingAnimationRefueledOnly: _parkingAnimationRefueledOnly, ...item }) => item);
+const parkingGuidanceSettingSchema = z.object({ event: parkingGuidanceEvent, enabled: z.boolean(), message: z.string().min(1).max(300), version: z.number().int().positive(), updatedAt: dateTime,
+  audioBase64: z.string().max(Math.ceil(FUEL_NOTICE_AUDIO_MAX_BYTES / 3) * 4).nullable(), audioMime: z.enum(["audio/mpeg", "audio/wav"]).nullable(), audioName: z.string().min(1).max(100).nullable(),
+}).strict().superRefine((item, context) => {
+  if (item.audioBase64 === null && item.audioMime === null && item.audioName === null) return;
+  try { if (!item.audioBase64 || !item.audioName || validateNoticeAudio(item.audioBase64) !== item.audioMime) throw new Error(); }
+  catch { context.addIssue({ code: "custom", message: "駐車音声案内の音声データが不正です" }); }
+});
+const fuelThankYouSettingSchema = z.object({ id: z.literal("default"), enabled: z.boolean(), audioEnabled: z.boolean(), message: z.string().min(1).max(300), version: z.number().int().positive(), updatedAt: dateTime,
+  audioBase64: z.string().max(Math.ceil(FUEL_NOTICE_AUDIO_MAX_BYTES / 3) * 4).nullable(), audioMime: z.enum(["audio/mpeg", "audio/wav"]).nullable(), audioName: z.string().min(1).max(100).nullable(),
+}).strict().superRefine((item, context) => {
+  if (item.audioBase64 === null && item.audioMime === null && item.audioName === null) return;
+  try { if (!item.audioBase64 || !item.audioName || validateNoticeAudio(item.audioBase64) !== item.audioMime) throw new Error(); }
+  catch { context.addIssue({ code: "custom", message: "給油時のお礼の音声データが不正です" }); }
+});
 
 export const fleetBackupSchema = z.object({
   format: z.literal("fleetflow-json-backup"),
@@ -66,7 +82,9 @@ export const fleetBackupSchema = z.object({
     // 整備記録を追加する前のバックアップにはないため、空として読む。
     vehicleMaintenances: z.array(vehicleMaintenanceSchema).max(100_000).default([]),
     fuelReturnNotices: z.array(fuelReturnNoticeSchema).max(5).default([]),
-    fuelStartNotices: z.array(fuelReturnNoticeSchema).max(5).default([]),
+    fuelStartNotices: z.array(fuelStartNoticeSchema).max(5).default([]),
+    parkingGuidanceSettings: z.array(parkingGuidanceSettingSchema).max(5).default([]),
+    fuelThankYouSettings: z.array(fuelThankYouSettingSchema).max(1).default([]),
     auditLogs: z.array(auditLogSchema).max(300_000),
   }).strict(),
 }).strict();
@@ -138,9 +156,10 @@ export function parseFleetBackup(value: unknown): FleetBackup {
   }
   data.nfcTags = upgradeDummyNfcUids(data);
   const collections = Object.entries(data) as [keyof typeof data, Array<{ id: string }>][];
-  for (const [name, items] of collections) { if (name !== "fuelReturnNotices" && name !== "fuelStartNotices") assertUnique(items, (item) => item.id, `${name}のID`); }
+  for (const [name, items] of collections) { if (name !== "fuelReturnNotices" && name !== "fuelStartNotices" && name !== "parkingGuidanceSettings") assertUnique(items, (item) => item.id, `${name}のID`); }
   assertUnique(data.fuelReturnNotices, (item) => String(item.level), "返却時ガソリン案内");
   assertUnique(data.fuelStartNotices, (item) => String(item.level), "利用開始時ガソリン案内");
+  assertUnique(data.parkingGuidanceSettings, (item) => item.event, "駐車音声案内");
   assertUnique(data.departments, (item) => item.name, "部署名");
   assertUnique(data.employeeNumbers, (item) => item.code, "社員番号");
   assertUnique(data.vehicleNumbers, (item) => item.code, "車両番号");
@@ -197,7 +216,7 @@ export function backupCounts(backup: FleetBackup): FleetBackupCounts {
 export async function createFleetBackup(): Promise<FleetBackup> {
   const systemPromise = getApplicationSystemStatus();
   const data = await prisma.$transaction(async (tx) => {
-    const [departments, employeeNumbers, vehicleNumbers, parkingSpots, nfcTags, employees, vehicles, nfcAssignments, trips, vehicleMaintenances, auditLogs, fuelReturnNotices, fuelStartNotices] = await Promise.all([
+    const [departments, employeeNumbers, vehicleNumbers, parkingSpots, nfcTags, employees, vehicles, nfcAssignments, trips, vehicleMaintenances, auditLogs, fuelReturnNotices, fuelStartNotices, parkingGuidanceSettings, fuelThankYouSettings] = await Promise.all([
       tx.department.findMany({ orderBy: { id: "asc" } }),
       tx.employeeNumber.findMany({ orderBy: { id: "asc" } }),
       tx.vehicleNumber.findMany({ orderBy: { id: "asc" } }),
@@ -211,8 +230,10 @@ export async function createFleetBackup(): Promise<FleetBackup> {
       tx.auditLog.findMany({ orderBy: { id: "asc" } }),
       tx.fuelReturnNotice.findMany({ orderBy: { level: "asc" } }),
       tx.fuelStartNotice.findMany({ orderBy: { level: "asc" } }),
+      tx.parkingGuidanceSetting.findMany({ orderBy: { event: "asc" } }),
+      tx.fuelThankYouSetting.findMany({ orderBy: { id: "asc" } }),
     ]);
-    return { departments, employeeNumbers, vehicleNumbers, parkingSpots, nfcTags, employees, vehicles, nfcAssignments, trips, vehicleMaintenances, auditLogs, fuelReturnNotices, fuelStartNotices };
+    return { departments, employeeNumbers, vehicleNumbers, parkingSpots, nfcTags, employees, vehicles, nfcAssignments, trips, vehicleMaintenances, auditLogs, fuelReturnNotices, fuelStartNotices, parkingGuidanceSettings, fuelThankYouSettings };
   }, { isolationLevel: "RepeatableRead", timeout: 30_000 });
   const system = await systemPromise;
   return JSON.parse(JSON.stringify({ format: "fleetflow-json-backup", formatVersion: JSON_BACKUP_FORMAT_VERSION, exportedAt: new Date().toISOString(), source: { appVersion: system.appVersion, schemaVersion: system.schemaVersion }, data })) as FleetBackup;
@@ -234,7 +255,9 @@ export async function restoreFleetBackup(backup: FleetBackup) {
   const data = backup.data;
   await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('fleetflow-json-restore'))::text AS restore_lock`;
-    await tx.$executeRawUnsafe('LOCK TABLE "FuelStartNotice", "FuelReturnNotice", "AuditLog", "NfcAssignment", "Trip", "VehicleMaintenance", "Employee", "Vehicle", "NfcTag", "EmployeeNumber", "VehicleNumber", "Department", "ParkingSpot" IN ACCESS EXCLUSIVE MODE');
+    await tx.$executeRawUnsafe('LOCK TABLE "FuelThankYouSetting", "ParkingGuidanceSetting", "FuelStartNotice", "FuelReturnNotice", "AuditLog", "NfcAssignment", "Trip", "VehicleMaintenance", "Employee", "Vehicle", "NfcTag", "EmployeeNumber", "VehicleNumber", "Department", "ParkingSpot" IN ACCESS EXCLUSIVE MODE');
+    await tx.fuelThankYouSetting.deleteMany();
+    await tx.parkingGuidanceSetting.deleteMany();
     await tx.fuelStartNotice.deleteMany();
     await tx.fuelReturnNotice.deleteMany();
     await tx.auditLog.deleteMany();
@@ -261,6 +284,8 @@ export async function restoreFleetBackup(backup: FleetBackup) {
     if (data.vehicleMaintenances.length) await tx.vehicleMaintenance.createMany({ data: data.vehicleMaintenances.map((item) => ({ ...item, plannedStart: asDate(item.plannedStart), plannedEnd: asNullableDate(item.plannedEnd), actualStart: asNullableDate(item.actualStart), actualEnd: asNullableDate(item.actualEnd), createdAt: asDate(item.createdAt), updatedAt: asDate(item.updatedAt) })) });
     if (data.fuelReturnNotices.length) await tx.fuelReturnNotice.createMany({ data: data.fuelReturnNotices.map((item) => ({ ...item, updatedAt: asDate(item.updatedAt) })) });
     if (data.fuelStartNotices.length) await tx.fuelStartNotice.createMany({ data: data.fuelStartNotices.map((item) => ({ ...item, updatedAt: asDate(item.updatedAt) })) });
+    if (data.parkingGuidanceSettings.length) await tx.parkingGuidanceSetting.createMany({ data: data.parkingGuidanceSettings.map((item) => ({ ...item, updatedAt: asDate(item.updatedAt) })) });
+    if (data.fuelThankYouSettings.length) await tx.fuelThankYouSetting.createMany({ data: data.fuelThankYouSettings.map((item) => ({ ...item, updatedAt: asDate(item.updatedAt) })) });
     if (data.auditLogs.length) await tx.auditLog.createMany({ data: data.auditLogs.map((item) => ({ ...item, createdAt: asDate(item.createdAt) })) });
     await tx.auditLog.create({ data: { operationId: randomUUID(), actorName: "設定画面", action: "JSON一括復元", targetType: "System", targetId: backup.exportedAt, description: `${backup.exportedAt}に書き出したJSONバックアップを復元` } });
   }, { isolationLevel: "Serializable", maxWait: 10_000, timeout: 120_000 });

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { validateReservationStart } from "@/lib/trip-times";
 import { readFuelReturnNotice } from "@/lib/fuel-return-notice-store";
+import { readFuelThankYouSetting } from "@/lib/fuel-thank-you-store";
 import { isFuelNoticeLevel } from "@/lib/fuel-return-notice";
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -361,12 +362,14 @@ export async function GET(request: Request) {
 
 async function successfulOperationResponse(input: { action: string; fuelLevel?: number | null }, replayed = false) {
   let notice = null;
+  let fuelThankYou = null;
   if ((input.action === "end" || input.action === "endMaintenance") && input.fuelLevel !== null && input.fuelLevel !== undefined && isFuelNoticeLevel(input.fuelLevel)) {
     // 案内の取得に失敗しても、完了済みの返却を失敗扱いにしない。
-    const configured = await readFuelReturnNotice(input.fuelLevel).catch(() => null);
+    const [configured, thankYou] = await Promise.all([readFuelReturnNotice(input.fuelLevel).catch(() => null), readFuelThankYouSetting().catch(() => null)]);
     if (configured?.displayMode !== "NONE") notice = configured;
+    if (thankYou?.enabled) fuelThankYou = thankYou;
   }
-  return NextResponse.json({ ok: true, ...(replayed ? { replayed: true } : {}), ...(notice ? { fuelReturnNotice: notice } : {}) });
+  return NextResponse.json({ ok: true, ...(replayed ? { replayed: true } : {}), ...(notice ? { fuelReturnNotice: notice } : {}), ...(fuelThankYou ? { fuelThankYou } : {}) });
 }
 
 export async function POST(request: Request) {

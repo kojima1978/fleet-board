@@ -10,9 +10,9 @@ export function validateNoticeAudio(base64: string) {
 }
 const noticeSelect = { level: true, displayMode: true, enabled: true, animated: true, audioEnabled: true, message: true, version: true, audioName: true, audioMime: true } as const;
 export async function readFuelNotice(level: FuelNoticeLevel, phase: FuelNoticePhase): Promise<FuelReturnNotice> {
-  const row = phase === "START" ? await prisma.fuelStartNotice.findUnique({ where: { level }, select: noticeSelect }) : await prisma.fuelReturnNotice.findUnique({ where: { level }, select: noticeSelect });
+  const row = phase === "START" ? await prisma.fuelStartNotice.findUnique({ where: { level }, select: noticeSelect }) : await prisma.fuelReturnNotice.findUnique({ where: { level }, select: { ...noticeSelect, parkingAnimationEnabled: true, parkingAnimationRefueledOnly: true } });
   if (!row) return defaultFuelReturnNotice(level, phase);
   const displayMode = fuelNoticeDisplayMode.catch(row.enabled ? (row.animated ? "MODAL" : "MESSAGE") : "NONE").parse(row.displayMode);
-  return { phase, level, displayMode, ...fuelNoticeLegacyFlags(displayMode), audioEnabled: row.audioEnabled, message: row.message, version: row.version, audioName: row.audioName, audioUrl: row.audioMime ? `/api/settings/fuel-return/${level}/audio?phase=${phase}&v=${row.version}` : null };
+  return { phase, level, displayMode, ...fuelNoticeLegacyFlags(displayMode), audioEnabled: row.audioEnabled, parkingAnimationEnabled: "parkingAnimationEnabled" in row && row.parkingAnimationEnabled === true, parkingAnimationRefueledOnly: !("parkingAnimationRefueledOnly" in row) || row.parkingAnimationRefueledOnly === true, message: row.message, version: row.version, audioName: row.audioName, audioUrl: row.audioMime ? `/api/settings/fuel-return/${level}/audio?phase=${phase}&v=${row.version}` : null };
 }
 export const readFuelReturnNotice = (level: FuelNoticeLevel) => readFuelNotice(level, "RETURN");
