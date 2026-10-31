@@ -2,6 +2,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "./generated/client";
 import { defaultSpotRoles, syncParkingSpots } from "./parking-spot-seed";
 import { createQrToken } from "../lib/qr-code";
+import { seedGuidanceDefaults } from "./guidance-defaults";
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) });
 
@@ -24,6 +25,7 @@ const cars = [
 
 async function main() {
   await syncParkingSpots(prisma);
+  await seedGuidanceDefaults(prisma);
   // 役割の列を追加したばかりの開発DBにだけ初期の役割を入れ、設定画面で変えた役割は上書きしない。
   const rolesMissing = await prisma.parkingSpot.count({ where: { role: { not: "REGULAR" } } }) === 0;
   if (rolesMissing) {

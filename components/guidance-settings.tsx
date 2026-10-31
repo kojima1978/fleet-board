@@ -39,5 +39,8 @@ export function GuidanceSettings() {
     <div role="tabpanel" id={`guidance-panel-${tab}`} aria-labelledby={`guidance-tab-${tab}`}>
       {tab === "parking" ? <ParkingGuidanceSettings /> : <FuelReturnNoticeSettings />}
     </div>
+    <p className="w-full max-w-[900px] text-right text-[11px] text-slate-400">
+      初期サンプル音声：<a className="font-bold underline decoration-slate-300 underline-offset-2 hover:text-slate-600" href="https://voicevox.hiroshiba.jp/" target="_blank" rel="noreferrer">VOICEVOX:ずんだもん</a>
+    </p>
   </div>;
 }

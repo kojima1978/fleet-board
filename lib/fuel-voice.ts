@@ -2,7 +2,7 @@
 
 import { isNfcSoundEnabled } from "./device-mode";
 
-const FUEL_RETURN_VOICE_PATH = "/audio/fuel-return-reminder.wav";
+const FUEL_RETURN_VOICE_PATH = "/audio/fuel-return-low-reminder.wav";
 
 let voice: HTMLAudioElement | null = null;
 

@@ -31,6 +31,7 @@
     "test:fuel-labels": "tsx tests/fuel-labels.test.tsx",
     "test:departure-guidance": "tsx tests/departure-guidance.test.tsx",
     "test:guidance-audio-priority": "tsx tests/guidance-audio-priority.test.ts",
+    "test:guidance-defaults": "tsx tests/guidance-defaults.test.ts",
     "test:reservation-dates": "tsx tests/all-day-reservation.test.ts",
     "test:trip-times": "tsx tests/trip-times.test.tsx",
     "test:integration:reservation-time-change": "tsx tests/integration/reservation-time-change.ts",
