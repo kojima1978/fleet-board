@@ -1,4 +1,4 @@
-import type { PrismaClient } from "./generated/client";
+import type { Prisma, PrismaClient } from "./generated/client";
 
 // 新しく作る区画の初期の役割。作成後は設定画面から変更する。
 export const defaultSpotRoles: Record<string, "TEMPORARY" | "CUSTOMER" | "HOLDING"> = {
@@ -72,4 +72,29 @@ export async function syncParkingSpots(prisma: PrismaClient) {
     const frontSpotIds = (defaultFrontSpotCodes[code] ?? []).map(idOf).filter((item): item is string => !!item);
     if (frontSpotIds.length) await prisma.parkingSpotFront.createMany({ data: frontSpotIds.map((frontSpotId) => ({ spotId: id, frontSpotId })), skipDuplicates: true });
   }
+}
+
+// 選んだ区画だけ、配置図の位置を基準に「手前の区画」を初期値へ戻す。
+// 区画番号を変更済みでも、位置が同じなら元の配置関係を復元できる。
+export async function resetParkingSpotFronts(tx: Prisma.TransactionClient, spotId: string) {
+  const spots = await tx.parkingSpot.findMany({ include: { fronts: { select: { frontSpotId: true } } } });
+  const target = spots.find((spot) => spot.id === spotId);
+  if (!target) throw new Error("選択した駐車区画が見つかりません");
+  const geometryFor = (spot: { x: number; y: number }) => parkingSpotGeometry.find((item) => Math.abs(spot.x - item.x) < 0.01 && Math.abs(spot.y - item.y) < 0.01);
+  const targetGeometry = geometryFor(target);
+  const desiredCodes = targetGeometry ? defaultFrontSpotCodes[targetGeometry.code] ?? [] : [];
+  const desiredIds = desiredCodes.flatMap((code) => {
+    const geometry = parkingSpotGeometry.find((item) => item.code === code);
+    if (!geometry) return [];
+    const spot = spots.find((item) => Math.abs(item.x - geometry.x) < 0.01 && Math.abs(item.y - geometry.y) < 0.01);
+    return spot && spot.id !== target.id ? [spot.id] : [];
+  });
+  const currentIds = target.fronts.map((item) => item.frontSpotId);
+  const changed = [...currentIds].sort().join() !== [...desiredIds].sort().join();
+  if (changed) {
+    await tx.parkingSpotFront.deleteMany({ where: { spotId } });
+    if (desiredIds.length) await tx.parkingSpotFront.createMany({ data: desiredIds.map((frontSpotId) => ({ spotId, frontSpotId })) });
+    await tx.parkingSpot.update({ where: { id: spotId }, data: { version: { increment: 1 } } });
+  }
+  return { changed, spotCode: target.code, frontCodes: desiredCodes };
 }

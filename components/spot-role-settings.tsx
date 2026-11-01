@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, MapPin, PenLine } from "lucide-react";
+import { Check, LoaderCircle, MapPin, PenLine, RotateCcw } from "lucide-react";
 import type { DashboardData, ParkingSpot, Vehicle } from "@/lib/types";
 import { PARKING_SPOT_ROLES, SPOT_LABEL_MAX_LENGTH, SPOT_ROLE_DESCRIPTIONS, SPOT_ROLE_LABELS, defaultSpotTag, isDashedSpot, spotRoleTag, type ParkingSpotRole } from "@/lib/parking-spots";
 import { Button, Card, cn } from "./ui";
@@ -120,6 +120,12 @@ function SpotEditor({ spot, spots, vehicles, mutate, onFrontChange }: { spot: Pa
   };
   // 番号は返却先や印刷にも出るため、変えるときだけ保存前に確認する。
   const requestSave = () => { if (!changed || !valid || saving) return; if (codeChanged) setConfirming(true); else void save(); };
+  const resetFronts = async () => {
+    if (saving || !window.confirm(`区画 ${spot.code} の手前の区画を初期設定へ戻します。未保存の選択も破棄されます。よろしいですか？`)) return;
+    setSaving(true);
+    try { await mutate({ action: "resetSpotFronts", id: spot.id, version: spot.version }, `区画 ${spot.code} の手前の区画を初期設定へ戻しました`); }
+    finally { setSaving(false); }
+  };
   return <div data-kiosk-auto-home-blocked={changed || saving} className="mt-4 space-y-3">
     <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-600">区画番号</span>
       <input aria-label={`区画 ${spot.code}の番号`} disabled={saving} value={code} maxLength={20} onChange={(event) => setCode(event.target.value)} className={cn(field, codeError && "border-rose-300")} />
@@ -142,7 +148,7 @@ function SpotEditor({ spot, spots, vehicles, mutate, onFrontChange }: { spot: Pa
       {labelMode === "custom" ? <input aria-label={`区画 ${spot.code}の表示名`} autoFocus={!spot.label} value={label} maxLength={SPOT_LABEL_MAX_LENGTH + 10} placeholder={`${SPOT_LABEL_MAX_LENGTH}文字以内`} onChange={(event) => setLabel(event.target.value)} className={cn(field, "mt-1.5", labelError && "border-rose-300")} /> : null}
       {labelError ? <span className="mt-1 block text-[11px] font-bold text-rose-600">{labelError}</span> : <span className="mt-1 block text-[11px] text-slate-400">{labelMode === "auto" ? autoLabel ? `配置図には「${autoLabel}」と出します` : "配置図には何も出しません" : "配置図で番号の横に出す名前です"}</span>}
     </fieldset>
-    <fieldset disabled={saving}><legend className="mb-1.5 block text-xs font-bold text-slate-600">手前の区画<span className="ml-1 font-normal text-slate-400">（任意）</span></legend>
+    <fieldset disabled={saving}><legend className="mb-1.5 w-full text-xs font-bold text-slate-600"><span className="flex w-full items-center justify-between gap-2"><span>手前の区画<span className="ml-1 font-normal text-slate-400">（任意）</span></span><Button type="button" variant="ghost" className="min-h-7 gap-1 rounded-lg border-slate-300 px-2 text-[11px] text-slate-800" disabled={saving} onClick={() => void resetFronts()}>{saving ? <LoaderCircle className="size-3 animate-spin" /> : <RotateCcw className="size-3" />}初期設定に戻す</Button></span></legend>
       <span className="flex flex-wrap gap-1">{frontCandidates.map((item) => <button key={item.id} type="button" aria-pressed={frontIds.includes(item.id)} aria-label={`区画 ${item.code}を手前の区画にする`} onClick={() => toggleFront(item.id)} className={cn("min-w-9 rounded-full border px-2 py-0.5 text-[11px] font-bold transition disabled:opacity-50", frontIds.includes(item.id) ? "border-amber-500 bg-amber-50 text-amber-800" : "border-slate-200 text-slate-600 hover:bg-slate-50")}>{item.code}</button>)}</span>
       <span className="mt-1 block text-[11px] text-slate-400">中央の道路側にある区画を選びます。出庫・入庫のとき、ここに車があれば注意を出します（登録は止めません）</span>
     </fieldset>

@@ -111,8 +111,11 @@ try {
   assert.deepEqual([...(await (await fetch(`${appUrl}/api/dashboard`)).json()).spots.find((spot) => spot.id === spots[3]).frontSpotIds].sort(), [spots[4], spots[5]].sort(), "配置図に手前の区画を返す");
   assert.equal((await updateSpot(spots[3], { frontSpotIds: ["missing-spot"] })).status, 400, "存在しない手前の区画を拒否する");
   assert.equal((await updateSpot(spots[3], { frontSpotIds: [spots[5], spots[4]] })).status, 400, "順番だけ違う手前の区画は変更なしとして拒否する");
-  assert.equal((await updateSpot(spots[3], { frontSpotIds: [] })).status, 200, "手前の区画を外せる");
-  assert.deepEqual((await spotRow(spots[3])).frontSpotIds, []);
+  const beforeFrontReset = await spotRow(spots[3]);
+  const frontReset = await post({ action: "resetSpotFronts", id: spots[3], version: beforeFrontReset.version });
+  assert.equal(frontReset.status, 200, `手前の区画を初期設定へ戻せる: ${JSON.stringify(frontReset.body)}`);
+  assert.deepEqual((await spotRow(spots[3])).frontSpotIds, [], "配置図外のテスト区画は手前なしへ戻す");
+  assert.equal((await post({ action: "resetSpotFronts", id: spots[3], version: beforeFrontReset.version })).status, 409, "古い区画バージョンで初期化できない");
   assert.equal((await importVehicles([importItem(8, spots[4]), importItem(9, spots[4])])).status, 400, "JSON内で同じ区画の割当を拒否する");
   assert.equal((await importVehicles([importItem(8, spots[4]), importItem(9, spots[2])])).status, 400, "使用中区画への取込を拒否する");
   assert.equal((await importVehicles([importItem(8, spots[4]), importItem(9, `missing-${suffix}`)])).status, 400, "存在しない区画への取込を拒否する");

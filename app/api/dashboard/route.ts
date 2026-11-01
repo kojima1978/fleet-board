@@ -20,6 +20,7 @@ import { updateTripStart } from "@/lib/trip-time-actions";
 import { captureTripStartSnapshot } from "@/lib/trip-snapshot";
 import { dashboardDataVersion, markDashboardDataChanged } from "@/lib/dashboard-data-version";
 import type { Prisma } from "@/prisma/generated/client";
+import { resetParkingSpotFronts } from "@/prisma/parking-spot-seed";
 
 export const dynamic = "force-dynamic";
 const activeOperationIds = new Set<string>();
@@ -199,6 +200,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("cancelTrip"), tripId: idSchema, version: z.number().int().nonnegative(), ...actorSchema }),
   z.object({ action: z.literal("moveVehicle"), vehicleId: idSchema, version: z.number().int().nonnegative(), spotId: idSchema, ...actorSchema }),
   z.object({ action: z.literal("updateSpot"), id: idSchema, version: z.number().int().nonnegative(), code: spotCodeSchema, label: spotLabelSchema.nullable(), role: z.enum(PARKING_SPOT_ROLES), dedicatedVehicleId: idSchema.nullable(), frontSpotIds: z.array(idSchema).max(FRONT_SPOT_MAX).optional() }),
+  z.object({ action: z.literal("resetSpotFronts"), id: idSchema, version: z.number().int().nonnegative() }),
   z.object({ action: z.literal("setFuelLevel"), vehicleId: idSchema, version: z.number().int().nonnegative(), fuelLevel: z.number().int().min(0).max(FUEL_LEVEL_MAX), ...actorSchema }),
   z.object({ action: z.literal("createDepartment"), name: departmentNameSchema }),
   z.object({ action: z.literal("renameDepartment"), id: idSchema, version: z.number().int().nonnegative(), name: departmentNameSchema }),
@@ -1118,6 +1120,15 @@ export async function POST(request: Request) {
         const describe = (role: typeof input.role, name: string | null) => role === "DEDICATED" ? `${name ?? "車両未設定"}専用` : SPOT_ROLE_LABELS[role];
         const changes = [codeChanged ? `番号を${input.code}へ` : "", roleChanged ? `用途を「${describe(spot.role, previousName)}」から「${describe(input.role, dedicatedVehicleName)}」へ` : "", labelChanged ? `表示名を${input.label ? `「${input.label}」` : "自動"}へ` : "", frontSpotsChanged ? `手前の区画を${frontSpots.length ? frontSpots.map((item) => item.code).join("・") : "なし"}へ` : ""].filter(Boolean).join("、");
         await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "区画設定変更", targetType: "ParkingSpot", targetId: input.id, description: `区画${spot.code}の${changes}変更` } });
+      });
+    }
+    if (input.action === "resetSpotFronts") {
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-spot:${input.id}`}))::text AS spot_lock`;
+        const spot = await tx.parkingSpot.findUnique({ where: { id: input.id }, select: { version: true } });
+        if (!spot || spot.version !== input.version) throw new Error("CONFLICT");
+        const result = await resetParkingSpotFronts(tx, input.id);
+        await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "手前区画初期化", targetType: "ParkingSpot", targetId: input.id, description: result.changed ? `区画${result.spotCode}の手前の区画を${result.frontCodes.length ? result.frontCodes.join("・") : "なし"}へ戻しました` : `区画${result.spotCode}の手前の区画は初期設定のままです` } });
       });
     }
     if (input.action === "setFuelLevel") {
