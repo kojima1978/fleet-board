@@ -343,6 +343,8 @@ NFC Bridgeがない場合は、NFCの表示を出さず、利用者チップか�
 
 初期音声は`public/audio`に、用途が分かる名前で保存しています。`parking-blocked-warning.mp3`は入出庫不可、`fuel-return-low-reminder.wav`は残量1/4、`fuel-return-empty-reminder.mp3`は残量E、`fuel-refueled-thank-you.wav`は給油のお礼に使用します。新規DBには初回起動時に自動登録されます。既存の設定行や、利用者が変更・取り外した音声は起動時に上書きしません。
 
+設定を変更した後は、「初期設定に戻す」から駐車案内、利用開始時、返却時、給油時のお礼をそれぞれ独立して復元できます。実行前に確認を表示し、文面・ON/OFF・該当するサンプル音声をまとめて戻します。復元操作は操作履歴にも記録します。
+
 初期サンプル音声のクレジット：`VOICEVOX:ずんだもん`（[VOICEVOX](https://voicevox.hiroshiba.jp/)／[ずんだもん音源利用規約](https://www.zunko.jp/con_ongen_kiyaku.html)）
 - 配置図の駐車中の車は青い枠で表示し、残量に応じて区画が青く塗られ、「残量 1/2」のように表示されます。1/4以下は黄色で表示されます。
 - 返却時の残量は操作履歴（CSVも含む）に「区画14へ返却（残量 1/2）」のように記録されます。

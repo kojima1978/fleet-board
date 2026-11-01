@@ -1,10 +1,12 @@
 import { readFile } from "node:fs/promises";
-import type { PrismaClient } from "./generated/client";
+import { resolve } from "node:path";
+import type { Prisma, PrismaClient } from "./generated/client";
 import { defaultFuelReturnNotice, FUEL_NOTICE_LEVELS, type FuelNoticeLevel, type FuelNoticePhase } from "../lib/fuel-return-notice";
 import { FUEL_THANK_YOU_DEFAULT_MESSAGE } from "../lib/fuel-thank-you";
 import { defaultParkingGuidanceSetting, PARKING_GUIDANCE_EVENTS, type ParkingGuidanceEvent } from "../lib/parking-guidance";
 
 type AudioSample = { fileName: string; mime: "audio/mpeg" | "audio/wav" };
+type GuidanceDb = PrismaClient | Prisma.TransactionClient;
 
 const audioSamples = {
   parkingBlocked: { fileName: "parking-blocked-warning.mp3", mime: "audio/mpeg" },
@@ -26,10 +28,18 @@ const fuelMessageOverrides: Partial<Record<`${FuelNoticePhase}:${FuelNoticeLevel
 
 async function loadAudio(sample: AudioSample) {
   return {
-    data: await readFile(new URL(`../public/audio/${sample.fileName}`, import.meta.url)),
+    data: await readFile(resolve(process.cwd(), "public", "audio", sample.fileName)),
     mime: sample.mime,
     name: sample.fileName,
   };
+}
+
+async function createAudio(db: GuidanceDb, sample: AudioSample) {
+  return db.noticeAudio.create({ data: await loadAudio(sample), select: { id: true } });
+}
+
+async function deleteUnusedAudio(db: GuidanceDb) {
+  await db.noticeAudio.deleteMany({ where: { fuelReturnNotice: null, fuelStartNotice: null, fuelThankYouSetting: null, parkingGuidanceSetting: null } });
 }
 
 async function createParkingDefaults(prisma: PrismaClient) {
@@ -90,4 +100,53 @@ export async function seedGuidanceDefaults(prisma: PrismaClient) {
   await createFuelDefaults(prisma, "START");
   await createFuelDefaults(prisma, "RETURN");
   await createFuelThankYouDefault(prisma);
+}
+
+export async function resetParkingGuidanceDefaults(db: GuidanceDb) {
+  for (const event of PARKING_GUIDANCE_EVENTS) {
+    const setting = defaultParkingGuidanceSetting(event);
+    const sample = event === "BLOCKED_OUT" || event === "BLOCKED_IN" ? audioSamples.parkingBlocked : null;
+    const audioId = sample ? (await createAudio(db, sample)).id : null;
+    const data = { enabled: setting.enabled, message: parkingMessageOverrides[event] ?? setting.message, audioId };
+    await db.parkingGuidanceSetting.upsert({
+      where: { event },
+      create: { event, ...data },
+      update: { ...data, version: { increment: 1 } },
+    });
+  }
+  await deleteUnusedAudio(db);
+}
+
+export async function resetFuelNoticeDefaults(db: GuidanceDb, phase: FuelNoticePhase) {
+  for (const level of FUEL_NOTICE_LEVELS) {
+    const setting = defaultFuelReturnNotice(level, phase);
+    const sample = phase === "RETURN" ? level === 1 ? audioSamples.fuelReturnLow : level === 0 ? audioSamples.fuelReturnEmpty : null : null;
+    const audioId = sample ? (await createAudio(db, sample)).id : null;
+    const common = {
+      displayMode: setting.displayMode,
+      enabled: setting.enabled,
+      animated: setting.animated,
+      audioEnabled: setting.audioEnabled,
+      message: fuelMessageOverrides[`${phase}:${level}`] ?? setting.message,
+      audioId,
+    };
+    if (phase === "START") {
+      await db.fuelStartNotice.upsert({ where: { level }, create: { level, ...common }, update: { ...common, version: { increment: 1 } } });
+    } else {
+      const data = { ...common, parkingAnimationEnabled: setting.parkingAnimationEnabled, parkingAnimationRefueledOnly: setting.parkingAnimationRefueledOnly };
+      await db.fuelReturnNotice.upsert({ where: { level }, create: { level, ...data }, update: { ...data, version: { increment: 1 } } });
+    }
+  }
+  await deleteUnusedAudio(db);
+}
+
+export async function resetFuelThankYouDefault(db: GuidanceDb) {
+  const audioId = (await createAudio(db, audioSamples.fuelThankYou)).id;
+  const data = { enabled: true, audioEnabled: true, message: FUEL_THANK_YOU_DEFAULT_MESSAGE, audioId };
+  await db.fuelThankYouSetting.upsert({
+    where: { id: "default" },
+    create: { id: "default", ...data },
+    update: { ...data, version: { increment: 1 } },
+  });
+  await deleteUnusedAudio(db);
 }

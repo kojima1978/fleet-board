@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Fuel, LoaderCircle, Play, Save, Trash2, Upload, Volume2, VolumeX } from "lucide-react";
+import { Check, Fuel, LoaderCircle, Play, RotateCcw, Save, Trash2, Upload, Volume2, VolumeX } from "lucide-react";
 import { FUEL_NOTICE_AUDIO_MAX_BYTES, FUEL_NOTICE_DISPLAY_MODES, fuelNoticeDisplayModeLabel, type FuelNoticeDisplayMode, type FuelNoticePhase, type FuelReturnNotice } from "@/lib/fuel-return-notice";
 import { formatFuelLevel } from "@/lib/fuel-level";
 import { Button, Card, cn } from "./ui";
@@ -15,6 +15,7 @@ export function FuelReturnNoticeSettings() {
   const [selectedLevel, setSelectedLevel] = useState(1);
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
+  const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -32,12 +33,26 @@ export function FuelReturnNoticeSettings() {
     return () => { cancelled = true; controller.abort(); window.clearTimeout(timer); };
   }, [phase, reload]);
 
+  async function resetDefaults() {
+    const label = phase === "START" ? "利用開始時" : "返却時";
+    if (!window.confirm(`${label}の残量5段階の文面・表示方法・音声を初期設定へ戻します。未保存の変更も破棄されます。よろしいですか？`)) return;
+    setResetting(true); setError("");
+    try {
+      const response = await fetch("/api/settings/fuel-return/reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phase }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message);
+      setNotices(result.notices);
+    } catch (failure) { setError((failure as Error).message || "初期設定へ戻せませんでした"); }
+    finally { setResetting(false); }
+  }
+
   const enabledCount = notices.filter((notice) => notice.displayMode !== "NONE").length;
-  return <Card className="w-full max-w-[900px] overflow-hidden border-slate-200 bg-white p-0">
+  return <Card data-kiosk-auto-home-blocked={resetting} className="w-full max-w-[900px] overflow-hidden border-slate-200 bg-white p-0">
     <div className="flex flex-wrap items-start gap-3 border-b border-slate-100 px-4 py-4 sm:px-5">
       <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600"><Fuel className="size-5" /></span>
       <div className="mr-auto min-w-0"><h3 className="text-base font-black text-slate-900">ガソリン残量別の案内</h3><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">利用開始時と返却時の案内を残量ごとに設定します。音声は共用端末だけで1回再生します。</p></div>
       {notices.length ? <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-600">5段階中 {enabledCount}件を使用</span> : null}
+      <Button type="button" variant="secondary" className="min-h-9 px-3 text-xs" disabled={resetting || !notices.length} onClick={() => void resetDefaults()}>{resetting ? <LoaderCircle className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />}{resetting ? "戻しています…" : `${phase === "START" ? "利用開始時" : "返却時"}を初期設定に戻す`}</Button>
     </div>
     <div role="tablist" aria-label="案内するタイミング" className="grid grid-cols-2 gap-1 border-b border-slate-100 bg-white px-4 py-3 sm:px-5"><button type="button" role="tab" aria-selected={phase === "START"} onClick={() => setPhase("START")} className={cn("min-h-10 rounded-lg text-sm font-bold transition", phase === "START" ? "bg-blue-50 text-blue-700 ring-1 ring-blue-200" : "text-slate-500 hover:bg-slate-50")}>利用開始時</button><button type="button" role="tab" aria-selected={phase === "RETURN"} onClick={() => setPhase("RETURN")} className={cn("min-h-10 rounded-lg text-sm font-bold transition", phase === "RETURN" ? "bg-blue-50 text-blue-700 ring-1 ring-blue-200" : "text-slate-500 hover:bg-slate-50")}>返却時</button></div>
     {error ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-4 text-sm text-rose-700 sm:px-5"><span>{error}</span><Button variant="secondary" onClick={() => setReload((value) => value + 1)}>再読み込み</Button></div> : null}

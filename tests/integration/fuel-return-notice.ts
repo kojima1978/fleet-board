@@ -3,6 +3,9 @@ import { prisma } from "../../lib/prisma";
 import { GET as settings, POST as save } from "../../app/api/settings/fuel-return/route";
 import { GET as audio } from "../../app/api/settings/fuel-return/[level]/audio/route";
 import { POST as action } from "../../app/api/dashboard/route";
+import { POST as resetFuel } from "../../app/api/settings/fuel-return/reset/route";
+import { POST as resetParking } from "../../app/api/settings/parking-guidance/reset/route";
+import { POST as resetThankYou } from "../../app/api/settings/fuel-thank-you/reset/route";
 import { createFleetBackup, parseFleetBackup, restoreFleetBackup } from "../../lib/json-backup";
 import { FUEL_NOTICE_AUDIO_MAX_BYTES } from "../../lib/fuel-return-notice";
 
@@ -99,7 +102,22 @@ async function main() {
     assert.equal((await prisma.fuelStartNotice.findUniqueOrThrow({ where: { level: 2 } })).message, "利用開始時の確認テスト");
     await restoreFleetBackup(parseFleetBackup(old));
     assert.equal(await prisma.fuelReturnNotice.count(), 0);
-    console.log("Fuel notices passed: defaults, origin/size/type checks, audio, optimistic save, successful return only, disabled levels, replay and old/new backup round trips");
+    const resetRequest = (path: string, body?: object, origin = "http://localhost") => new Request(`http://localhost${path}`, { method: "POST", headers: { Origin: origin, ...(body ? { "Content-Type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    assert.equal((await resetFuel(resetRequest("/api/settings/fuel-return/reset", { phase: "RETURN" }, "http://evil.invalid"))).status, 403);
+    let resetResponse: Response = await resetFuel(resetRequest("/api/settings/fuel-return/reset", { phase: "RETURN" }));
+    assert.equal(resetResponse.status, 200);
+    let resetData = await resetResponse.json();
+    assert.equal(resetData.notices.length, 5); assert.equal(resetData.notices.find((notice: { level: number }) => notice.level === 1).audioName, "fuel-return-low-reminder.wav");
+    resetResponse = await resetFuel(resetRequest("/api/settings/fuel-return/reset", { phase: "START" }));
+    assert.equal(resetResponse.status, 200); assert.equal((await resetResponse.json()).notices.length, 5);
+    resetResponse = await resetParking(resetRequest("/api/settings/parking-guidance/reset"));
+    assert.equal(resetResponse.status, 200);
+    resetData = await resetResponse.json();
+    assert.equal(resetData.settings.length, 5); assert.equal(resetData.settings.filter((setting: { enabled: boolean }) => setting.enabled).length, 2); assert.equal(resetData.settings.find((setting: { event: string }) => setting.event === "BLOCKED_OUT").audioName, "parking-blocked-warning.mp3");
+    resetResponse = await resetThankYou(resetRequest("/api/settings/fuel-thank-you/reset"));
+    assert.equal(resetResponse.status, 200); assert.equal((await resetResponse.json()).setting.audioName, "fuel-refueled-thank-you.wav");
+    assert.equal(await prisma.auditLog.count({ where: { action: { contains: "初期化" } } }), 4);
+    console.log("Fuel notices passed: defaults, resets with sample audio/audit logs, origin/size/type checks, audio, optimistic save, successful return only, replay and backup round trips");
   } finally { await prisma.$disconnect(); }
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

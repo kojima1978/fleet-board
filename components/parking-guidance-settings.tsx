@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, LoaderCircle, MapPin, Play, Save, Trash2, Upload, Volume2, VolumeX } from "lucide-react";
+import { Check, LoaderCircle, MapPin, Play, RotateCcw, Save, Trash2, Upload, Volume2, VolumeX } from "lucide-react";
 import { PARKING_GUIDANCE_AUDIO_MAX_BYTES, parkingGuidanceLabels, type ParkingGuidanceEvent, type ParkingGuidanceSetting } from "@/lib/parking-guidance";
 import { refreshParkingGuidance } from "@/lib/use-parking-guidance";
 import { Button, Card, cn } from "./ui";
@@ -13,6 +13,7 @@ export function ParkingGuidanceSettings() {
   const [selected, setSelected] = useState<ParkingGuidanceEvent>("DEPARTURE");
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
+  const [resetting, setResetting] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
     setError(""); setSettings([]);
@@ -22,9 +23,20 @@ export function ParkingGuidanceSettings() {
     }).catch(() => { if (!controller.signal.aborted) setError("駐車音声案内を読み込めませんでした"); });
     return () => controller.abort();
   }, [reload]);
+  async function resetDefaults() {
+    if (!window.confirm("駐車案内5項目の文面・ON/OFF・音声を初期設定へ戻します。未保存の変更も破棄されます。よろしいですか？")) return;
+    setResetting(true); setError("");
+    try {
+      const response = await fetch("/api/settings/parking-guidance/reset", { method: "POST" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message);
+      setSettings(result.settings); refreshParkingGuidance();
+    } catch (failure) { setError((failure as Error).message || "初期設定へ戻せませんでした"); }
+    finally { setResetting(false); }
+  }
   const setting = settings.find((item) => item.event === selected);
-  return <Card className="w-full max-w-[900px] overflow-hidden border-slate-200 bg-white p-0">
-    <div className="flex flex-wrap items-start gap-3 border-b border-slate-100 px-4 py-4 sm:px-5"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600"><MapPin className="size-5" /></span><div className="mr-auto min-w-0"><h3 className="text-base font-black text-slate-900">駐車操作の音声案内</h3><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">出庫・入庫・区画選択と、手前の車で動かせない場面を個別に案内します。</p></div>{settings.length ? <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-600">{settings.filter((item) => item.enabled).length}/{settings.length}件 ON</span> : null}</div>
+  return <Card data-kiosk-auto-home-blocked={resetting} className="w-full max-w-[900px] overflow-hidden border-slate-200 bg-white p-0">
+    <div className="flex flex-wrap items-start gap-3 border-b border-slate-100 px-4 py-4 sm:px-5"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600"><MapPin className="size-5" /></span><div className="mr-auto min-w-0"><h3 className="text-base font-black text-slate-900">駐車操作の音声案内</h3><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">出庫・入庫・区画選択と、手前の車で動かせない場面を個別に案内します。</p></div>{settings.length ? <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-600">{settings.filter((item) => item.enabled).length}/{settings.length}件 ON</span> : null}<Button type="button" variant="secondary" className="min-h-9 px-3 text-xs" disabled={resetting || !settings.length} onClick={() => void resetDefaults()}>{resetting ? <LoaderCircle className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />}{resetting ? "戻しています…" : "初期設定に戻す"}</Button></div>
     {error ? <div role="alert" className="flex items-center justify-between gap-3 p-5 text-sm font-bold text-rose-700"><span>{error}</span><Button variant="secondary" onClick={() => setReload((value) => value + 1)}>再読み込み</Button></div> : null}
     {!error && !settings.length ? <div role="status" className="flex items-center gap-2 p-8 text-sm text-slate-500"><LoaderCircle className="size-4 animate-spin" />設定を読み込んでいます</div> : null}
     {settings.length ? <><div role="tablist" aria-label="駐車音声の場面" className="grid grid-cols-2 gap-1 border-b border-slate-100 bg-slate-50/70 p-2 sm:grid-cols-5 sm:px-4">{settings.map((item) => <button key={item.event} type="button" role="tab" aria-selected={selected === item.event} onClick={() => setSelected(item.event)} className={cn("min-h-12 rounded-xl border px-2 text-xs font-black transition", selected === item.event ? "border-slate-300 bg-white text-slate-900 shadow-sm" : "border-transparent text-slate-500 hover:bg-white")}><span className={cn("mr-1.5 inline-block size-2 rounded-full", item.enabled ? "bg-emerald-500" : "bg-slate-300")} />{parkingGuidanceLabels[item.event].label}</button>)}</div>{setting ? <GuidanceEditor key={`${setting.event}:${setting.version}`} setting={setting} onSaved={(saved) => setSettings((items) => items.map((item) => item.event === saved.event ? saved : item))} /> : null}</> : null}
