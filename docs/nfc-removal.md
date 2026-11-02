@@ -177,7 +177,7 @@ DROP TABLE "NfcTag";
 ### ドキュメント
 
 - **README.md**: NFCの説明、NFCリーダーの導入、NFC関連のコマンドを外す。
-- **docs/**: `database-design-review-2026-10-28.md`と`database-hardening.md`のNFCの記述を直す。
+- **docs/**: `database-hardening.md`と`仕様書.md`のNFCの記述を直す。
 
 ### 変更しないもの
 
