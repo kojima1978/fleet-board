@@ -3,14 +3,14 @@
 import type { ReactNode } from "react";
 import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
-import { Archive, CarFront, Check, ChevronDown, ChevronUp, Clock3, Laptop, LayoutGrid, Nfc, QrCode, Settings, UserRound, Users, Volume2, VolumeX, X } from "lucide-react";
+import { Archive, BookOpen, CarFront, Check, ChevronDown, ChevronUp, Clock3, Laptop, LayoutGrid, Nfc, QrCode, Settings, UserRound, Users, Volume2, VolumeX, X } from "lucide-react";
 import type { NfcBridgeStatus, QrBridgeStatus } from "@/lib/use-nfc-bridge";
 import { isKioskDevice, setDeviceMode, setIdleTrafficEnabled, setNfcSoundEnabled, setUserTimeoutMinutes, useDeviceMode, useIdleTrafficEnabled, useNfcSoundEnabled, USER_TIMEOUT_CHOICES, useUserTimeoutMinutes, type DeviceMode } from "@/lib/device-mode";
 import { playNfcSound } from "@/lib/nfc-sound";
 import { cn } from "./ui";
 import { KioskAutoHome } from "./kiosk-auto-home";
 
-export type AppView = "parking" | "timeline" | "settingsEmployees" | "settingsDepartments" | "settingsVehicles" | "settingsSpots" | "settingsData" | "settingsSystem" | "settingsScanner" | "settingsReturnGuidance" | "settingsEmergency" | "operations";
+export type AppView = "parking" | "timeline" | "settingsEmployees" | "settingsDepartments" | "settingsVehicles" | "settingsSpots" | "settingsData" | "settingsSystem" | "settingsScanner" | "settingsReturnGuidance" | "settingsEmergency" | "operations" | "help";
 export type HeaderSyncState = "loading" | "healthy" | "stale";
 
 const jpTimeSeconds = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
@@ -38,11 +38,12 @@ function HeaderClock() {
 }
 
 export function Navigation({ view, className }: { view: AppView; className?: string }) {
-  const links: { id: "parking" | "timeline" | "settings" | "operations"; href: string; label: string; icon: ReactNode }[] = [
+  const links: { id: "parking" | "timeline" | "settings" | "operations" | "help"; href: string; label: string; icon: ReactNode }[] = [
     { id: "parking", href: "/", label: "駐車場", icon: <LayoutGrid className="size-4" /> },
     { id: "timeline", href: "/timeline", label: "タイムライン", icon: <Clock3 className="size-4" /> },
     { id: "settings", href: "/settings/vehicles", label: "設定", icon: <Settings className="size-4" /> },
     { id: "operations", href: "/operations", label: "履歴", icon: <Archive className="size-4" /> },
+    { id: "help", href: "/help", label: "使い方", icon: <BookOpen className="size-4" /> },
   ];
   return <nav aria-label="メインメニュー" className={cn("items-center justify-center gap-1", className)}>{links.map((link) => {
     const active = link.id === "settings" ? view.startsWith("settings") : view === link.id;
