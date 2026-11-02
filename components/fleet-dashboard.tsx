@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { AlertTriangle, CalendarClock, Camera, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Fuel, Gift, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Move, Nfc, Play, Plus, Printer, QrCode, RefreshCw, Snowflake, UserRound, Utensils, Wrench, X } from "lucide-react";
+import { AlertTriangle, BookOpen, CalendarClock, Camera, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Fuel, Gift, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Move, Nfc, Play, Plus, Printer, QrCode, RefreshCw, Snowflake, UserRound, Utensils, Wrench, X } from "lucide-react";
 import type { DashboardData, Employee, ParkingSpot, Trip, Vehicle, VehicleMaintenance } from "@/lib/types";
 import { normalizeNfcUid } from "@/lib/nfc";
 import { vehicleDotStyle, vehicleIconStyle } from "@/lib/vehicle-colors";
@@ -558,7 +558,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
         </> : null}
 
         {view === "settingsEmployees" || view === "settingsDepartments" || view === "settingsVehicles" || view === "settingsSpots" || view === "settingsData" || view === "settingsSystem" || view === "settingsScanner" || view === "settingsReturnGuidance" || view === "settingsEmergency" ? <div className="space-y-5">
-            <PageHeading eyebrow="管理設定" title={view === "settingsEmployees" ? "社員登録" : view === "settingsDepartments" ? "部署" : view === "settingsVehicles" ? "車両登録" : view === "settingsSpots" ? "駐車区画" : view === "settingsSystem" ? "システム状態" : view === "settingsScanner" ? "NFC・QR 接続ガイド" : view === "settingsReturnGuidance" ? "案内設定" : view === "settingsEmergency" ? "緊急時" : "データ保存・復元"} description={view === "settingsEmployees" ? "利用者となる社員、社員証のNFCタグ、社員QRを管理します。" : view === "settingsDepartments" ? "社員が所属する部署の追加・名前の変更・並び順を管理します。" : view === "settingsVehicles" ? "利用する社用車、車両のNFCタグ、車両QRを管理します。" : view === "settingsSpots" ? "配置図で区画を選び、区画番号と用途（一時・お客様用・専用・仮置き）を変更します。" : view === "settingsSystem" ? "アプリ、データベース、バックアップ、NFC・QRの状態をまとめて確認します。" : view === "settingsScanner" ? "初回導入、接続復旧、アンインストールの手順を確認できます。" : view === "settingsReturnGuidance" ? "給油と駐車操作のメッセージ・音声を管理します。" : view === "settingsEmergency" ? "システム障害時に手書き運用へ切り替えるための用紙を印刷します。" : "FleetFlowの全データをJSONで保存し、必要なときに一括復元します。"} />
+            <PageHeading eyebrow="管理設定" help={SETTINGS_HELP[view]} title={view === "settingsEmployees" ? "社員登録" : view === "settingsDepartments" ? "部署" : view === "settingsVehicles" ? "車両登録" : view === "settingsSpots" ? "駐車区画" : view === "settingsSystem" ? "システム状態" : view === "settingsScanner" ? "NFC・QR 接続ガイド" : view === "settingsReturnGuidance" ? "案内設定" : view === "settingsEmergency" ? "緊急時" : "データ保存・復元"} description={view === "settingsEmployees" ? "利用者となる社員、社員証のNFCタグ、社員QRを管理します。" : view === "settingsDepartments" ? "社員が所属する部署の追加・名前の変更・並び順を管理します。" : view === "settingsVehicles" ? "利用する社用車、車両のNFCタグ、車両QRを管理します。" : view === "settingsSpots" ? "配置図で区画を選び、区画番号と用途（一時・お客様用・専用・仮置き）を変更します。" : view === "settingsSystem" ? "アプリ、データベース、バックアップ、NFC・QRの状態をまとめて確認します。" : view === "settingsScanner" ? "初回導入、接続復旧、アンインストールの手順を確認できます。" : view === "settingsReturnGuidance" ? "給油と駐車操作のメッセージ・音声を管理します。" : view === "settingsEmergency" ? "システム障害時に手書き運用へ切り替えるための用紙を印刷します。" : "FleetFlowの全データをJSONで保存し、必要なときに一括復元します。"} />
             <SettingsNavigation view={view} />
             {view === "settingsEmergency" ? <EmergencyToolsPanel /> : view === "settingsSystem" ? <SystemStatusPanel system={data.system} syncState={syncState} nfcStatus={nfcHealth} qrStatus={qrHealth} /> : view === "settingsReturnGuidance" ? <GuidanceSettings /> : view === "settingsScanner" ? <ScannerGuide /> : view === "settingsData" ? <DataBackupPanel /> : view === "settingsSpots" ? <SpotRoleSettings data={data} mutate={mutate} /> : view === "settingsDepartments" ? <DepartmentSettings data={data} mutate={mutate} /> : <><div className={cn("flex flex-wrap items-end justify-between gap-2", view === "settingsEmployees" ? "max-w-[1080px]" : "max-w-[1120px]")}><div><p className="text-xs font-bold text-blue-600">日常管理</p><h3 className="mt-0.5 text-lg font-black">{view === "settingsEmployees" ? "社員情報" : "車両情報"}</h3></div><p className="text-xs text-slate-500">検索・登録・変更をこの一覧から行えます</p></div><SettingsPanelV2 kind={view === "settingsEmployees" ? "employee" : "vehicle"} data={data} mutate={mutate} /></>}
           </div> : null}
@@ -650,8 +650,21 @@ function OperationalAlerts({ data, compact = false }: { data: DashboardData; com
   return <Card role="status" className="flex flex-wrap items-center gap-2 border-amber-300 bg-amber-50 p-3"><span className="mr-1 inline-flex items-center gap-2 text-sm font-black text-amber-950"><AlertTriangle className="size-4" />確認が必要</span>{alerts.map((alert) => <Link key={alert.label} href={alert.href} className="rounded-full border border-amber-200 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 hover:border-amber-400">{alert.label}</Link>)}</Card>;
 }
 
-function PageHeading({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
-  return <div><p className="text-xs font-bold text-blue-600">{eyebrow}</p><h2 className="mt-1 text-2xl font-black">{title}</h2><p className="mt-1 text-sm text-slate-500">{description}</p></div>;
+// 各設定画面から「使い方」ページの該当する説明へ移るための見出しの対応。
+const SETTINGS_HELP: Record<"settingsEmployees" | "settingsDepartments" | "settingsVehicles" | "settingsSpots" | "settingsData" | "settingsSystem" | "settingsScanner" | "settingsReturnGuidance" | "settingsEmergency", string> = {
+  settingsEmployees: "employee-add",
+  settingsDepartments: "departments",
+  settingsVehicles: "vehicle-add",
+  settingsSpots: "spot-role",
+  settingsReturnGuidance: "guidance",
+  settingsData: "data",
+  settingsEmergency: "emergency",
+  settingsSystem: "reader",
+  settingsScanner: "reader",
+};
+
+function PageHeading({ eyebrow, title, description, help }: { eyebrow: string; title: string; description: string; help?: string }) {
+  return <div><p className="text-xs font-bold text-blue-600">{eyebrow}</p><div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1"><h2 className="text-2xl font-black">{title}</h2>{help ? <Link href={`/help#${help}`} className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-blue-100 bg-blue-50 px-2.5 text-xs font-bold text-blue-700 hover:bg-blue-100"><BookOpen className="size-3.5" />この画面の使い方</Link> : null}</div><p className="mt-1 text-sm text-slate-500">{description}</p></div>;
 }
 
 function InitialSetupGuide({ hasEmployees, hasVehicles }: { hasEmployees: boolean; hasVehicles: boolean }) {
