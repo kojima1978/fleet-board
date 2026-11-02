@@ -1983,12 +1983,12 @@ function VehicleStatusBadge({ vehicle, offSite, className }: { vehicle: Pick<Veh
 function EquipmentBadges({ vehicle, className }: { vehicle: Pick<Vehicle, "hasEtc" | "hasNavigation" | "hasBackMonitor" | "hasWinterTires" | "isKei">; className?: string }) {
   if (!vehicle.hasEtc && !vehicle.hasNavigation && !vehicle.hasBackMonitor && !vehicle.hasWinterTires && !vehicle.isKei) return null;
   return (
-    <span className={cn("flex shrink-0 gap-1", className)} aria-label={`装備：${[vehicle.isKei ? "軽自動車" : "", vehicle.hasEtc ? "ETC" : "", vehicle.hasNavigation ? "ナビ" : "", vehicle.hasBackMonitor ? "バックモニター" : "", vehicle.hasWinterTires ? "冬タイヤ" : ""].filter(Boolean).join("、")}`}>
-      {vehicle.isKei ? <span className="rounded bg-yellow-100 px-1.5 py-0.5 text-[9px] font-black text-yellow-800">軽</span> : null}
-      {vehicle.hasEtc ? <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[9px] font-black text-sky-700">ETC</span> : null}
-      {vehicle.hasNavigation ? <span className="rounded bg-violet-50 px-1.5 py-0.5 text-[9px] font-black text-violet-700">ナビ</span> : null}
-      {vehicle.hasBackMonitor ? <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] font-black text-emerald-700">バックモニター</span> : null}
-      {vehicle.hasWinterTires ? <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-black text-slate-700">冬タイヤ</span> : null}
+    <span className={cn("flex min-w-0 flex-wrap gap-1", className)} aria-label={`装備：${[vehicle.isKei ? "軽自動車" : "", vehicle.hasEtc ? "ETC" : "", vehicle.hasNavigation ? "ナビ" : "", vehicle.hasBackMonitor ? "バックモニター" : "", vehicle.hasWinterTires ? "冬タイヤ" : ""].filter(Boolean).join("、")}`}>
+      {vehicle.isKei ? <span className="whitespace-nowrap rounded bg-yellow-100 px-1.5 py-0.5 text-[9px] font-black text-yellow-800">軽</span> : null}
+      {vehicle.hasEtc ? <span className="whitespace-nowrap rounded bg-sky-50 px-1.5 py-0.5 text-[9px] font-black text-sky-700">ETC</span> : null}
+      {vehicle.hasNavigation ? <span className="whitespace-nowrap rounded bg-violet-50 px-1.5 py-0.5 text-[9px] font-black text-violet-700">ナビ</span> : null}
+      {vehicle.hasBackMonitor ? <span className="whitespace-nowrap rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] font-black text-emerald-700">バックモニター</span> : null}
+      {vehicle.hasWinterTires ? <span className="whitespace-nowrap rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-black text-slate-700">冬タイヤ</span> : null}
     </span>
   );
 }
