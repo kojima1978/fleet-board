@@ -6,6 +6,7 @@ FleetFlowは、社用車の駐車位置、予約、利用開始、返却、利�
 
 - リポジトリ：[https://github.com/kojima1978/fleet-board](https://github.com/kojima1978/fleet-board)
 - clone用URL：`https://github.com/kojima1978/fleet-board.git`（ブランチは`main`）
+- 仕様書：[docs/仕様書.md](docs/仕様書.md)（画面、機能、データモデル、API、制約値の一覧。操作と運用の手順はこのREADMEが正本）
 
 このプロジェクトはDockerで動かします。通常運用には**本番環境**、開発・動作確認には**開発環境**を使用してください。
 
