@@ -19,13 +19,14 @@ const jpClockTime = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", h
 
 export function AppHeader({ view, actions, kiosk = false, autoHomeBlocked = false }: { view: AppView; actions?: ReactNode; kiosk?: boolean; autoHomeBlocked?: boolean }) {
   return <><KioskAutoHome key={view} enabled={kiosk && view !== "parking"} blocked={autoHomeBlocked} /><header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
-    <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-3 px-4 py-3 md:px-8 2xl:gap-5">
+    <div className="mx-auto flex max-w-[1600px] items-center gap-3 px-4 py-3 md:px-8 2xl:gap-5">
       <div className="flex min-w-0 items-center gap-3">
         <div className="grid size-11 place-items-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-200"><CarFront /></div>
         <div className="min-w-0 overflow-hidden whitespace-nowrap max-[360px]:hidden"><h1 className="truncate text-lg font-black tracking-tight">FleetFlow</h1><HeaderClock /></div>
       </div>
-      <Navigation view={view} className="hidden lg:flex" />
-      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+      {/* 右側のボタンがない画面でもメニューの位置が変わらないよう、メニューはロゴのすぐ右に置き、ボタンだけを右端へ寄せる。 */}
+      <Navigation view={view} className="hidden lg:ml-4 lg:flex" />
+      {actions ? <div className="ml-auto flex shrink-0 items-center gap-2">{actions}</div> : null}
     </div>
   </header></>;
 }

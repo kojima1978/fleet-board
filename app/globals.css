@@ -2,7 +2,7 @@
 
 :root { color-scheme: light; }
 * { box-sizing: border-box; }
-html { font-family: "Noto Sans JP", "Yu Gothic UI", system-ui, sans-serif; }
+html { font-family: "Noto Sans JP", "Yu Gothic UI", system-ui, sans-serif; scrollbar-gutter: stable; }
 body { margin: 0; }
 button, select, input { font: inherit; }
 button { -webkit-tap-highlight-color: transparent; }
