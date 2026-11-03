@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
-// 仕様書「10. 制約値の一覧」の値・定義場所と、コードに書かれた値が食い違っていないかを確かめる。
+// 仕様書「10. 制約値の一覧」の値・定義場所と、6.9 などの定数表が、コードに書かれた値と食い違っていないかを確かめる。
 // コードの値を変えたら、仕様書の表とこの対応表の両方を直す。
 type Constraint = { item: string; value: string; code: [file: string, snippet: string][] };
 
@@ -104,4 +105,17 @@ for (const row of rows) {
 const specItems = new Set(rows.map((row) => row.item));
 const unused = constraints.filter((entry) => !specItems.has(entry.item)).map((entry) => entry.item);
 assert.deepEqual(unused, [], `仕様書にない項目が対応表に残っています：${unused.join("、")}`);
-console.log(`Spec constraints passed: ${constraints.length} rows match the code`);
+
+// 「定義」の列に定数名を書いた表（6.9 など）は、値の数字と、コードの「定数名 = 数字」を比べる。
+const source = ["app", "components", "lib"].flatMap((dir) => readdirSync(dir, { recursive: true, withFileTypes: true })
+  .filter((entry) => entry.isFile() && /\.tsx?$/.test(entry.name))
+  .map((entry) => read(join(entry.parentPath, entry.name)))).join("\n");
+const constantRows = [...spec.matchAll(/^\| ([^|]+) \| ([^|]+) \| `([A-Z][A-Z0-9_]+)` \|\r?$/gm)].map(([, item, value, name]) => ({ item, value, name }));
+assert.ok(constantRows.length > 0, "仕様書に「定義」の列へ定数名を書いた表が見つかりません");
+for (const row of constantRows) {
+  const defined = source.match(new RegExp(`\\b${row.name} = ([\\d_]+);`));
+  assert.ok(defined, `仕様書の「${row.item}」の定数 ${row.name} がコードに見つかりません。定数名を変えたなら仕様書を直してください`);
+  const specNumber = row.value.match(/\d[\d,]*/)?.[0].replaceAll(",", "");
+  assert.equal(specNumber, defined[1].replaceAll("_", ""), `仕様書の「${row.item}」の値（${row.value}）が、${row.name} の値と違います。仕様書を直してください`);
+}
+console.log(`Spec constraints passed: ${constraints.length} rows and ${constantRows.length} named constants match the code`);
