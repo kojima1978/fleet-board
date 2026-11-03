@@ -114,10 +114,10 @@ function DepartmentRow({ department, departments, order, first, last, busy, edit
       </div>
     </form> : <div className="flex items-center gap-3">
       <span className="grid size-7 shrink-0 place-items-center rounded-full bg-slate-100 text-xs font-black tabular-nums text-slate-500">{order}</span>
-      {/* 狭い画面では部署名を省略しないよう、人数を名前の下へ回す。 */}
+      {/* 狭い画面では部署名を省略しないよう、人数を名前の下へ回す。広い画面では人数の桁数で矢印の位置がずれないよう、人数を決まった幅にする。 */}
       <div className="min-w-0 flex-1 md:flex md:flex-none md:items-center md:gap-3">
       <p className="truncate text-sm font-black md:w-56">{department.name}</p>
-      <Link href={`/settings/employees?department=${encodeURIComponent(department.name)}`} className="mt-0.5 inline-block shrink-0 rounded-full md:mt-0 bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600 hover:bg-blue-50 hover:text-blue-700" aria-label={`${department.name}の社員${members}人を表示`}>社員 {members}人</Link>
+      <Link href={`/settings/employees?department=${encodeURIComponent(department.name)}`} className="mt-0.5 inline-block shrink-0 rounded-full md:mt-0 md:w-22 md:text-center bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600 hover:bg-blue-50 hover:text-blue-700" aria-label={`${department.name}の社員${members}人を表示`}>社員 {members}人</Link>
       </div>
       <span className="flex shrink-0 gap-1">
         <button type="button" aria-label={`${department.name}を上へ移動`} title="上へ" disabled={first || busy} onClick={() => move("up")} className={moveButton}><ChevronUp className="size-4" /></button>
