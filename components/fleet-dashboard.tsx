@@ -753,8 +753,9 @@ function ActiveTripPopover({ trip, reservations, mutate, actorName, onReturn, on
 
 // 車検・修理で外出中の車の詳細。利用中の車（ActiveTripPopover）と同じ形で、車検終了と戻り予定の延長を出す。
 // 延長の時間は選ぶだけで、「延長する」を押したときに確定する。日時の指定と備考は「設定 → 車両登録」の「整備」で直す。
+// 駐車場とタイムラインの車検中の帯から開く。置き場所は画面ごとに className で変える。
 const OFF_SITE_EXTEND_OPTIONS = [{ label: "半日", hours: 12 }, { label: "1日", hours: 24 }, { label: "2日", hours: 48 }] as const;
-export function OffSiteMaintenancePopover({ maintenance, vehicle, reservations, mutate, onReturn, onClose }: { maintenance: VehicleMaintenance; vehicle: Vehicle; reservations: Trip[]; mutate: Mutate; onReturn: () => void; onClose: () => void }) {
+export function OffSiteMaintenancePopover({ maintenance, vehicle, reservations, mutate, onReturn, onClose, className }: { maintenance: VehicleMaintenance; vehicle: Vehicle; reservations: Trip[]; mutate: Mutate; onReturn: () => void; onClose: () => void; className?: string }) {
   const [busy, setBusy] = useState(false);
   const [selectedHours, setSelectedHours] = useState<number | null>(null);
   const now = Date.now();
@@ -777,7 +778,7 @@ export function OffSiteMaintenancePopover({ maintenance, vehicle, reservations, 
       if (await mutate({ action: "updateMaintenance", maintenanceId: maintenance.id, version: maintenance.version, note: maintenance.note, plannedEnd: new Date(selected.end).toISOString() }, `${vehicle.name}の戻り予定を${formatMaintenanceTime(new Date(selected.end))}に延長しました`)) setSelectedHours(null);
     } finally { setBusy(false); }
   };
-  return <div role="region" aria-label={`${vehicle.name}の車検・整備状況`} className="absolute inset-x-2 bottom-2 z-30 mx-auto w-auto max-w-2xl rounded-2xl border border-slate-300 bg-white p-3 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.55)] ring-1 ring-white/80">
+  return <div role="region" aria-label={`${vehicle.name}の車検・整備状況`} className={cn("absolute inset-x-2 bottom-2 z-30 mx-auto w-auto max-w-2xl rounded-2xl border border-slate-300 bg-white p-3 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.55)] ring-1 ring-white/80", className)}>
     <div className="flex min-w-0 items-center gap-3 pr-9">
       <span className="grid size-11 shrink-0 place-items-center rounded-xl border border-slate-200 bg-slate-50"><CarFront className="size-5" style={vehicleIconStyle(vehicle.color)} /></span>
       <div className="min-w-0 flex-1">
@@ -804,11 +805,12 @@ export function OffSiteMaintenancePopover({ maintenance, vehicle, reservations, 
 }
 
 // 車検予約は日常画面では概要と当日の開始だけを扱い、細かな日時・備考は管理設定へ分離する。
-export function ScheduledMaintenancePopover({ maintenance, vehicle, now, onStart, onClose }: { maintenance: VehicleMaintenance; vehicle: Vehicle; now: number; onStart: () => void; onClose: () => void }) {
+// 駐車場とタイムラインの予定の帯から開く。置き場所は画面ごとに className で変える。
+export function ScheduledMaintenancePopover({ maintenance, vehicle, now, onStart, onClose, className }: { maintenance: VehicleMaintenance; vehicle: Vehicle; now: number; onStart: () => void; onClose: () => void; className?: string }) {
   const due = canSendOutMaintenance(maintenance, now);
   const canStart = due && vehicle.status === "AVAILABLE";
   const startLabel = maintenance.kind === "OFF_SITE" ? "車検を開始" : "整備を開始";
-  return <div role="region" aria-label={`${vehicle.name}の車検・整備予定`} className="absolute inset-x-2 bottom-2 z-30 mx-auto w-auto max-w-2xl rounded-2xl border border-slate-300 bg-white p-3 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.55)] ring-1 ring-white/80">
+  return <div role="region" aria-label={`${vehicle.name}の車検・整備予定`} className={cn("absolute inset-x-2 bottom-2 z-30 mx-auto w-auto max-w-2xl rounded-2xl border border-slate-300 bg-white p-3 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.55)] ring-1 ring-white/80", className)}>
     <div className="flex min-w-0 items-center gap-3 pr-9">
       <span className="grid size-11 shrink-0 place-items-center rounded-xl border border-slate-200 bg-slate-50"><CarFront className="size-5" style={vehicleIconStyle(vehicle.color)} /></span>
       <div className="min-w-0 flex-1">
@@ -840,7 +842,7 @@ function ViewSwitch<T extends string>({ value, onChange, first, second, compact 
 }
 
 function TimelinePanelHeader({ mode, onChange }: { mode: "chart" | "list"; onChange: (mode: "chart" | "list") => void }) {
-  return <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-100 px-4 py-2.5"><ViewSwitch value={mode} onChange={onChange} first={{ value: "chart", label: "タイムライン", icon: <Clock3 className="size-4" /> }} second={{ value: "list", label: "予約一覧", icon: <List className="size-4" /> }} compact /><p className="mr-auto text-xs text-slate-500">{mode === "chart" ? "予約をクリックして日時を変更（保存前に確認できます）" : "予約を選ぶと時間の変更や取消ができます"}</p>{mode === "chart" ? <div className="flex shrink-0 gap-3 text-xs"><Legend color="bg-blue-500" label="利用中" /><Legend color="bg-violet-500" label="予約" /><Legend color="bg-slate-400" label="完了" /><Legend color="bg-amber-400" label="整備" /></div> : null}</div>;
+  return <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-100 px-4 py-2.5"><ViewSwitch value={mode} onChange={onChange} first={{ value: "chart", label: "タイムライン", icon: <Clock3 className="size-4" /> }} second={{ value: "list", label: "予約一覧", icon: <List className="size-4" /> }} compact /><p className="mr-auto text-xs text-slate-500">{mode === "chart" ? "予約をクリックして日時を変更（保存前に確認できます）" : "予約を選ぶと時間の変更や取消ができます"}</p>{mode === "chart" ? <div className="flex shrink-0 gap-3 text-xs"><Legend color="bg-blue-500" label="利用中" /><Legend color="bg-violet-500" label="予約" /><Legend color="bg-slate-400" label="完了" /><Legend color="bg-amber-400" label="車検" /></div> : null}</div>;
 }
 
 // タイムラインと予約一覧で共通の期間切り替え。
@@ -977,6 +979,10 @@ function Timeline({ data, openReserve, openEdit, mutate, actorName, highlightTri
   // 利用中の帯を押したときの詳細。返却されたら一覧から消えるので自然に閉じる。
   const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
   const selectedTrip = data.trips.find((trip) => trip.id === selectedTripId && trip.status === "IN_USE");
+  // 車検中・予定の帯を押したときの詳細。駐車場の「車検中」「車検の予定」と同じものを出す。
+  const [selectedMaintenanceId, setSelectedMaintenanceId] = useState<string | null>(null);
+  const selectedMaintenance = data.maintenances.find((item) => item.id === selectedMaintenanceId && (item.status === "SCHEDULED" || (item.status === "ACTIVE" && item.kind === "OFF_SITE")));
+  const selectedMaintenanceVehicle = selectedMaintenance ? data.vehicles.find((vehicle) => vehicle.id === selectedMaintenance.vehicleId) : undefined;
   const highlightedTrip = useRef<HTMLButtonElement | null>(null);
   const highlightedRow = useRef<HTMLDivElement | null>(null);
   const scrollArea = useRef<HTMLDivElement | null>(null);
@@ -1071,9 +1077,15 @@ function Timeline({ data, openReserve, openEdit, mutate, actorName, highlightTri
               const label = item.status === "SCHEDULED" ? `${MAINTENANCE_KIND_SHORT_LABELS[item.kind]}の予定` : item.status === "COMPLETED" ? `${MAINTENANCE_KIND_SHORT_LABELS[item.kind]}（済）` : MAINTENANCE_KIND_SHORT_LABELS[item.kind];
               const sameDay = tokyoDayStart(new Date(range.start)).getTime() === tokyoDayStart(new Date(range.end)).getTime();
               const period = `${formatTime(new Date(range.start))}～${range.open ? "戻り未定" : sameDay ? formatTime(new Date(range.end)) : formatDateTime(new Date(range.end))}`;
-              return <div key={item.id} title={`${label} ${formatDateTime(new Date(range.start))}–${range.open ? "戻り未定" : formatDateTime(new Date(range.end))}${item.note ? `\n${item.note}` : ""}`} className={cn("pointer-events-auto absolute top-2 z-[1] h-11 overflow-hidden rounded-xl border-2 px-3 text-left", item.status === "COMPLETED" ? "border-slate-300 bg-slate-100 text-slate-500" : "border-amber-400 text-amber-900", item.status === "SCHEDULED" && "border-dashed")} style={{ left: visibleStart * pxPerMinute, width: visibleDuration * pxPerMinute, ...(item.status === "COMPLETED" ? {} : { backgroundImage: "repeating-linear-gradient(135deg, #fef3c7 0 8px, #fde68a 8px 16px)" }) }}>
-                <span className="flex items-center gap-1 truncate text-xs font-black"><Wrench className="size-3 shrink-0" />{start < 0 ? "◀ " : ""}{label}{end > timelineMinutes ? " ▶" : ""}</span><span className="block truncate text-[10px] opacity-80">{period}{item.note ? ` ・ ${item.note}` : ""}</span>
-              </div>;
+              // 車検中と予定は押すと詳細を開く。済と構内の整備中は見るだけ。
+              const clickable = item.status === "SCHEDULED" || (item.status === "ACTIVE" && item.kind === "OFF_SITE");
+              const title = `${label} ${formatDateTime(new Date(range.start))}–${range.open ? "戻り未定" : formatDateTime(new Date(range.end))}${item.note ? `\n${item.note}` : ""}${clickable ? item.status === "SCHEDULED" ? "\n（押すと予定の確認・開始）" : "\n（押すと延長・終了）" : ""}`;
+              const className = cn("pointer-events-auto absolute top-2 z-[1] h-11 overflow-hidden rounded-xl border-2 px-3 text-left", item.status === "COMPLETED" ? "border-slate-300 bg-slate-100 text-slate-500" : "border-amber-400 text-amber-900", item.status === "SCHEDULED" && "border-dashed", clickable && "cursor-pointer hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600", item.id === selectedMaintenanceId && "ring-4 ring-amber-300");
+              const style = { left: visibleStart * pxPerMinute, width: visibleDuration * pxPerMinute, ...(item.status === "COMPLETED" ? {} : { backgroundImage: "repeating-linear-gradient(135deg, #fef3c7 0 8px, #fde68a 8px 16px)" }) };
+              const content = <><span className="flex items-center gap-1 truncate text-xs font-black"><Wrench className="size-3 shrink-0" />{start < 0 ? "◀ " : ""}{label}{end > timelineMinutes ? " ▶" : ""}</span><span className="block truncate text-[10px] opacity-80">{period}{item.note ? ` ・ ${item.note}` : ""}</span></>;
+              return clickable
+                ? <button key={item.id} type="button" aria-pressed={item.id === selectedMaintenanceId} title={title} onClick={() => { setSelectedTripId(null); setSelectedMaintenanceId(item.id === selectedMaintenanceId ? null : item.id); }} className={className} style={style}>{content}</button>
+                : <div key={item.id} title={title} className={className} style={style}>{content}</div>;
             })}
             {trips.map((trip) => {
               const displayStart = timelineStartOf(trip);
@@ -1089,7 +1101,7 @@ function Timeline({ data, openReserve, openEdit, mutate, actorName, highlightTri
               const color = trip.status === "IN_USE" ? "bg-blue-500" : trip.status === "COMPLETED" ? "bg-slate-400" : "bg-violet-500";
               const isHighlighted = trip.id === highlightTripId;
               if (visibleDuration <= 0) return null;
-              return <button ref={isHighlighted ? highlightedTrip : undefined} key={trip.id} aria-pressed={trip.status === "IN_USE" ? trip.id === selectedTripId : undefined} title={`${trip.employee.name} ${trip.status === "COMPLETED" ? "実績" : "予定"} ${formatDateTime(displayStart)}–${formatDateTime(displayEnd)}${trip.status === "IN_USE" ? "（押すと返却・延長）" : ""}`} onClick={() => { if (trip.status === "RESERVED") openEdit(trip); else if (trip.status === "IN_USE") setSelectedTripId(trip.id === selectedTripId ? null : trip.id); }} className={cn("absolute top-2 z-[2] h-11 select-none overflow-hidden rounded-xl px-3 text-left text-white shadow-sm", color, trip.status === "RESERVED" && "cursor-pointer hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600", trip.status === "IN_USE" && "cursor-pointer hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600", trip.id === selectedTripId && "ring-4 ring-blue-300", isHighlighted && "z-10 ring-4 ring-amber-300 shadow-xl animate-pulse")} style={{ left: visibleStart * pxPerMinute, width: visibleDuration * pxPerMinute }}>
+              return <button ref={isHighlighted ? highlightedTrip : undefined} key={trip.id} aria-pressed={trip.status === "IN_USE" ? trip.id === selectedTripId : undefined} title={`${trip.employee.name} ${trip.status === "COMPLETED" ? "実績" : "予定"} ${formatDateTime(displayStart)}–${formatDateTime(displayEnd)}${trip.status === "IN_USE" ? "（押すと返却・延長）" : ""}`} onClick={() => { if (trip.status === "RESERVED") openEdit(trip); else if (trip.status === "IN_USE") { setSelectedMaintenanceId(null); setSelectedTripId(trip.id === selectedTripId ? null : trip.id); } }} className={cn("absolute top-2 z-[2] h-11 select-none overflow-hidden rounded-xl px-3 text-left text-white shadow-sm", color, trip.status === "RESERVED" && "cursor-pointer hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600", trip.status === "IN_USE" && "cursor-pointer hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600", trip.id === selectedTripId && "ring-4 ring-blue-300", isHighlighted && "z-10 ring-4 ring-amber-300 shadow-xl animate-pulse")} style={{ left: visibleStart * pxPerMinute, width: visibleDuration * pxPerMinute }}>
                 <span className="block truncate text-xs font-black">{continuesBefore ? "◀ 継続 ・ " : ""}{isHighlighted ? "登録済 ・ " : ""}{trip.employee.name}{continuesAfter ? " ・ 翌日へ ▶" : ""}</span><span className="block truncate text-[10px] opacity-80">{trip.status === "COMPLETED" ? "実績 " : liveOverdue ? "超過中 " : ""}{formatTime(displayStart)}～{liveOverdue ? `現在 ${formatTime(displayEnd)}` : formatTime(displayEnd)}</span>
               </button>;
             })}
@@ -1098,7 +1110,9 @@ function Timeline({ data, openReserve, openEdit, mutate, actorName, highlightTri
       })}
     </div>
   </div>
-  {selectedTrip ? <ActiveTripPopover key={selectedTrip.id} trip={selectedTrip} reservations={data.nextReservations} mutate={mutate} actorName={actorName} onReturn={() => router.push(`/?returnTrip=${selectedTrip.id}`)} onClose={() => setSelectedTripId(null)} className="fixed inset-x-4 bottom-4 z-40" /> : null}</>;
+  {selectedTrip ? <ActiveTripPopover key={selectedTrip.id} trip={selectedTrip} reservations={data.nextReservations} mutate={mutate} actorName={actorName} onReturn={() => router.push(`/?returnTrip=${selectedTrip.id}`)} onClose={() => setSelectedTripId(null)} className="fixed inset-x-4 bottom-4 z-40" /> : null}
+  {selectedMaintenance && selectedMaintenanceVehicle && selectedMaintenance.status === "ACTIVE" ? <OffSiteMaintenancePopover key={selectedMaintenance.id} maintenance={selectedMaintenance} vehicle={selectedMaintenanceVehicle} reservations={data.nextReservations} mutate={mutate} onReturn={() => router.push(`/?returnMaintenance=${selectedMaintenance.id}`)} onClose={() => setSelectedMaintenanceId(null)} className="fixed inset-x-4 bottom-4 z-40" /> : null}
+  {selectedMaintenance && selectedMaintenanceVehicle && selectedMaintenance.status === "SCHEDULED" ? <ScheduledMaintenancePopover key={selectedMaintenance.id} maintenance={selectedMaintenance} vehicle={selectedMaintenanceVehicle} now={now.getTime()} onStart={() => router.push(`/?sendOutMaintenance=${selectedMaintenance.id}`)} onClose={() => setSelectedMaintenanceId(null)} className="fixed inset-x-4 bottom-4 z-40" /> : null}</>;
 }
 
 function VehicleEquipmentBadges({ vehicle, compact = false, className }: { vehicle: Pick<Vehicle, "hasEtc" | "hasNavigation" | "hasBackMonitor" | "hasWinterTires">; compact?: boolean; className?: string }) {
@@ -1246,6 +1260,17 @@ function ParkingMap({ selectedVehicleId, setSelectedVehicleId, data, trips, chan
     if (trip) startReturn(trip);
     window.history.replaceState({}, "", "/");
   }, [trips]);
+  // タイムラインの「車検を終了」「車検を開始」から来たときは、戻す区画の選択・開始の画面から始める。
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const returnId = params.get("returnMaintenance");
+    const sendOutMaintenanceId = params.get("sendOutMaintenance");
+    if (!returnId && !sendOutMaintenanceId) return;
+    const returning = data.maintenances.find((item) => item.id === returnId && item.status === "ACTIVE" && item.kind === "OFF_SITE");
+    if (returning) startMaintenanceReturn(returning);
+    if (data.maintenances.some((item) => item.id === sendOutMaintenanceId && item.status === "SCHEDULED")) setSendOutId(sendOutMaintenanceId);
+    window.history.replaceState({}, "", "/");
+  }, [data.maintenances]);
   // 車両一覧の「配置図で置く」から来たときは、その車の置き場所選びから始める。
   useEffect(() => {
     const vehicleId = new URLSearchParams(window.location.search).get("placeVehicle");
