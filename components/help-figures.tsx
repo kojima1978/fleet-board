@@ -75,6 +75,30 @@ export function MaintenanceFlowFigure() {
   </Figure>;
 }
 
+export function StartFlowFigure() {
+  return <Figure caption="黄色の点線は車の状態です。予約した車も、時刻になったら同じように利用開始します。">
+    <FlowRow steps={[
+      { where: "駐車場の配置図", label: "使う車を押す" },
+      { label: "「今すぐ利用」" },
+      { where: "共用端末", label: "社員証をかざす・社員QRを読む" },
+      { label: "返却予定を選んで「この内容で利用開始」" },
+      { label: "利用中", tone: "state" },
+    ]} />
+  </Figure>;
+}
+
+export function ReturnFlowFigure() {
+  return <Figure caption="返却の直後に出る「返却を取り消す」を30秒以内に押すと、利用中へ戻せます。">
+    <FlowRow steps={[
+      { where: "駐車場の配置図", label: "停めた区画を押す（緑に点滅）" },
+      { label: "車両タグをかざす・車両QRを読む" },
+      { label: "ガソリン残量を選ぶ" },
+      { label: "「区画◯◯へ返却する」" },
+      { label: "利用できる", tone: "done" },
+    ]} />
+  </Figure>;
+}
+
 export function RestoreFlowFigure() {
   return <Figure caption="「RESTORE」と入力するまでは、データは置き換わりません。">
     <div className="space-y-4">

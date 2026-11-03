@@ -1,11 +1,11 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { AlertTriangle, ArrowDownToLine, Ban, Building2, CalendarClock, CarFront, Clock3, Database, IdCard, LayoutGrid, LifeBuoy, MapPin, Printer, ScanLine, Settings, Undo2, UserMinus, UserPlus, Users, Volume2, Wrench } from "lucide-react";
+import { Children, cloneElement, createElement, Fragment, isValidElement, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { AlertTriangle, ArrowDownToLine, ArrowUp, Ban, Building2, CalendarClock, CarFront, Clock3, Database, IdCard, LayoutGrid, LifeBuoy, MapPin, Printer, ScanLine, Search, Settings, Undo2, UserMinus, UserPlus, Users, Volume2, Wrench } from "lucide-react";
 import { isKioskDevice, useDeviceMode } from "@/lib/device-mode";
 import { useNfcBridgeHealth, useQrBridgeHealth } from "@/lib/use-nfc-bridge";
 import { AppHeader, Navigation } from "./app-header";
-import { FrontSpotFigure, MaintenanceFlowFigure, RestoreFlowFigure, SettingsScreenFigure, SpotRoleFigure } from "./help-figures";
+import { FrontSpotFigure, MaintenanceFlowFigure, RestoreFlowFigure, ReturnFlowFigure, SettingsScreenFigure, SpotRoleFigure, StartFlowFigure } from "./help-figures";
 import { Button, Card, cn } from "./ui";
 
 type Section = { id: string; title: string; icon: ReactNode; intro?: string; steps?: ReactNode[]; notes?: ReactNode[]; figure?: ReactNode; wide?: boolean };
@@ -34,7 +34,7 @@ const USER_SECTIONS: Section[] = [
     <>車両タグをかざすか車両QRを読むと、その車の利用開始の画面がすぐ開きます。</>,
     <>ガソリンが少ない車では、給油のお願いが出ます。</>,
     <>手前の区画に車があると、黄色の注意が出ます。出られるか確認してから利用開始してください。</>,
-  ] },
+  ], figure: <StartFlowFigure /> },
   { id: "reserve", title: "予約する", icon: <CalendarClock className="size-5" />, steps: [
     <>配置図で車を押して「予約する」を押します。タイムラインの左の車両名を押しても開けます。</>,
     <>「時間で予約」「1日利用」（6:00〜22:00）「日をまたいで利用」（最大7日）から選び、日時を指定します。</>,
@@ -63,7 +63,7 @@ const USER_SECTIONS: Section[] = [
     <>「利用中」の車を押して「返却する」からでも始められます。そのあと配置図で区画を選びます。</>,
     <>お客様用の区画を選ぶと黄色の注意が出ます。できるだけ「別の区画を選ぶ」で通常の区画へ停めてください。</>,
     <>専用の区画には、決められた車しか停められません。</>,
-  ] },
+  ], figure: <ReturnFlowFigure /> },
   { id: "fix", title: "間違えたときに直す", icon: <Undo2 className="size-5" />, notes: [
     <><b>返却を間違えた</b>：返却の直後に出る「返却を取り消す」を30秒以内に押すと、利用中へ戻せます。</>,
     <><b>停めた区画が違う</b>：配置図で車を押し、「位置変更」を押します。移動先の区画を押すか、車をドラッグします。社員証は要りません。</>,
@@ -220,19 +220,118 @@ const ADMIN_GROUPS: Group[] = [
   ] },
 ];
 
+const ALL_IDS = new Set([...USER_SECTIONS, ...ADMIN_GROUPS.flatMap((group) => group.sections)].map((section) => section.id));
+const ADMIN_IDS = new Set(ADMIN_GROUPS.flatMap((group) => group.sections.map((section) => section.id)));
+// ヘッダーの下に隠れる高さ。これより下に見えている最初の説明を、いま読んでいる項目にする。
+const READING_LINE = 120;
+
+const normalize = (text: string) => text.normalize("NFKC").toLowerCase().replace(/\s+/g, "");
+
+function nodeText(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(nodeText).join("");
+  if (isValidElement<{ children?: ReactNode }>(node)) return nodeText(node.props.children);
+  return "";
+}
+
+const sectionText = (section: Section) => normalize([section.title, section.intro ?? "", ...(section.steps ?? []), ...(section.notes ?? [])].map(nodeText).join(" "));
+
+// 説明の中のカギかっこで囲んだ言葉（ボタン名など）を、画面のボタンに似た見た目にする。
+function withLabels(node: ReactNode): ReactNode {
+  if (typeof node === "string") {
+    const parts = node.split(/「([^「」]+)」/);
+    if (parts.length === 1) return node;
+    return createElement(Fragment, null, ...parts.map((part, index) => index % 2 === 0 ? part : <span className="mx-0.5 rounded-md border border-slate-300 bg-white px-1.5 py-px font-bold text-slate-900 shadow-sm [box-decoration-break:clone] print:shadow-none">{part}</span>));
+  }
+  if (isValidElement<{ children?: ReactNode }>(node) && node.props.children !== undefined) return cloneElement(node, undefined, ...Children.toArray(node.props.children).map(withLabels));
+  return node;
+}
+
 export function HelpGuide() {
   const nfcHealth = useNfcBridgeHealth(true);
   const qrHealth = useQrBridgeHealth(true);
   const kiosk = isKioskDevice(useDeviceMode(), nfcHealth === "ready" || qrHealth === "ready" ? "ready" : nfcHealth);
+  const [query, setQuery] = useState("");
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [flash, setFlash] = useState<{ id: string } | null>(null);
+  const [adminOpen, setAdminOpen] = useState(false);
+  // 目次などで移った直後は、移った先を目次の現在地にしておく。利用者が自分でスクロールしたら追い始める。
+  const followScroll = useRef(true);
+  // 終わりのひらがな1文字は比べない（取り消し・取り消す のどちらでも見つける）。
+  const keyword = normalize(query).replace(/(?<=.{2})[ぁ-ん]$/, "");
+  const userSections = USER_SECTIONS.filter((section) => !keyword || sectionText(section).includes(keyword));
+  const adminGroups = ADMIN_GROUPS.map((group) => ({ ...group, sections: group.sections.filter((section) => !keyword || sectionText(section).includes(keyword)) })).filter((group) => group.sections.length > 0);
+  // 共用端末では、管理者向けの説明を最初は閉じておく。検索したときと、管理者の項目へ移ったときは開く。
+  const adminCollapsed = kiosk && !adminOpen && !keyword;
+  const empty = userSections.length === 0 && adminGroups.length === 0;
+
+  const jumpTo = useCallback((id: string) => {
+    if (ADMIN_IDS.has(id)) setAdminOpen(true);
+    followScroll.current = false;
+    setActiveId(id);
+    setFlash({ id });
+    requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ block: "start" }));
+  }, []);
+
+  useEffect(() => {
+    const onHash = () => {
+      const id = decodeURIComponent(window.location.hash.slice(1));
+      if (ALL_IDS.has(id)) jumpTo(id);
+    };
+    onHash();
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, [jumpTo]);
+
+  useEffect(() => {
+    if (!flash) return;
+    const timer = window.setTimeout(() => setFlash(null), 2_000);
+    return () => window.clearTimeout(timer);
+  }, [flash]);
+
+  useEffect(() => {
+    const update = () => {
+      if (!followScroll.current) return;
+      const cards = [...document.querySelectorAll<HTMLElement>("[data-help-section]")].filter((card) => card.offsetParent !== null);
+      const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+      const current = atBottom ? cards.at(-1) : cards.find((card) => card.getBoundingClientRect().bottom > READING_LINE);
+      setActiveId(current?.id ?? null);
+    };
+    const release = () => { followScroll.current = true; };
+    const userInputs = ["wheel", "keydown", "touchstart", "mousedown"] as const;
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+    for (const type of userInputs) window.addEventListener(type, release, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", update);
+      for (const type of userInputs) window.removeEventListener(type, release);
+    };
+  }, [keyword, adminCollapsed]);
+
+  const onTocClick = (id: string) => {
+    window.history.replaceState(null, "", `#${id}`);
+    jumpTo(id);
+  };
+  const backToToc = () => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    document.querySelector<HTMLElement>("nav[aria-label='目次'] a")?.focus({ preventScroll: true });
+  };
+
   return <div className="min-h-screen bg-[#f4f7fb] text-slate-900 print:bg-white">
     <div className="print:hidden"><AppHeader view="help" kiosk={kiosk} /></div>
     <main className="mx-auto max-w-[1400px] p-4 pb-24 md:p-8 print:max-w-none print:p-0">
       <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-bold text-blue-600">FleetFlow</p><h2 className="mt-1 text-2xl font-black">使い方</h2><p className="mt-1 text-sm text-slate-500">社用車の利用開始・予約・返却と、管理者の設定のしかたをまとめています。</p></div><Button variant="ghost" className="print:hidden" onClick={() => window.print()}><Printer className="size-4" />印刷・PDFに保存</Button></div>
+      <div className="relative mt-4 w-full sm:w-96 print:hidden"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" /><input type="search" aria-label="使い方を検索" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setQuery(""); }} placeholder="説明を検索（例：取り消し、残量）" className="min-h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3 text-sm outline-none focus:border-blue-500" /></div>
       <div className="mt-6 grid gap-6 lg:grid-cols-[220px_1fr] print:block">
-        <nav aria-label="目次" className="print:hidden"><div className="space-y-4 lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto"><TocGroup title="利用する人" sections={USER_SECTIONS} /><div><p className="px-3 text-xs font-black text-slate-500">管理者</p><div className="mt-1 space-y-2">{ADMIN_GROUPS.map((group) => <TocGroup key={group.title} title={group.title} sections={group.sections} sub />)}</div></div></div></nav>
+        <nav aria-label="目次" className="print:hidden"><div className="space-y-4 lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto">{userSections.length > 0 ? <TocGroup title="利用する人" sections={userSections} activeId={activeId} onJump={onTocClick} /> : null}{adminGroups.length > 0 ? <div><p className="px-3 text-xs font-black text-slate-500">管理者</p><div className="mt-1 space-y-2">{adminGroups.map((group) => <TocGroup key={group.title} title={group.title} sections={group.sections} activeId={activeId} onJump={onTocClick} sub />)}</div></div> : null}</div></nav>
         <div className="space-y-8">
-          <SectionGroup title="利用する人" sections={USER_SECTIONS} />
-          <section aria-label="管理者" className="space-y-6 print:break-before-page"><h2 className="flex items-baseline gap-2 border-b-2 border-slate-900 pb-2 text-lg font-black">管理者<span className="text-xs font-bold text-slate-500">やりたいことから探してください。</span></h2>{ADMIN_GROUPS.map((group) => <SectionGroup key={group.title} title={group.title} sections={group.sections} sub />)}</section>
+          {empty ? <p role="status" className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">当てはまる説明はありません。別の言葉で探してください。</p> : null}
+          {userSections.length > 0 ? <SectionGroup title="利用する人" sections={userSections} flashId={flash?.id} /> : null}
+          {adminGroups.length > 0 ? <section aria-label="管理者" className="space-y-6 print:break-before-page"><h2 className="flex items-baseline gap-2 border-b-2 border-slate-900 pb-2 text-lg font-black">管理者<span className="text-xs font-bold text-slate-500">やりたいことから探してください。</span></h2>
+            {adminCollapsed ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-dashed border-slate-300 bg-white p-4 print:hidden"><p className="text-sm text-slate-600">共用端末では、管理者向けの説明を閉じています。</p><Button variant="secondary" onClick={() => setAdminOpen(true)}>管理者向けの説明を開く</Button></div> : null}
+            <div className={cn("space-y-6", adminCollapsed && "hidden print:block")}>{adminGroups.map((group) => <SectionGroup key={group.title} title={group.title} sections={group.sections} flashId={flash?.id} sub />)}</div>
+          </section> : null}
+          {!empty ? <div className="flex justify-end print:hidden"><Button variant="ghost" onClick={backToToc}><ArrowUp className="size-4" />目次へ戻る</Button></div> : null}
         </div>
       </div>
     </main>
@@ -246,21 +345,21 @@ export function HelpGuide() {
   </div>;
 }
 
-function TocGroup({ title, sections, sub = false }: { title: string; sections: Section[]; sub?: boolean }) {
-  return <div><p className={sub ? "px-3 text-[11px] font-bold text-slate-400" : "px-3 text-xs font-black text-slate-500"}>{title}</p><ul className="mt-0.5">{sections.map((section) => <li key={section.id}><a href={`#${section.id}`} className={cn("flex items-center rounded-lg px-3 text-sm font-bold text-slate-600 hover:bg-white hover:text-blue-700", sub ? "min-h-8" : "min-h-9")}>{section.title}</a></li>)}</ul></div>;
+function TocGroup({ title, sections, activeId, onJump, sub = false }: { title: string; sections: Section[]; activeId: string | null; onJump: (id: string) => void; sub?: boolean }) {
+  return <div><p className={sub ? "px-3 text-[11px] font-bold text-slate-400" : "px-3 text-xs font-black text-slate-500"}>{title}</p><ul className="mt-0.5">{sections.map((section) => <li key={section.id}><a href={`#${section.id}`} aria-current={activeId === section.id ? "location" : undefined} onClick={(event) => { event.preventDefault(); onJump(section.id); }} className={cn("flex items-center rounded-lg px-3 text-sm font-bold", sub ? "min-h-8" : "min-h-9", activeId === section.id ? "bg-white text-blue-700 shadow-sm" : "text-slate-600 hover:bg-white hover:text-blue-700")}>{section.title}</a></li>)}</ul></div>;
 }
 
-function SectionGroup({ title, sections, sub = false }: { title: string; sections: Section[]; sub?: boolean }) {
+function SectionGroup({ title, sections, flashId, sub = false }: { title: string; sections: Section[]; flashId?: string; sub?: boolean }) {
   const Heading = sub ? "h3" : "h2";
-  return <section aria-label={title}><Heading className={sub ? "text-sm font-black text-slate-500 print:break-after-avoid" : "border-b-2 border-slate-900 pb-2 text-lg font-black"}>{title}</Heading><div className={cn("grid gap-4 xl:grid-cols-2 print:block print:space-y-3", sub ? "mt-2" : "mt-4")}>{sections.map((section) => <GuideCard key={section.id} section={section} heading={sub ? "h4" : "h3"} />)}</div></section>;
+  return <section aria-label={title}><Heading className={sub ? "text-sm font-black text-slate-500 print:break-after-avoid" : "border-b-2 border-slate-900 pb-2 text-lg font-black"}>{title}</Heading><div className={cn("grid gap-4 xl:grid-cols-2 print:block print:space-y-3", sub ? "mt-2" : "mt-4")}>{sections.map((section) => <GuideCard key={section.id} section={section} heading={sub ? "h4" : "h3"} flash={flashId === section.id} />)}</div></section>;
 }
 
-function GuideCard({ section, heading: Heading }: { section: Section; heading: "h3" | "h4" }) {
-  return <Card id={section.id} className={cn("scroll-mt-24 p-5 print:break-inside-avoid print:rounded-none print:border-0 print:border-b print:p-0 print:pb-3 print:shadow-none", section.wide && "xl:col-span-2")}>
+function GuideCard({ section, heading: Heading, flash }: { section: Section; heading: "h3" | "h4"; flash: boolean }) {
+  return <Card id={section.id} data-help-section="" className={cn("scroll-mt-24 p-5 transition-shadow duration-500 print:break-inside-avoid print:rounded-none print:border-0 print:border-b print:p-0 print:pb-3 print:shadow-none", section.wide && "xl:col-span-2", flash && "ring-4 ring-blue-300")}>
     <Heading className="flex items-center gap-2 text-base font-black"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-700 print:size-6 print:bg-transparent">{section.icon}</span>{section.title}</Heading>
-    {section.intro ? <p className="mt-3 text-sm text-slate-700">{section.intro}</p> : null}
-    {section.steps ? <ol className="mt-3 space-y-2">{section.steps.map((step, index) => <li key={index} className="flex gap-3 text-sm leading-relaxed"><span className="grid size-6 shrink-0 place-items-center rounded-full bg-slate-900 text-xs font-black text-white print:border print:border-slate-900 print:bg-white print:text-slate-900">{index + 1}</span><span className="pt-0.5">{step}</span></li>)}</ol> : null}
-    {section.notes ? <ul className="mt-3 space-y-1.5 text-sm leading-relaxed text-slate-700">{section.notes.map((note, index) => <li key={index} className="flex gap-2"><span aria-hidden className="mt-2 size-1.5 shrink-0 rounded-full bg-slate-400" /><span>{note}</span></li>)}</ul> : null}
+    {section.intro ? <p className="mt-3 text-sm text-slate-700">{withLabels(section.intro)}</p> : null}
+    {section.steps ? <ol className="mt-3 space-y-2">{section.steps.map((step, index) => <li key={index} className="flex gap-3 text-sm leading-relaxed"><span className="grid size-6 shrink-0 place-items-center rounded-full bg-slate-900 text-xs font-black text-white print:border print:border-slate-900 print:bg-white print:text-slate-900">{index + 1}</span><span className="pt-0.5">{withLabels(step)}</span></li>)}</ol> : null}
+    {section.notes ? <ul className="mt-3 space-y-1.5 text-sm leading-relaxed text-slate-700">{section.notes.map((note, index) => <li key={index} className="flex gap-2"><span aria-hidden className="mt-2 size-1.5 shrink-0 rounded-full bg-slate-400" /><span>{withLabels(note)}</span></li>)}</ul> : null}
     {section.figure}
   </Card>;
 }
