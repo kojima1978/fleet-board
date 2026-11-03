@@ -980,10 +980,13 @@ function Timeline({ data, openReserve, openEdit, mutate, actorName, highlightTri
   const highlightedTrip = useRef<HTMLButtonElement | null>(null);
   const highlightedRow = useRef<HTMLDivElement | null>(null);
   const scrollArea = useRef<HTMLDivElement | null>(null);
+  // 表の横幅。広い画面では帯をこの幅いっぱいに広げる。
+  const [areaWidth, setAreaWidth] = useState(0);
   const timelineStart = new Date(timelineDate.getTime() + (timelineDays === 1 ? DAY_VIEW_START_MINUTE : 0) * 60_000);
   const timelineEnd = new Date(timelineDate.getTime() + (timelineDays === 1 ? DAY_VIEW_END_MINUTE : timelineDays * MINUTES_PER_DAY) * 60_000);
   const timelineMinutes = timelineDays === 1 ? DAY_VIEW_END_MINUTE - DAY_VIEW_START_MINUTE : timelineDays * MINUTES_PER_DAY;
-  const pxPerMinute = timelineDays === 1 ? 1.08 : 0.24;
+  // 今までの固定幅を下限にし、狭い画面では横スクロールのまま。左の車両名の列（w-32）と、右端の目盛り線の1pxを除いた幅で割る。
+  const pxPerMinute = Math.max(timelineDays === 1 ? 1.08 : 0.24, (areaWidth - 129) / timelineMinutes);
   const timelineWidth = timelineMinutes * pxPerMinute;
   const days = Array.from({ length: timelineDays }, (_, index) => new Date(timelineDate.getTime() + index * 24 * 60 * 60_000));
   const timeTicks = timelineDays === 1
@@ -1035,6 +1038,13 @@ function Timeline({ data, openReserve, openEdit, mutate, actorName, highlightTri
   }, [highlightTripId]);
 
   useEffect(() => { const timer = window.setInterval(() => setNow(new Date()), 60_000); return () => window.clearInterval(timer); }, []);
+  useEffect(() => {
+    const area = scrollArea.current;
+    if (!area) return;
+    const observer = new ResizeObserver(() => setAreaWidth(area.clientWidth));
+    observer.observe(area);
+    return () => observer.disconnect();
+  }, []);
   useEffect(() => { if (includesNow) scrollToNow(false); }, [timelineDate, timelineDays]);
 
   return <><TimelineDateNav timelineDate={timelineDate} timelineDays={timelineDays} setTimelineDate={setTimelineDate} setTimelineDays={setTimelineDays}>{includesNow ? <button onClick={() => scrollToNow()} className="min-h-9 rounded-lg px-3 text-xs font-bold text-blue-700 hover:bg-blue-50">現在時刻へ</button> : null}</TimelineDateNav>
