@@ -15,5 +15,7 @@ assert.equal(csvResponse.status, 200, "CSV export must succeed");
 assert.match(csvResponse.headers.get("content-type") ?? "", /text\/csv/);
 const csv = await csvResponse.text();
 assert.ok(csv.includes('"日時","利用者","操作","対象","内容"'), "CSV header must be present");
+const firstRow = csv.split("\r\n")[1];
+if (firstRow) assert.match(firstRow, /^"\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}",/, "日時は日本時間の 2026/11/03 09:20 の形で書き出す");
 
 console.log("Operations integration passed: audit log pagination, filters and CSV export");

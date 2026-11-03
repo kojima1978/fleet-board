@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/prisma/generated/client";
 import { csvResponse, csvText } from "@/lib/csv";
+import { formatHistoryDateTime } from "@/lib/vehicle-history";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +34,7 @@ export async function GET(request: Request) {
     const logs = await prisma.auditLog.findMany({ where, orderBy: { createdAt: "desc" }, take: 10_000, select: { actorName: true, action: true, targetType: true, description: true, createdAt: true } });
     return csvResponse(csvText([
       ["日時", "利用者", "操作", "対象", "内容"],
-      ...logs.map((log) => [log.createdAt.toISOString(), log.actorName, log.action, log.targetType, log.description]),
+      ...logs.map((log) => [formatHistoryDateTime(log.createdAt), log.actorName, log.action, log.targetType, log.description]),
     ]), `fleetflow-operations-${new Date().toISOString().slice(0, 10)}.csv`);
   }
   const [logs, total, actions] = await Promise.all([

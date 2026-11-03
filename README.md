@@ -693,6 +693,12 @@ docker compose exec app npm run test:security
 # HTTPのLAN接続でも利用できる操作ID生成
 docker compose exec app npm run test:operation-id
 
+# 使い方ページの「」のボタン名・見出しが画面に残っているか（ボタン名を変えたら使い方も直す）
+docker compose exec app npm run test:help-labels
+
+# 仕様書「10. 制約値の一覧」の値とコードの値が合っているか（値を変えたら仕様書と対応表も直す）
+docker compose exec app npm run test:spec-constraints
+
 # 本番LAN URL・サブネット計算・ネットワーク種別・公開アドレス待機（Windowsホスト）
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\production-network.test.ps1
 
@@ -773,7 +779,7 @@ docker compose restart app
 
 一覧は「利用開始・返却・利用時間・ガソリン・利用者」の順に並びます。同じ日に返却した記録は返却の時刻だけを、利用中の記録は「利用中」と返却予定を表示します。「CSV」を押すと、最後に検索した条件（車両・期間・利用者名）に一致する記録を、ページに分けず最大10,000件まで保存します。日時は日本時間で、車両・利用者は利用開始時点の情報で書き出します。利用中の記録は返却・利用時間・残量を空欄にします。
 
-「履歴」画面では、利用者・内容のキーワード、操作種別、開始日、終了日で絞り込めます。「CSV」を押すと現在の検索条件に一致する履歴を最大10,000件まで保存します。同じ画面でアプリ、DB、NFC、バックアップの状態と、アプリ・DBバージョンを確認できます。
+「履歴」画面では、利用者・内容のキーワード、操作種別、開始日、終了日で絞り込めます。「CSV」を押すと現在の検索条件に一致する履歴を最大10,000件まで保存します。日時は車両利用履歴と同じく日本時間（2026/11/03 09:20の形）で書き出します。同じ画面でアプリ、DB、NFC、バックアップの状態と、アプリ・DBバージョンを確認できます。
 
 ### 本番障害の情報を保存したい
 

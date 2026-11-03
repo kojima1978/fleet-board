@@ -36,6 +36,8 @@
     "test:trip-times": "tsx tests/trip-times.test.tsx",
     "test:integration:reservation-time-change": "tsx tests/integration/reservation-time-change.ts",
     "test:integration:trip-times": "tsx tests/integration/trip-start-times.ts",
+    "test:help-labels": "tsx tests/help-labels.test.ts",
+    "test:spec-constraints": "tsx tests/spec-constraints.test.ts",
     "db:migrate:employee-numbers": "node scripts/migrations/migrate-employee-numbers.mjs",
     "db:migrate:employee-normalization": "node scripts/migrations/migrate-employee-normalization.mjs",
     "db:migrate:unified-nfc": "node scripts/migrations/migrate-unified-nfc-assignments.mjs",
