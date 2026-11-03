@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-// 仕様書「10. 制約値の一覧」の値と、コードに書かれた値が食い違っていないかを確かめる。
+// 仕様書「10. 制約値の一覧」の値・定義場所と、コードに書かれた値が食い違っていないかを確かめる。
 // コードの値を変えたら、仕様書の表とこの対応表の両方を直す。
 type Constraint = { item: string; value: string; code: [file: string, snippet: string][] };
 
@@ -55,7 +55,8 @@ const constraints: Constraint[] = [
   { item: "案内の音声", value: "MP3・WAV、2MB", code: [
     ["lib/fuel-return-notice.ts", "FUEL_NOTICE_AUDIO_MAX_BYTES = 2 * 1024 * 1024"],
     ["lib/parking-guidance.ts", "PARKING_GUIDANCE_AUDIO_MAX_BYTES = 2 * 1024 * 1024"],
-    ["lib/json-backup.ts", "audioMime: z.enum([\"audio/mpeg\", \"audio/wav\"])"],
+    ["lib/fuel-return-notice-store.ts", "return \"audio/wav\""],
+    ["lib/fuel-return-notice-store.ts", "return \"audio/mpeg\""],
   ] },
   { item: "開始時刻の訂正理由", value: "200文字", code: [["app/api/dashboard/route.ts", "reason: z.string().trim().min(1).max(200)"]] },
   { item: "整備の備考", value: "200文字", code: [["lib/maintenance.ts", "MAINTENANCE_NOTE_MAX = 200"]] },
@@ -79,17 +80,23 @@ const section = spec.split("## 10. 制約値の一覧")[1]?.split(/\n## /)[0] ??
 const rows = section.split("\n")
   .filter((line) => line.startsWith("| ") && !line.startsWith("| 項目") && !line.startsWith("| ---"))
   .map((line) => line.split("|").map((cell) => cell.trim()))
-  .map(([, item, value]) => ({ item, value }));
+  .map(([, item, value, place]) => ({ item, value, place }));
 assert.ok(rows.length > 0, "仕様書に「10. 制約値の一覧」の表が見つかりません");
 
 const files = new Map<string, string>();
 const read = (file: string) => files.get(file) ?? files.set(file, readFileSync(file, "utf8")).get(file)!;
 
+// 「定義場所」の「同上」は、一つ上の行と同じファイルとして読む。
+let previousPlaces: string[] = [];
 for (const row of rows) {
+  const places = row.place === "同上" ? previousPlaces : [...row.place.matchAll(/`([^`]+)`/g)].map((match) => match[1]);
+  previousPlaces = places;
   if (outsideApp.has(row.item)) continue;
   const constraint = constraints.find((entry) => entry.item === row.item);
   assert.ok(constraint, `仕様書の「${row.item}」が対応表にありません。tests/spec-constraints.test.ts に、コードの値と組にして足してください`);
   assert.equal(row.value, constraint.value, `仕様書の「${row.item}」の値が対応表と違います。コードの値を確かめて、仕様書か対応表を直してください`);
+  const codeFiles = [...new Set(constraint.code.map(([file]) => file))];
+  assert.deepEqual([...places].sort(), codeFiles.sort(), `仕様書の「${row.item}」の定義場所が、値を書いているファイルと違います。仕様書の定義場所を直してください`);
   for (const [file, snippet] of constraint.code) {
     assert.ok(read(file).includes(snippet), `「${row.item}」のコードが変わっています（${file} に ${snippet} がありません）。仕様書の値と対応表を直してください`);
   }

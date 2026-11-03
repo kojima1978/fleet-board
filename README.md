@@ -696,7 +696,7 @@ docker compose exec app npm run test:operation-id
 # 使い方ページの「」のボタン名・見出しが画面に残っているか（ボタン名を変えたら使い方も直す）
 docker compose exec app npm run test:help-labels
 
-# 仕様書「10. 制約値の一覧」の値とコードの値が合っているか（値を変えたら仕様書と対応表も直す）
+# 仕様書「10. 制約値の一覧」の値・定義場所がコードと合っているか（値や置き場所を変えたら仕様書と対応表も直す）
 docker compose exec app npm run test:spec-constraints
 
 # 本番LAN URL・サブネット計算・ネットワーク種別・公開アドレス待機（Windowsホスト）
