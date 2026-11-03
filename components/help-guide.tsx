@@ -227,23 +227,39 @@ const READING_LINE = 120;
 
 const normalize = (text: string) => text.normalize("NFKC").toLowerCase().replace(/\s+/g, "");
 
-function nodeText(node: ReactNode): string {
+// figure を真にすると、図の部品を呼び出して中の文字も読む。図の部品はフックを使わないので、そのまま呼び出せる。
+function nodeText(node: ReactNode, figure = false): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(nodeText).join("");
-  if (isValidElement<{ children?: ReactNode }>(node)) return nodeText(node.props.children);
-  return "";
+  if (Array.isArray(node)) return node.map((child) => nodeText(child, figure)).join(" ");
+  if (!isValidElement<{ children?: ReactNode }>(node)) return "";
+  if (figure && typeof node.type === "function") return nodeText((node.type as (props: unknown) => ReactNode)(node.props), figure);
+  return nodeText(node.props.children, figure);
 }
 
-const sectionText = (section: Section) => normalize([section.title, section.intro ?? "", ...(section.steps ?? []), ...(section.notes ?? [])].map(nodeText).join(" "));
+// 説明は書き換わらないので、検索に使う文字は最初に一度だけ作る。
+const SECTION_TEXT = new Map([...USER_SECTIONS, ...ADMIN_GROUPS.flatMap((group) => group.sections)].map((section) => [section.id, normalize([
+  ...[section.title, section.intro ?? "", ...(section.steps ?? []), ...(section.notes ?? [])].map((node) => nodeText(node)),
+  nodeText(section.figure, true),
+].join(" "))]));
+const sectionMatches = (section: Section, keyword: string) => !keyword || (SECTION_TEXT.get(section.id) ?? "").includes(keyword);
 
-// 説明の中のカギかっこで囲んだ言葉（ボタン名など）を、画面のボタンに似た見た目にする。
-function withLabels(node: ReactNode): ReactNode {
+// 検索した言葉に合う部分を探す正規表現。normalize と同じく、空白の違いと英字の大小は区別しない。
+const keywordPattern = (keyword: string) => keyword ? new RegExp(`(${[...keyword].map((char) => char.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s*")})`, "gi") : null;
+
+function highlight(text: string, pattern: RegExp | null): ReactNode {
+  const parts = pattern ? text.split(pattern) : [text];
+  if (parts.length === 1) return text;
+  return createElement(Fragment, null, ...parts.map((part, index) => index % 2 === 0 ? part : <mark className="rounded-sm bg-amber-200 text-inherit print:bg-transparent">{part}</mark>));
+}
+
+// 説明の中のカギかっこで囲んだ言葉（ボタン名など）を、画面のボタンに似た見た目にする。検索した言葉にも色を付ける。
+function withLabels(node: ReactNode, pattern: RegExp | null): ReactNode {
   if (typeof node === "string") {
     const parts = node.split(/「([^「」]+)」/);
-    if (parts.length === 1) return node;
-    return createElement(Fragment, null, ...parts.map((part, index) => index % 2 === 0 ? part : <span className="mx-0.5 rounded-md border border-slate-300 bg-white px-1.5 py-px font-bold text-slate-900 shadow-sm [box-decoration-break:clone] print:shadow-none">{part}</span>));
+    if (parts.length === 1) return highlight(node, pattern);
+    return createElement(Fragment, null, ...parts.map((part, index) => index % 2 === 0 ? highlight(part, pattern) : <span className="mx-0.5 rounded-md border border-slate-300 bg-white px-1.5 py-px font-bold text-slate-900 shadow-sm [box-decoration-break:clone] print:shadow-none">{highlight(part, pattern)}</span>));
   }
-  if (isValidElement<{ children?: ReactNode }>(node) && node.props.children !== undefined) return cloneElement(node, undefined, ...Children.toArray(node.props.children).map(withLabels));
+  if (isValidElement<{ children?: ReactNode }>(node) && node.props.children !== undefined) return cloneElement(node, undefined, ...Children.toArray(node.props.children).map((child) => withLabels(child, pattern)));
   return node;
 }
 
@@ -259,8 +275,9 @@ export function HelpGuide() {
   const followScroll = useRef(true);
   // 終わりのひらがな1文字は比べない（取り消し・取り消す のどちらでも見つける）。
   const keyword = normalize(query).replace(/(?<=.{2})[ぁ-ん]$/, "");
-  const userSections = USER_SECTIONS.filter((section) => !keyword || sectionText(section).includes(keyword));
-  const adminGroups = ADMIN_GROUPS.map((group) => ({ ...group, sections: group.sections.filter((section) => !keyword || sectionText(section).includes(keyword)) })).filter((group) => group.sections.length > 0);
+  const pattern = keywordPattern(keyword);
+  const userSections = USER_SECTIONS.filter((section) => sectionMatches(section, keyword));
+  const adminGroups = ADMIN_GROUPS.map((group) => ({ ...group, sections: group.sections.filter((section) => sectionMatches(section, keyword)) })).filter((group) => group.sections.length > 0);
   // 共用端末では、管理者向けの説明を最初は閉じておく。検索したときと、管理者の項目へ移ったときは開く。
   const adminCollapsed = kiosk && !adminOpen && !keyword;
   const empty = userSections.length === 0 && adminGroups.length === 0;
@@ -326,10 +343,10 @@ export function HelpGuide() {
         <nav aria-label="目次" className="print:hidden"><div className="space-y-4 lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto">{userSections.length > 0 ? <TocGroup title="利用する人" sections={userSections} activeId={activeId} onJump={onTocClick} /> : null}{adminGroups.length > 0 ? <div><p className="px-3 text-xs font-black text-slate-500">管理者</p><div className="mt-1 space-y-2">{adminGroups.map((group) => <TocGroup key={group.title} title={group.title} sections={group.sections} activeId={activeId} onJump={onTocClick} sub />)}</div></div> : null}</div></nav>
         <div className="space-y-8">
           {empty ? <p role="status" className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">当てはまる説明はありません。別の言葉で探してください。</p> : null}
-          {userSections.length > 0 ? <SectionGroup title="利用する人" sections={userSections} flashId={flash?.id} /> : null}
+          {userSections.length > 0 ? <SectionGroup title="利用する人" sections={userSections} flashId={flash?.id} pattern={pattern} /> : null}
           {adminGroups.length > 0 ? <section aria-label="管理者" className="space-y-6 print:break-before-page"><h2 className="flex items-baseline gap-2 border-b-2 border-slate-900 pb-2 text-lg font-black">管理者<span className="text-xs font-bold text-slate-500">やりたいことから探してください。</span></h2>
             {adminCollapsed ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-dashed border-slate-300 bg-white p-4 print:hidden"><p className="text-sm text-slate-600">共用端末では、管理者向けの説明を閉じています。</p><Button variant="secondary" onClick={() => setAdminOpen(true)}>管理者向けの説明を開く</Button></div> : null}
-            <div className={cn("space-y-6", adminCollapsed && "hidden print:block")}>{adminGroups.map((group) => <SectionGroup key={group.title} title={group.title} sections={group.sections} flashId={flash?.id} sub />)}</div>
+            <div className={cn("space-y-6", adminCollapsed && "hidden print:block")}>{adminGroups.map((group) => <SectionGroup key={group.title} title={group.title} sections={group.sections} flashId={flash?.id} pattern={pattern} sub />)}</div>
           </section> : null}
           {!empty ? <div className="flex justify-end print:hidden"><Button variant="ghost" onClick={backToToc}><ArrowUp className="size-4" />目次へ戻る</Button></div> : null}
         </div>
@@ -349,17 +366,17 @@ function TocGroup({ title, sections, activeId, onJump, sub = false }: { title: s
   return <div><p className={sub ? "px-3 text-[11px] font-bold text-slate-400" : "px-3 text-xs font-black text-slate-500"}>{title}</p><ul className="mt-0.5">{sections.map((section) => <li key={section.id}><a href={`#${section.id}`} aria-current={activeId === section.id ? "location" : undefined} onClick={(event) => { event.preventDefault(); onJump(section.id); }} className={cn("flex items-center rounded-lg px-3 text-sm font-bold", sub ? "min-h-8" : "min-h-9", activeId === section.id ? "bg-white text-blue-700 shadow-sm" : "text-slate-600 hover:bg-white hover:text-blue-700")}>{section.title}</a></li>)}</ul></div>;
 }
 
-function SectionGroup({ title, sections, flashId, sub = false }: { title: string; sections: Section[]; flashId?: string; sub?: boolean }) {
+function SectionGroup({ title, sections, flashId, pattern, sub = false }: { title: string; sections: Section[]; flashId?: string; pattern: RegExp | null; sub?: boolean }) {
   const Heading = sub ? "h3" : "h2";
-  return <section aria-label={title}><Heading className={sub ? "text-sm font-black text-slate-500 print:break-after-avoid" : "border-b-2 border-slate-900 pb-2 text-lg font-black"}>{title}</Heading><div className={cn("grid gap-4 xl:grid-cols-2 print:block print:space-y-3", sub ? "mt-2" : "mt-4")}>{sections.map((section) => <GuideCard key={section.id} section={section} heading={sub ? "h4" : "h3"} flash={flashId === section.id} />)}</div></section>;
+  return <section aria-label={title}><Heading className={sub ? "text-sm font-black text-slate-500 print:break-after-avoid" : "border-b-2 border-slate-900 pb-2 text-lg font-black"}>{title}</Heading><div className={cn("grid gap-4 xl:grid-cols-2 print:block print:space-y-3", sub ? "mt-2" : "mt-4")}>{sections.map((section) => <GuideCard key={section.id} section={section} heading={sub ? "h4" : "h3"} flash={flashId === section.id} pattern={pattern} />)}</div></section>;
 }
 
-function GuideCard({ section, heading: Heading, flash }: { section: Section; heading: "h3" | "h4"; flash: boolean }) {
+function GuideCard({ section, heading: Heading, flash, pattern }: { section: Section; heading: "h3" | "h4"; flash: boolean; pattern: RegExp | null }) {
   return <Card id={section.id} data-help-section="" className={cn("scroll-mt-24 p-5 transition-shadow duration-500 print:break-inside-avoid print:rounded-none print:border-0 print:border-b print:p-0 print:pb-3 print:shadow-none", section.wide && "xl:col-span-2", flash && "ring-4 ring-blue-300")}>
-    <Heading className="flex items-center gap-2 text-base font-black"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-700 print:size-6 print:bg-transparent">{section.icon}</span>{section.title}</Heading>
-    {section.intro ? <p className="mt-3 text-sm text-slate-700">{withLabels(section.intro)}</p> : null}
-    {section.steps ? <ol className="mt-3 space-y-2">{section.steps.map((step, index) => <li key={index} className="flex gap-3 text-sm leading-relaxed"><span className="grid size-6 shrink-0 place-items-center rounded-full bg-slate-900 text-xs font-black text-white print:border print:border-slate-900 print:bg-white print:text-slate-900">{index + 1}</span><span className="pt-0.5">{withLabels(step)}</span></li>)}</ol> : null}
-    {section.notes ? <ul className="mt-3 space-y-1.5 text-sm leading-relaxed text-slate-700">{section.notes.map((note, index) => <li key={index} className="flex gap-2"><span aria-hidden className="mt-2 size-1.5 shrink-0 rounded-full bg-slate-400" /><span>{withLabels(note)}</span></li>)}</ul> : null}
+    <Heading className="flex items-center gap-2 text-base font-black"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-700 print:size-6 print:bg-transparent">{section.icon}</span>{highlight(section.title, pattern)}</Heading>
+    {section.intro ? <p className="mt-3 text-sm text-slate-700">{withLabels(section.intro, pattern)}</p> : null}
+    {section.steps ? <ol className="mt-3 space-y-2">{section.steps.map((step, index) => <li key={index} className="flex gap-3 text-sm leading-relaxed"><span className="grid size-6 shrink-0 place-items-center rounded-full bg-slate-900 text-xs font-black text-white print:border print:border-slate-900 print:bg-white print:text-slate-900">{index + 1}</span><span className="pt-0.5">{withLabels(step, pattern)}</span></li>)}</ol> : null}
+    {section.notes ? <ul className="mt-3 space-y-1.5 text-sm leading-relaxed text-slate-700">{section.notes.map((note, index) => <li key={index} className="flex gap-2"><span aria-hidden className="mt-2 size-1.5 shrink-0 rounded-full bg-slate-400" /><span>{withLabels(note, pattern)}</span></li>)}</ul> : null}
     {section.figure}
   </Card>;
 }
