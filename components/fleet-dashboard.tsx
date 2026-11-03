@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { AlertTriangle, BookOpen, CalendarClock, Camera, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Fuel, Gift, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Move, Nfc, Play, Plus, Printer, QrCode, RefreshCw, Snowflake, UserRound, Utensils, Wrench, X } from "lucide-react";
 import type { DashboardData, Employee, ParkingSpot, Trip, Vehicle, VehicleMaintenance } from "@/lib/types";
 import { normalizeNfcUid } from "@/lib/nfc";
@@ -551,10 +552,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
             <div className="min-w-0 flex-1"><p className="font-black">利用開始を登録しました</p><p className="mt-0.5 text-sm text-emerald-700">{confirmedTrip ? `${confirmedTrip.vehicle.name} ・ ${confirmedTrip.employee.name} ・ ${formatDateTime(confirmedTrip.actualStart ?? confirmedTrip.plannedStart)}〜${formatDateTime(confirmedTrip.plannedEnd)}` : "登録内容がタイムラインに反映されています。"}</p><p className="mt-1 text-xs font-bold text-emerald-800">{stayOnTimeline ? "自動移動を停止しました。続けて予定を修正できます。" : `${autoReturnSeconds ?? 5}秒後に駐車場へ戻ります。画面を操作すると停止します。`}</p></div>
             <div className="flex flex-wrap gap-2"><button type="button" onClick={() => setStayOnTimeline(true)} disabled={stayOnTimeline} className="rounded-xl px-3 py-2 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100 disabled:text-emerald-500">タイムラインに留まる</button><Link href="/" className="rounded-xl border border-emerald-300 bg-white px-4 py-2 text-sm font-bold text-emerald-800 transition hover:bg-emerald-100">今すぐ駐車場へ戻る</Link></div>
           </Card> : null}
-          {activeVehicles.length === 0 ? <TimelineEmptyState /> : <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-            {timelineMode === "chart" ? <Card className="min-w-0 overflow-hidden"><TimelinePanelHeader mode={timelineMode} onChange={setTimelineMode} /><Timeline data={data} openReserve={openReserve} openEdit={openEdit} highlightTripId={confirmedTrip?.id} timelineDate={timelineDate} timelineDays={timelineDays} setTimelineDate={setTimelineDate} setTimelineDays={setTimelineDays} /></Card> : <TimelineList trips={data.trips} openEdit={openEdit} mode={timelineMode} onChange={setTimelineMode} timelineDate={timelineDate} timelineDays={timelineDays} setTimelineDate={setTimelineDate} setTimelineDays={setTimelineDays} />}
-            <ActiveTripsPanel trips={activeTrips} reservations={data.nextReservations} mutate={mutate} actorName={employee?.name ?? "共用端末"} />
-          </section>}
+          {activeVehicles.length === 0 ? <TimelineEmptyState /> : timelineMode === "chart" ? <Card className="min-w-0 overflow-hidden"><TimelinePanelHeader mode={timelineMode} onChange={setTimelineMode} /><Timeline data={data} openReserve={openReserve} openEdit={openEdit} mutate={mutate} actorName={employee?.name ?? "共用端末"} highlightTripId={confirmedTrip?.id} timelineDate={timelineDate} timelineDays={timelineDays} setTimelineDate={setTimelineDate} setTimelineDays={setTimelineDays} /></Card> : <TimelineList trips={data.trips} openEdit={openEdit} mode={timelineMode} onChange={setTimelineMode} timelineDate={timelineDate} timelineDays={timelineDays} setTimelineDate={setTimelineDate} setTimelineDays={setTimelineDays} />}
         </> : null}
 
         {view === "settingsEmployees" || view === "settingsDepartments" || view === "settingsVehicles" || view === "settingsSpots" || view === "settingsData" || view === "settingsSystem" || view === "settingsScanner" || view === "settingsReturnGuidance" || view === "settingsEmergency" ? <div className="space-y-5">
@@ -641,7 +639,7 @@ function OperationalAlerts({ data, compact = false }: { data: DashboardData; com
   const backupOld = !data.system.backupLatestAt || now - new Date(data.system.backupLatestAt).getTime() > 26 * 60 * 60_000;
   const verificationOld = !data.system.backupVerifiedAt || now - new Date(data.system.backupVerifiedAt).getTime() > 26 * 60 * 60_000;
   const alerts = [
-    overdue ? { label: `返却予定を超過 ${overdue}台`, href: "/timeline" } : null,
+    overdue ? { label: `返却予定を超過 ${overdue}台`, href: "/" } : null,
     unlocated ? { label: `駐車位置未確定 ${unlocated}台`, href: "/" } : null,
     backupOld || verificationOld ? { label: backupOld ? "DBバックアップを確認できません" : "バックアップ復元確認が古くなっています", href: "/settings/system" } : null,
   ].filter((item): item is { label: string; href: string } => item !== null);
@@ -680,42 +678,6 @@ function TimelineEmptyState() {
   return <Card className="grid min-h-72 place-items-center p-6 text-center"><div><span className="mx-auto grid size-14 place-items-center rounded-2xl bg-blue-50 text-blue-600"><Clock3 className="size-7" /></span><h2 className="mt-4 text-lg font-black">表示する車両がありません</h2><p className="mt-1 text-sm text-slate-500">車両を登録すると、利用予定と現在の利用状況を確認できます。</p><div className="mt-5 flex flex-wrap justify-center gap-2"><Link href="/settings/vehicles" className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white hover:bg-blue-700"><Plus className="size-4" />車両を登録</Link><Link href="/" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 hover:bg-slate-50"><LayoutGrid className="size-4" />駐車場を見る</Link></div></div></Card>;
 }
 
-// タイムライン右の利用中の車両。超過した人から連絡を受けた社内の人が、延長や返却予定の変更をここで済ませる。
-// 台数が多くても見渡せるよう1台1行にし、操作はタップして開いた行にだけ出す。返却は駐車場の配置図で区画を選んで行う。
-function ActiveTripsPanel({ trips, reservations, mutate, actorName }: { trips: Trip[]; reservations: Trip[]; mutate: Mutate; actorName: string }) {
-  const [openTripId, setOpenTripId] = useState<string | null>(null);
-  const now = new Date();
-  const inUse = [...trips].sort((a, b) => a.plannedEnd.localeCompare(b.plannedEnd));
-  return <Card className="overflow-hidden xl:relative">
-    <div className="flex flex-col xl:absolute xl:inset-0">
-      <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2"><h2 className="text-sm font-black">利用中</h2><span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-black text-blue-700">{inUse.length}台</span></div>
-      {inUse.length === 0 ? <p className="px-3 py-6 text-center text-xs text-slate-400">現在利用中の車両はありません</p> : <ul className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto">{inUse.map((trip) => {
-        const end = new Date(trip.plannedEnd).getTime();
-        const overdue = end < now.getTime();
-        const next = nextReservationFor(trip, reservations);
-        // 次の予約までの残り。超過中は今からの残り時間で見る。1時間を切ったら行にも印を出す。
-        const gap = next ? Math.floor((new Date(next.plannedStart).getTime() - Math.max(end, now.getTime())) / 60_000) : null;
-        const tight = gap !== null && gap < 60;
-        const open = trip.id === openTripId;
-        return <li key={trip.id} className={cn(overdue && "bg-rose-50/60")}>
-          <button type="button" aria-expanded={open} onClick={() => setOpenTripId(open ? null : trip.id)} className={cn("flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-slate-50", open && "bg-blue-50 hover:bg-blue-50")}>
-            <CarFront className="size-4 shrink-0" style={vehicleIconStyle(trip.vehicle.color)} />
-            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs"><VehicleCodeBadge code={trip.vehicle.code} /><b className="min-w-0 truncate font-black">{trip.vehicle.name}</b><span className="shrink-0 text-slate-500">{trip.employee.name}</span></span>
-            {tight && next ? <span title={`次の予約 ${formatDateTime(next.plannedStart)} ${next.employee.name}`} className="flex shrink-0 items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[10px] font-black text-amber-900"><CalendarClock className="size-3" />{gap !== null && gap <= 0 ? "次の予約と重複" : `次まで${formatMinutes(gap ?? 0)}`}</span> : null}
-            {overdue ? <span className="shrink-0 rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-black text-rose-700">超過{formatMinutes(Math.max(1, Math.floor((now.getTime() - end) / 60_000)))}</span> : <span className="shrink-0 text-[11px] font-bold tabular-nums text-slate-600">{formatShortTime(trip.plannedEnd, now)}</span>}
-            <ChevronDown className={cn("size-3.5 shrink-0 text-slate-400 transition", open && "rotate-180")} />
-          </button>
-          {open ? <div className="space-y-1.5 px-3 pb-2.5 pt-1">
-            <p className="text-[11px] text-slate-500">{trip.employee.department} ・ 返却予定 <span className={cn("font-bold", overdue ? "text-rose-700" : "text-slate-700")}>{formatDateTime(trip.plannedEnd)}</span></p>
-            {next ? <p className={cn("flex items-center gap-1 text-[11px] font-bold", tight ? "text-amber-900" : "text-slate-500")}><CalendarClock className="size-3.5 shrink-0" /><span className="truncate">次の予約 {formatDateTime(next.plannedStart)} {next.employee.name}{tight ? gap <= 0 ? "（開始時刻を過ぎています）" : `（あと${formatMinutes(gap)}）` : ""}</span></p> : null}
-            <TripExtend trip={trip} reservations={reservations} mutate={mutate} actorName={actorName} buttonClassName="min-h-8 bg-white text-[11px]" confirmClassName="min-h-8 bg-white px-3">{({ options, preview, confirm }) => <>{options}<div className="flex items-center gap-1.5"><div className="min-w-0 flex-1">{preview}</div>{confirm}<Link href={`/?returnTrip=${trip.id}`} title="駐車場の画面で返却先の区画を選びます" className="inline-flex min-h-8 items-center gap-1 rounded-lg bg-blue-600 px-3 text-xs font-bold text-white hover:bg-blue-700"><LogOut className="size-3.5" />返却する</Link></div></>}</TripExtend>
-          </div> : null}
-        </li>;
-      })}</ul>}
-    </div>
-  </Card>;
-}
-
 // 返却予定の延長。30分〜3時間と、その日いっぱい（終日＝23:59）まで。次の予約や7日の上限を越える延長は選べない。
 // 時間のボタンは選ぶだけで、「延長する」を押したときに確定する。同じボタンをもう一度押すと選択を外す。
 // 時間の並び・変更後の時刻・確定ボタンは置き場所が画面ごとに違うので、部品を渡して並べてもらう。
@@ -751,9 +713,16 @@ function TripExtend({ trip, reservations, mutate, actorName, buttonClassName, co
   });
 }
 
-function ActiveTripPopover({ trip, reservations, mutate, actorName, onReturn, onClose }: { trip: Trip; reservations: Trip[]; mutate: Mutate; actorName: string; onReturn: () => void; onClose: () => void }) {
-  const overdue = new Date(trip.plannedEnd).getTime() < Date.now();
-  return <div role="region" aria-label={`${trip.vehicle.name}の利用状況`} className="absolute inset-x-2 bottom-2 z-30 mx-auto w-auto max-w-2xl rounded-2xl border border-slate-300 bg-white p-3 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.55)] ring-1 ring-white/80">
+// 利用中の車の詳細。駐車場の配置図とタイムラインの利用中の帯から開く。置き場所は画面ごとに className で変える。
+function ActiveTripPopover({ trip, reservations, mutate, actorName, onReturn, onClose, className }: { trip: Trip; reservations: Trip[]; mutate: Mutate; actorName: string; onReturn: () => void; onClose: () => void; className?: string }) {
+  const now = Date.now();
+  const end = new Date(trip.plannedEnd).getTime();
+  const overdue = end < now;
+  const next = nextReservationFor(trip, reservations);
+  // 次の予約までの残り。超過中は今からの残り時間で見る。1時間を切ったら目立たせる。
+  const gap = next ? Math.floor((new Date(next.plannedStart).getTime() - Math.max(end, now)) / 60_000) : null;
+  const tight = gap !== null && gap < 60;
+  return <div role="region" aria-label={`${trip.vehicle.name}の利用状況`} className={cn("absolute inset-x-2 bottom-2 z-30 mx-auto w-auto max-w-2xl rounded-2xl border border-slate-300 bg-white p-3 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.55)] ring-1 ring-white/80", className)}>
     <div className="flex min-w-0 items-center gap-3 pr-9">
       <span className="grid size-11 shrink-0 place-items-center rounded-xl border border-slate-200 bg-slate-50"><CarFront className="size-5" style={vehicleIconStyle(trip.vehicle.color)} /></span>
       <div className="min-w-0 flex-1">
@@ -770,6 +739,7 @@ function ActiveTripPopover({ trip, reservations, mutate, actorName, onReturn, on
           {overdue ? <span className="rounded-full border border-rose-200 bg-white px-2 py-0.5 text-[10px] font-black text-rose-700">予定を超過</span> : null}
           <span className="ml-auto text-[10px] text-slate-400">延長する時間を選択</span>
         </div>
+        {next && gap !== null ? <p className={cn("mb-2 flex items-center gap-1 text-[11px] font-bold", tight ? "rounded-lg bg-amber-100 px-2 py-1 text-amber-900" : "text-slate-500")}><CalendarClock className="size-3.5 shrink-0" /><span className="truncate">次の予約 {formatDateTime(next.plannedStart)} {next.employee.name}{tight ? gap <= 0 ? "（次の予約と重複）" : `（次まで${formatMinutes(gap)}）` : ""}</span></p> : null}
         {options}
         <div className="mt-2 flex min-h-10 items-center justify-between gap-3 border-t border-slate-200 pt-2">
           <div className="min-w-0 flex-1 text-left">{preview}</div>
@@ -891,7 +861,7 @@ function ActiveVehicleSidebar({ trips, reservationPanel, maintenancePanel, maint
   const [showAll, setShowAll] = useState(false);
   const [maintenanceOpen, setMaintenanceOpen] = useState(maintenanceNeedsAttention);
   const now = Date.now();
-  // 選んでいる利用者の車両を一番上に出し、あとはタイムラインの「利用中」と同じく返却予定が近い順（超過は上）に並べる。
+  // 選んでいる利用者の車両を一番上に出し、あとは返却予定が近い順（超過は上）に並べる。
   const isMine = (trip: Trip) => mineEmployeeId !== null && trip.employeeId === mineEmployeeId;
   const inUse = [...trips].sort((a, b) => Number(isMine(b)) - Number(isMine(a)) || a.plannedEnd.localeCompare(b.plannedEnd));
   return <><Card className="overflow-hidden lg:relative">
@@ -945,7 +915,7 @@ function ActiveVehiclesDialog({ trips, mineEmployeeId, onSelect, onClose }: { tr
   </DialogShell>;
 }
 
-// これからの予約を日付ごとに1件1行で並べる。利用中は右の「利用中」、完了は履歴で見る。
+// これからの予約を日付ごとに1件1行で並べる。利用中は表の帯か駐車場、完了は履歴で見る。
 function TimelineList({ trips, openEdit, mode, onChange, timelineDate, timelineDays, setTimelineDate, setTimelineDays }: { trips: Trip[]; openEdit: (trip: Trip) => void; mode: "chart" | "list"; onChange: (mode: "chart" | "list") => void; timelineDate: Date; timelineDays: 1 | 3; setTimelineDate: React.Dispatch<React.SetStateAction<Date>>; setTimelineDays: React.Dispatch<React.SetStateAction<1 | 3>> }) {
   const now = new Date();
   const today = tokyoDayStart(now).getTime();
@@ -1001,8 +971,12 @@ function EmergencyToolsPanel() {
   </Card>;
 }
 
-function Timeline({ data, openReserve, openEdit, highlightTripId, timelineDate, timelineDays, setTimelineDate, setTimelineDays }: { data: DashboardData; openReserve: (v: Vehicle) => void; openEdit: (t: Trip) => void; highlightTripId?: string; timelineDate: Date; timelineDays: 1 | 3; setTimelineDate: React.Dispatch<React.SetStateAction<Date>>; setTimelineDays: React.Dispatch<React.SetStateAction<1 | 3>> }) {
+function Timeline({ data, openReserve, openEdit, mutate, actorName, highlightTripId, timelineDate, timelineDays, setTimelineDate, setTimelineDays }: { data: DashboardData; openReserve: (v: Vehicle) => void; openEdit: (t: Trip) => void; mutate: Mutate; actorName: string; highlightTripId?: string; timelineDate: Date; timelineDays: 1 | 3; setTimelineDate: React.Dispatch<React.SetStateAction<Date>>; setTimelineDays: React.Dispatch<React.SetStateAction<1 | 3>> }) {
+  const router = useRouter();
   const [now, setNow] = useState(() => new Date());
+  // 利用中の帯を押したときの詳細。返却されたら一覧から消えるので自然に閉じる。
+  const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
+  const selectedTrip = data.trips.find((trip) => trip.id === selectedTripId && trip.status === "IN_USE");
   const highlightedTrip = useRef<HTMLButtonElement | null>(null);
   const highlightedRow = useRef<HTMLDivElement | null>(null);
   const scrollArea = useRef<HTMLDivElement | null>(null);
@@ -1105,7 +1079,7 @@ function Timeline({ data, openReserve, openEdit, highlightTripId, timelineDate, 
               const color = trip.status === "IN_USE" ? "bg-blue-500" : trip.status === "COMPLETED" ? "bg-slate-400" : "bg-violet-500";
               const isHighlighted = trip.id === highlightTripId;
               if (visibleDuration <= 0) return null;
-              return <button ref={isHighlighted ? highlightedTrip : undefined} key={trip.id} title={`${trip.employee.name} ${trip.status === "COMPLETED" ? "実績" : "予定"} ${formatDateTime(displayStart)}–${formatDateTime(displayEnd)}${trip.status === "IN_USE" ? "（返却・延長は右の「利用中」から）" : ""}`} onClick={() => { if (trip.status === "RESERVED") openEdit(trip); }} className={cn("absolute top-2 z-[2] h-11 select-none overflow-hidden rounded-xl px-3 text-left text-white shadow-sm", color, trip.status === "RESERVED" && "cursor-pointer hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600", isHighlighted && "z-10 ring-4 ring-amber-300 shadow-xl animate-pulse")} style={{ left: visibleStart * pxPerMinute, width: visibleDuration * pxPerMinute }}>
+              return <button ref={isHighlighted ? highlightedTrip : undefined} key={trip.id} aria-pressed={trip.status === "IN_USE" ? trip.id === selectedTripId : undefined} title={`${trip.employee.name} ${trip.status === "COMPLETED" ? "実績" : "予定"} ${formatDateTime(displayStart)}–${formatDateTime(displayEnd)}${trip.status === "IN_USE" ? "（押すと返却・延長）" : ""}`} onClick={() => { if (trip.status === "RESERVED") openEdit(trip); else if (trip.status === "IN_USE") setSelectedTripId(trip.id === selectedTripId ? null : trip.id); }} className={cn("absolute top-2 z-[2] h-11 select-none overflow-hidden rounded-xl px-3 text-left text-white shadow-sm", color, trip.status === "RESERVED" && "cursor-pointer hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600", trip.status === "IN_USE" && "cursor-pointer hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600", trip.id === selectedTripId && "ring-4 ring-blue-300", isHighlighted && "z-10 ring-4 ring-amber-300 shadow-xl animate-pulse")} style={{ left: visibleStart * pxPerMinute, width: visibleDuration * pxPerMinute }}>
                 <span className="block truncate text-xs font-black">{continuesBefore ? "◀ 継続 ・ " : ""}{isHighlighted ? "登録済 ・ " : ""}{trip.employee.name}{continuesAfter ? " ・ 翌日へ ▶" : ""}</span><span className="block truncate text-[10px] opacity-80">{trip.status === "COMPLETED" ? "実績 " : liveOverdue ? "超過中 " : ""}{formatTime(displayStart)}～{liveOverdue ? `現在 ${formatTime(displayEnd)}` : formatTime(displayEnd)}</span>
               </button>;
             })}
@@ -1113,7 +1087,8 @@ function Timeline({ data, openReserve, openEdit, highlightTripId, timelineDate, 
         </div>;
       })}
     </div>
-  </div></>;
+  </div>
+  {selectedTrip ? <ActiveTripPopover key={selectedTrip.id} trip={selectedTrip} reservations={data.nextReservations} mutate={mutate} actorName={actorName} onReturn={() => router.push(`/?returnTrip=${selectedTrip.id}`)} onClose={() => setSelectedTripId(null)} className="fixed inset-x-4 bottom-4 z-40" /> : null}</>;
 }
 
 function VehicleEquipmentBadges({ vehicle, compact = false, className }: { vehicle: Pick<Vehicle, "hasEtc" | "hasNavigation" | "hasBackMonitor" | "hasWinterTires">; compact?: boolean; className?: string }) {
