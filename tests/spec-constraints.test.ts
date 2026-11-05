@@ -10,6 +10,10 @@ const constraints: Constraint[] = [
   { item: "利用・予約の長さ", value: "15分〜7日（10,080分）", code: [["app/api/dashboard/route.ts", "minutes: z.number().int().min(15).max(10_080)"]] },
   { item: "予約の自動取消", value: "開始予定から30分", code: [["lib/reservations.ts", "RESERVATION_GRACE_MINUTES = 30"]] },
   { item: "予約の目印を出す時期", value: "開始の30分前", code: [["lib/parking-reservations.ts", "PARKING_RESERVATION_NOTICE_MINUTES = 30"]] },
+  { item: "予定一覧の表示期間", value: "7日・30日・90日（初期30日）", code: [
+    ["components/fleet-dashboard.tsx", "type ScheduleListDays = 7 | 30 | 90"],
+    ["components/fleet-dashboard.tsx", "useState<ScheduleListDays>(30)"],
+  ] },
   { item: "1日利用の時間帯", value: "6:00〜22:00、7日先まで", code: [
     ["lib/all-day-reservation.ts", "T06:00:00+09:00"],
     ["lib/all-day-reservation.ts", "7 * DAY"],
