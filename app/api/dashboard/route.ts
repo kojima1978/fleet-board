@@ -19,6 +19,7 @@ import { createQrToken, qrPayload } from "@/lib/qr-code";
 import { updateTripStart } from "@/lib/trip-time-actions";
 import { captureTripStartSnapshot } from "@/lib/trip-snapshot";
 import { dashboardDataVersion, markDashboardDataChanged } from "@/lib/dashboard-data-version";
+import { parseDashboardRangeDays } from "@/lib/dashboard-range";
 import type { Prisma } from "@/prisma/generated/client";
 import { resetParkingSpotFronts } from "@/prisma/parking-spot-seed";
 
@@ -286,8 +287,8 @@ export async function GET(request: Request) {
   const requestedStart = url.searchParams.get("from");
   const parsedStart = requestedStart ? new Date(requestedStart) : defaults.start;
   const dayStart = Number.isNaN(parsedStart.getTime()) ? defaults.start : parsedStart;
-  const requestedDays = Number(url.searchParams.get("days"));
-  const days = requestedDays === 1 || requestedDays === 3 ? requestedDays : 3;
+  // タイムライン本体は1・3日、予定一覧は7・30・90日を要求する。
+  const days = parseDashboardRangeDays(url.searchParams.get("days"));
   const dayEnd = new Date(dayStart.getTime() + days * 24 * 60 * 60_000);
   const cacheKey = `${scope}:${dayStart.toISOString()}:${days}`;
   const cached = dashboardSnapshots.get(cacheKey);

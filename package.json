@@ -19,6 +19,7 @@
     "test:security": "tsx tests/request-security.test.ts",
     "test:operation-id": "tsx tests/operation-id.test.ts",
     "test:development-origins": "tsx tests/development-origins.test.ts",
+    "test:dashboard-range": "tsx tests/dashboard-range.test.ts",
     "test:scanner-monitoring": "tsx tests/scanner-monitoring.test.ts",
     "test:kiosk-auto-home": "tsx tests/kiosk-auto-home.test.ts",
     "test:vehicle-history": "tsx tests/vehicle-history.test.ts",

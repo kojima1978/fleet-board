@@ -151,6 +151,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
   const [stayOnTimeline, setStayOnTimeline] = useState(false);
   const [timelineDate, setTimelineDate] = useState(() => tokyoDayStart());
   const [timelineDays, setTimelineDays] = useState<1 | 3>(1);
+  const [timelineListDays, setTimelineListDays] = useState<ScheduleListDays>(30);
   const nfcHealth = useNfcBridgeHealth(true);
   const qrHealth = useQrBridgeHealth(true);
   const scannerHealth: NfcBridgeStatus = nfcHealth === "ready" || qrHealth === "ready" ? "ready" : nfcHealth;
@@ -200,7 +201,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
       const query = new URLSearchParams();
       if (view === "timeline") {
         query.set("from", timelineDate.toISOString());
-        query.set("days", String(timelineDays));
+        query.set("days", String(timelineMode === "list" ? timelineListDays : timelineDays));
       } else if (view !== "parking") {
         query.set("scope", "settings");
       }
@@ -250,7 +251,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
       setLoading(false);
       if (!quiet) setRefreshing(false);
     }
-  }, [recordSuccessfulSync, timelineDate, timelineDays, view]);
+  }, [recordSuccessfulSync, timelineDate, timelineDays, timelineListDays, timelineMode, view]);
 
   useEffect(() => {
     load();
@@ -552,7 +553,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
             <div className="min-w-0 flex-1"><p className="font-black">利用開始を登録しました</p><p className="mt-0.5 text-sm text-emerald-700">{confirmedTrip ? `${confirmedTrip.vehicle.name} ・ ${confirmedTrip.employee.name} ・ ${formatDateTime(confirmedTrip.actualStart ?? confirmedTrip.plannedStart)}〜${formatDateTime(confirmedTrip.plannedEnd)}` : "登録内容がタイムラインに反映されています。"}</p><p className="mt-1 text-xs font-bold text-emerald-800">{stayOnTimeline ? "自動移動を停止しました。続けて予定を修正できます。" : `${autoReturnSeconds ?? 5}秒後に駐車場へ戻ります。画面を操作すると停止します。`}</p></div>
             <div className="flex flex-wrap gap-2"><button type="button" onClick={() => setStayOnTimeline(true)} disabled={stayOnTimeline} className="rounded-xl px-3 py-2 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100 disabled:text-emerald-500">タイムラインに留まる</button><Link href="/" className="rounded-xl border border-emerald-300 bg-white px-4 py-2 text-sm font-bold text-emerald-800 transition hover:bg-emerald-100">今すぐ駐車場へ戻る</Link></div>
           </Card> : null}
-          {activeVehicles.length === 0 ? <TimelineEmptyState /> : timelineMode === "chart" ? <Card className="min-w-0 overflow-hidden"><TimelinePanelHeader mode={timelineMode} onChange={setTimelineMode} /><Timeline data={data} openReserve={openReserve} openEdit={openEdit} mutate={mutate} actorName={employee?.name ?? "共用端末"} highlightTripId={confirmedTrip?.id} timelineDate={timelineDate} timelineDays={timelineDays} setTimelineDate={setTimelineDate} setTimelineDays={setTimelineDays} /></Card> : <TimelineList trips={data.trips} openEdit={openEdit} mode={timelineMode} onChange={setTimelineMode} timelineDate={timelineDate} timelineDays={timelineDays} setTimelineDate={setTimelineDate} setTimelineDays={setTimelineDays} />}
+          {activeVehicles.length === 0 ? <TimelineEmptyState /> : timelineMode === "chart" ? <Card className="min-w-0 overflow-hidden"><TimelinePanelHeader mode={timelineMode} onChange={setTimelineMode} /><Timeline data={data} openReserve={openReserve} openEdit={openEdit} mutate={mutate} actorName={employee?.name ?? "共用端末"} highlightTripId={confirmedTrip?.id} timelineDate={timelineDate} timelineDays={timelineDays} setTimelineDate={setTimelineDate} setTimelineDays={setTimelineDays} /></Card> : <TimelineList data={data} openEdit={openEdit} mutate={mutate} mode={timelineMode} onChange={setTimelineMode} timelineDate={timelineDate} listDays={timelineListDays} setTimelineDate={setTimelineDate} setListDays={setTimelineListDays} />}
         </> : null}
 
         {view === "settingsEmployees" || view === "settingsDepartments" || view === "settingsVehicles" || view === "settingsSpots" || view === "settingsData" || view === "settingsSystem" || view === "settingsScanner" || view === "settingsReturnGuidance" || view === "settingsEmergency" ? <div className="space-y-5">
@@ -842,15 +843,27 @@ function ViewSwitch<T extends string>({ value, onChange, first, second, compact 
 }
 
 function TimelinePanelHeader({ mode, onChange }: { mode: "chart" | "list"; onChange: (mode: "chart" | "list") => void }) {
-  return <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-100 px-4 py-2.5"><ViewSwitch value={mode} onChange={onChange} first={{ value: "chart", label: "タイムライン", icon: <Clock3 className="size-4" /> }} second={{ value: "list", label: "予約一覧", icon: <List className="size-4" /> }} compact /><p className="mr-auto text-xs text-slate-500">{mode === "chart" ? "予約をクリックして日時を変更（保存前に確認できます）" : "予約を選ぶと時間の変更や取消ができます"}</p>{mode === "chart" ? <div className="flex shrink-0 gap-3 text-xs"><Legend color="bg-blue-500" label="利用中" /><Legend color="bg-violet-500" label="予約" /><Legend color="bg-slate-400" label="完了" /><Legend color="bg-amber-400" label="車検" /></div> : null}</div>;
+  return <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-100 px-4 py-2.5"><ViewSwitch value={mode} onChange={onChange} first={{ value: "chart", label: "タイムライン", icon: <Clock3 className="size-4" /> }} second={{ value: "list", label: "予定一覧", icon: <List className="size-4" /> }} compact /><p className="mr-auto text-xs text-slate-500">{mode === "chart" ? "予約をクリックして日時を変更（保存前に確認できます）" : "利用予約と車検予定を日時順に確認できます"}</p>{mode === "chart" ? <div className="flex shrink-0 gap-3 text-xs"><Legend color="bg-blue-500" label="利用中" /><Legend color="bg-violet-500" label="予約" /><Legend color="bg-slate-400" label="完了" /><Legend color="bg-amber-400" label="車検" /></div> : null}</div>;
 }
 
-// タイムラインと予約一覧で共通の期間切り替え。
+// タイムライン本体は細かな時刻を確認するため、1日・3日に絞る。
 function TimelineDateNav({ timelineDate, timelineDays, setTimelineDate, setTimelineDays, children }: { timelineDate: Date; timelineDays: 1 | 3; setTimelineDate: React.Dispatch<React.SetStateAction<Date>>; setTimelineDays: React.Dispatch<React.SetStateAction<1 | 3>>; children?: ReactNode }) {
   const moveDay = (amount: number) => setTimelineDate((current) => new Date(current.getTime() + amount * 24 * 60 * 60_000));
   return <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/70 p-3">
     <div className="flex items-center gap-1"><button aria-label="前日" onClick={() => moveDay(-1)} className="grid size-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"><ChevronLeft className="size-4" /></button><button onClick={() => setTimelineDate(tokyoDayStart())} className="min-h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 hover:bg-slate-50">今日</button><button aria-label="翌日" onClick={() => moveDay(1)} className="grid size-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"><ChevronRight className="size-4" /></button><span className="ml-2 text-sm font-black">{jpShortDate.format(timelineDate)}{timelineDays === 3 ? `〜${jpShortDate.format(new Date(timelineDate.getTime() + 2 * 24 * 60 * 60_000))}` : ""}</span></div>
     <div className="flex items-center gap-2">{children}<div className="flex rounded-xl bg-slate-200 p-1"><button onClick={() => setTimelineDays(1)} className={cn("min-h-8 rounded-lg px-3 text-xs font-bold", timelineDays === 1 ? "bg-white text-slate-900 shadow-sm" : "text-slate-500")}>1日</button><button onClick={() => setTimelineDays(3)} className={cn("min-h-8 rounded-lg px-3 text-xs font-bold", timelineDays === 3 ? "bg-white text-slate-900 shadow-sm" : "text-slate-500")}>3日</button></div></div>
+  </div>;
+}
+
+type ScheduleListDays = 7 | 30 | 90;
+
+// 予定一覧は車検を早めに把握できるよう、タイムラインより長い期間を表示する。
+function ScheduleListDateNav({ timelineDate, listDays, setTimelineDate, setListDays }: { timelineDate: Date; listDays: ScheduleListDays; setTimelineDate: React.Dispatch<React.SetStateAction<Date>>; setListDays: React.Dispatch<React.SetStateAction<ScheduleListDays>> }) {
+  const moveDay = (amount: number) => setTimelineDate((current) => new Date(current.getTime() + amount * 24 * 60 * 60_000));
+  const end = new Date(timelineDate.getTime() + (listDays - 1) * 24 * 60 * 60_000);
+  return <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/70 p-3">
+    <div className="flex items-center gap-1"><button aria-label="前日" onClick={() => moveDay(-1)} className="grid size-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"><ChevronLeft className="size-4" /></button><button onClick={() => setTimelineDate(tokyoDayStart())} className="min-h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 hover:bg-slate-50">今日から</button><button aria-label="翌日" onClick={() => moveDay(1)} className="grid size-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"><ChevronRight className="size-4" /></button><span className="ml-2 text-sm font-black">{jpShortDate.format(timelineDate)}〜{jpShortDate.format(end)}</span></div>
+    <div className="flex rounded-xl bg-slate-200 p-1">{([7, 30, 90] as const).map((days) => <button key={days} type="button" onClick={() => setListDays(days)} aria-pressed={listDays === days} className={cn("min-h-8 rounded-lg px-3 text-xs font-bold", listDays === days ? "bg-white text-slate-900 shadow-sm" : "text-slate-500")}>{days}日</button>)}</div>
   </div>;
 }
 
@@ -917,28 +930,75 @@ function ActiveVehiclesDialog({ trips, mineEmployeeId, onSelect, onClose }: { tr
   </DialogShell>;
 }
 
-// これからの予約を日付ごとに1件1行で並べる。利用中は表の帯か駐車場、完了は履歴で見る。
-function TimelineList({ trips, openEdit, mode, onChange, timelineDate, timelineDays, setTimelineDate, setTimelineDays }: { trips: Trip[]; openEdit: (trip: Trip) => void; mode: "chart" | "list"; onChange: (mode: "chart" | "list") => void; timelineDate: Date; timelineDays: 1 | 3; setTimelineDate: React.Dispatch<React.SetStateAction<Date>>; setTimelineDays: React.Dispatch<React.SetStateAction<1 | 3>> }) {
-  const now = new Date();
-  const today = tokyoDayStart(now).getTime();
-  const reservations = trips.filter((trip) => trip.status === "RESERVED" && new Date(trip.plannedEnd).getTime() > now.getTime()).sort((left, right) => left.plannedStart.localeCompare(right.plannedStart));
-  const groups = new Map<number, Trip[]>();
-  for (const trip of reservations) { const day = tokyoDayStart(new Date(trip.plannedStart)).getTime(); groups.set(day, [...(groups.get(day) ?? []), trip]); }
-  const dayLabel = (day: number) => day === today ? "今日" : day === today + 86_400_000 ? "明日" : null;
-  return <Card className="overflow-hidden"><TimelinePanelHeader mode={mode} onChange={onChange} /><TimelineDateNav timelineDate={timelineDate} timelineDays={timelineDays} setTimelineDate={setTimelineDate} setTimelineDays={setTimelineDays} />
-    {reservations.length === 0 ? <div className="p-5"><Empty label="この期間の予約はありません" /></div> : [...groups].map(([day, items]) => <section key={day}>
-      <h3 className="sticky top-0 flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-1.5 text-xs font-black text-slate-700">{dayLabel(day) ? <span className="text-blue-700">{dayLabel(day)}</span> : null}{jpShortDate.format(new Date(day))}<span className="ml-auto font-bold text-slate-400">{items.length}件</span></h3>
-      <ul className="divide-y divide-slate-100">{items.map((trip) => {
-        const sameDay = tokyoDayStart(new Date(trip.plannedEnd)).getTime() === day;
-        return <li key={trip.id}><button type="button" onClick={() => openEdit(trip)} className="flex w-full items-center gap-3 px-4 py-2 text-left transition hover:bg-violet-50/50">
-          <span className="w-28 shrink-0 text-xs font-bold tabular-nums text-slate-700">{formatTime(trip.plannedStart)}–{sameDay ? formatTime(trip.plannedEnd) : formatDateTime(trip.plannedEnd)}</span>
-          <CarFront className="size-4 shrink-0" style={vehicleIconStyle(trip.vehicle.color)} />
-          <span className="min-w-0 flex-1 truncate text-sm"><b className="font-black">{trip.vehicle.name}</b><span className="ml-2 text-xs text-slate-500">{trip.employee.name}</span></span>
+type TimelineScheduleEntry =
+  | { kind: "reservation"; id: string; start: string; end: string; trip: Trip }
+  | { kind: "maintenance"; id: string; start: string; end: string | null; maintenance: VehicleMaintenance; vehicle: Vehicle };
+
+// 選んだ期間の利用予約と車検を1件1行で並べる。完了した予定は履歴で見る。
+function TimelineList({ data, openEdit, mutate, mode, onChange, timelineDate, listDays, setTimelineDate, setListDays }: { data: DashboardData; openEdit: (trip: Trip) => void; mutate: Mutate; mode: "chart" | "list"; onChange: (mode: "chart" | "list") => void; timelineDate: Date; listDays: ScheduleListDays; setTimelineDate: React.Dispatch<React.SetStateAction<Date>>; setListDays: React.Dispatch<React.SetStateAction<ScheduleListDays>> }) {
+  const router = useRouter();
+  const [now, setNow] = useState(0);
+  const [selectedMaintenanceId, setSelectedMaintenanceId] = useState<string | null>(null);
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const today = now ? tokyoDayStart(new Date(now)).getTime() : null;
+  const rangeStart = timelineDate.getTime();
+  const rangeEnd = rangeStart + listDays * 86_400_000;
+  const vehicleById = new Map(data.vehicles.map((vehicle) => [vehicle.id, vehicle] as const));
+  const entries: TimelineScheduleEntry[] = [];
+  for (const trip of data.trips) {
+    const start = Date.parse(trip.plannedStart);
+    const end = Date.parse(trip.plannedEnd);
+    if (trip.status !== "RESERVED" || end <= rangeStart || start >= rangeEnd || (now && end <= now)) continue;
+    entries.push({ kind: "reservation", id: trip.id, start: trip.plannedStart, end: trip.plannedEnd, trip });
+  }
+  for (const maintenance of data.maintenances) {
+    if (maintenance.kind !== "OFF_SITE" || (maintenance.status !== "SCHEDULED" && maintenance.status !== "ACTIVE")) continue;
+    const vehicle = vehicleById.get(maintenance.vehicleId);
+    if (!vehicle) continue;
+    const start = Date.parse(maintenance.actualStart ?? maintenance.plannedStart);
+    const end = maintenance.plannedEnd ? Date.parse(maintenance.plannedEnd) : rangeEnd;
+    if (end <= rangeStart || start >= rangeEnd) continue;
+    entries.push({ kind: "maintenance", id: maintenance.id, start: maintenance.actualStart ?? maintenance.plannedStart, end: maintenance.plannedEnd, maintenance, vehicle });
+  }
+  entries.sort((left, right) => left.start.localeCompare(right.start) || left.kind.localeCompare(right.kind));
+  const groups = new Map<number, TimelineScheduleEntry[]>();
+  for (const entry of entries) {
+    const actualDay = tokyoDayStart(new Date(entry.start)).getTime();
+    const day = Math.max(rangeStart, actualDay);
+    groups.set(day, [...(groups.get(day) ?? []), entry]);
+  }
+  const selectedMaintenance = selectedMaintenanceId ? data.maintenances.find((item) => item.id === selectedMaintenanceId && (item.status === "SCHEDULED" || (item.status === "ACTIVE" && item.kind === "OFF_SITE"))) ?? null : null;
+  const selectedVehicle = selectedMaintenance ? vehicleById.get(selectedMaintenance.vehicleId) ?? null : null;
+  const dayLabel = (day: number) => day === today ? "今日" : today !== null && day === today + 86_400_000 ? "明日" : null;
+  return <><Card className="overflow-hidden"><TimelinePanelHeader mode={mode} onChange={onChange} /><ScheduleListDateNav timelineDate={timelineDate} listDays={listDays} setTimelineDate={setTimelineDate} setListDays={setListDays} />
+    {entries.length === 0 ? <div className="p-5"><Empty label="この期間の利用予約・車検予定はありません" /></div> : [...groups].map(([day, items]) => <section key={day}>
+      <h3 className="sticky top-0 flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-1.5 text-xs font-black text-slate-700"><span>{jpShortDate.format(new Date(day))}</span>{dayLabel(day) ? <span className="text-blue-700">{dayLabel(day)}</span> : null}<span className="ml-auto font-bold text-slate-400">{items.length}件</span></h3>
+      <ul className="divide-y divide-slate-100">{items.map((entry) => {
+        const end = entry.end;
+        const sameDay = end ? tokyoDayStart(new Date(end)).getTime() === tokyoDayStart(new Date(entry.start)).getTime() : false;
+        const period = `${formatTime(entry.start)}–${end ? sameDay ? formatTime(end) : formatDateTime(end) : "戻り未定"}`;
+        if (entry.kind === "reservation") return <li key={`reservation-${entry.id}`}><button type="button" onClick={() => openEdit(entry.trip)} className="flex min-h-14 w-full items-center gap-3 px-4 py-2 text-left transition hover:bg-violet-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-500">
+          <span className="w-32 shrink-0 text-xs font-bold tabular-nums text-slate-700">{period}</span>
+          <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white"><CarFront className="size-4" style={vehicleIconStyle(entry.trip.vehicle.color)} /></span>
+          <span className="min-w-0 flex-1"><span className="flex min-w-0 items-center gap-2"><b className="truncate text-sm font-black">{entry.trip.vehicle.name}</b><span className="shrink-0 rounded-md border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">利用予約</span></span><span className="mt-0.5 block truncate text-xs text-slate-500">{entry.trip.employee.name}{entry.trip.purpose ? ` ・ ${entry.trip.purpose}` : ""}</span></span>
+          <ChevronRight className="size-4 shrink-0 text-slate-300" />
+        </button></li>;
+        const active = entry.maintenance.status === "ACTIVE";
+        return <li key={`maintenance-${entry.id}`}><button type="button" onClick={() => setSelectedMaintenanceId((current) => current === entry.id ? null : entry.id)} className="flex min-h-14 w-full items-center gap-3 px-4 py-2 text-left transition hover:bg-amber-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-500">
+          <span className="w-32 shrink-0 text-xs font-bold tabular-nums text-slate-700">{period}</span>
+          <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-slate-200 bg-slate-50 text-slate-600"><Wrench className="size-4" /></span>
+          <span className="min-w-0 flex-1"><span className="flex min-w-0 items-center gap-2"><b className="truncate text-sm font-black">{entry.vehicle.name}</b><span className={cn("shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-bold", active ? "border-amber-300 bg-amber-50 text-amber-800" : "border-slate-300 bg-white text-slate-600")}>{active ? "車検中" : "車検予定"}</span></span><span className="mt-0.5 block truncate text-xs text-slate-500">{entry.vehicle.code} ・ {entry.vehicle.plateNumber}{entry.maintenance.note ? ` ・ ${entry.maintenance.note}` : ""}</span></span>
           <ChevronRight className="size-4 shrink-0 text-slate-300" />
         </button></li>;
       })}</ul>
     </section>)}
-  </Card>;
+  </Card>
+  {selectedMaintenance && selectedVehicle && selectedMaintenance.status === "ACTIVE" ? <OffSiteMaintenancePopover key={selectedMaintenance.id} maintenance={selectedMaintenance} vehicle={selectedVehicle} reservations={data.nextReservations} mutate={mutate} onReturn={() => router.push(`/?returnMaintenance=${selectedMaintenance.id}`)} onClose={() => setSelectedMaintenanceId(null)} className="fixed inset-x-4 bottom-4 z-40" /> : null}
+  {selectedMaintenance && selectedVehicle && selectedMaintenance.status === "SCHEDULED" ? <ScheduledMaintenancePopover key={selectedMaintenance.id} maintenance={selectedMaintenance} vehicle={selectedVehicle} now={now} onStart={() => router.push(`/?sendOutMaintenance=${selectedMaintenance.id}`)} onClose={() => setSelectedMaintenanceId(null)} className="fixed inset-x-4 bottom-4 z-40" /> : null}</>;
 }
 
 function SettingsNavigation({ view }: { view: "settingsEmployees" | "settingsDepartments" | "settingsVehicles" | "settingsSpots" | "settingsData" | "settingsSystem" | "settingsScanner" | "settingsReturnGuidance" | "settingsEmergency" }) {
