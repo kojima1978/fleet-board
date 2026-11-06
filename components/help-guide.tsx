@@ -336,7 +336,8 @@ export function HelpGuide() {
   };
 
   return <div className="min-h-screen bg-[#f4f7fb] text-slate-900 print:bg-white">
-    <div className="print:hidden"><AppHeader view="help" kiosk={kiosk} /></div>
+    {/* contents にして囲み自体の箱をなくし、ヘッダーをほかの画面と同じく画面の上に固定する。印刷では隠す。 */}
+    <div className="contents print:hidden"><AppHeader view="help" kiosk={kiosk} /></div>
     <main className="mx-auto max-w-[1400px] p-4 pb-24 md:p-8 print:max-w-none print:p-0">
       <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-bold text-blue-600">FleetFlow</p><h2 className="mt-1 text-2xl font-black">使い方</h2><p className="mt-1 text-sm text-slate-500">社用車の利用開始・予約・返却と、管理者の設定のしかたをまとめています。</p></div><Button variant="ghost" className="print:hidden" onClick={() => window.print()}><Printer className="size-4" />印刷・PDFに保存</Button></div>
       <div className="relative mt-4 w-full sm:w-96 print:hidden"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" /><input type="search" aria-label="使い方を検索" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setQuery(""); }} placeholder="説明を検索（例：取り消し、残量）" className="min-h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3 text-sm outline-none focus:border-blue-500" /></div>
