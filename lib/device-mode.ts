@@ -91,3 +91,13 @@ const idleTraffic = createDeviceSetting<boolean>(
 );
 export const useIdleTrafficEnabled = idleTraffic.useValue;
 export const setIdleTrafficEnabled = idleTraffic.set;
+
+// 駐車場外周の3Dキャラクター演出。端末性能や用途に合わせ、PCごとに切り替える。
+const minionAnimation = createDeviceSetting<boolean>(
+  "fleetflow.minionAnimation",
+  (value) => value === "on",
+  (value) => value ? "on" : null,
+  false,
+);
+export const useMinionAnimationEnabled = minionAnimation.useValue;
+export const setMinionAnimationEnabled = minionAnimation.set;

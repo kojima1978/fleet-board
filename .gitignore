@@ -15,3 +15,5 @@ nfc-bridge/bin/
 nfc-bridge/obj/
 nfc-setup/bin/
 nfc-setup/obj/
+local-assets/minions/*
+!local-assets/minions/.gitkeep

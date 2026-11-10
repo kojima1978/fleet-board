@@ -25,7 +25,7 @@ import { playNfcSound } from "@/lib/nfc-sound";
 import { FuelLevelLabel, FuelLevelPicker, FuelReminder } from "./fuel-controls";
 export { FuelLevelLabel, FuelReminder } from "./fuel-controls";
 import { clearSavedEmployee, forgetPersistentEmployee, readSavedEmployee, saveEmployee } from "@/lib/employee-session";
-import { isKioskDevice, readDeviceMode, useDeviceMode, useIdleTrafficEnabled, useUserTimeoutMinutes } from "@/lib/device-mode";
+import { isKioskDevice, readDeviceMode, useDeviceMode, useIdleTrafficEnabled, useMinionAnimationEnabled, useUserTimeoutMinutes } from "@/lib/device-mode";
 import { canSendOutMaintenance, formatMaintenanceStart, formatMaintenanceTime, getUpcomingMaintenances, MAINTENANCE_KIND_LABELS, MAINTENANCE_KIND_SHORT_LABELS } from "@/lib/maintenance";
 import { AllDayDateSelector } from "./all-day-date-selector";
 import { allDayDates, allDayStart } from "@/lib/all-day-reservation";
@@ -64,6 +64,8 @@ const ScannerGuide = dynamic(() => import("./scanner-guide").then((module) => mo
 const MaintenanceDialog = dynamic(() => import("./maintenance-dialog").then((module) => module.MaintenanceDialog));
 const SendOutDialog = dynamic(() => import("./maintenance-dialog").then((module) => module.SendOutDialog));
 const NfcBridgeHelp = dynamic(() => import("./nfc-bridge-help").then((module) => module.NfcBridgeHelp));
+// 私有の3Dモデルが配置されている端末だけで読み込む。モデル未配置時はThree.jsの追加チャンクも実行しない。
+const MinionPerimeterRunners = dynamic(() => import("./minion-perimeter-runners").then((module) => module.MinionPerimeterRunners), { ssr: false });
 const jpTime = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false });
 const jpTimeSeconds = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 const jpDate = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", month: "long", day: "numeric", weekday: "long" });
@@ -1207,6 +1209,7 @@ function ParkingMap({ selectedVehicleId, setSelectedVehicleId, data, trips, chan
   // 車両移動モードでドラッグ中、またはタップで選んだ移動元の車両。
   const [movingVehicleId, setMovingVehicleId] = useState<string | null>(null);
   const idleTrafficEnabled = useIdleTrafficEnabled();
+  const minionAnimationEnabled = useMinionAnimationEnabled();
   // 位置未設定の車両も置けるよう、区画ではなく車両一覧から探す。
   const movingVehicle = movingVehicleId ? data.vehicles.find((vehicle) => vehicle.id === movingVehicleId && vehicle.active && vehicle.status === "AVAILABLE") ?? null : null;
   const unplacedVehicles = data.vehicles.filter((vehicle) => vehicle.active && vehicle.status === "AVAILABLE" && !vehicle.parkingSpotId);
@@ -1362,6 +1365,7 @@ function ParkingMap({ selectedVehicleId, setSelectedVehicleId, data, trips, chan
       <div className="@container relative mx-auto aspect-[950/525] max-w-[1180px] overflow-hidden rounded-xl border border-slate-200 bg-white" style={{ width: "min(100%, calc((100vh - 270px) * 1.81))" }}>
         <img src="/parking-layout.svg" alt="" className="pointer-events-none absolute inset-0 size-full select-none" draggable={false} />
         {fuelThankYou ? <FuelThankYouPopup key={fuelThankYou.operationId} state={fuelThankYou} onClose={() => onCloseFuelThankYou(fuelThankYou.operationId)} /> : null}
+        {minionAnimationEnabled ? <MinionPerimeterRunners paused={Boolean(selectedVehicle || selectedTrip || selectedOffSite || selectedScheduled || returningTrip || returningMaintenance || movingVehicleId)} /> : null}
         <IdleTraffic enabled={idleTrafficEnabled} colors={data.vehicles.filter((vehicle) => vehicle.active).map((vehicle) => vehicle.color)} />
         {visibleParkingSpots(data.spots).map((spot) => <div key={spot.id} data-parking-spot-id={spot.id} onDragOver={(e) => { if (isTarget(spot)) e.preventDefault(); }} onDrop={(e) => { e.preventDefault(); if (returningTrip) returnTo(spot); else if (returningMaintenance) returnMaintenanceTo(spot); else moveTo(spot); }} className={cn("absolute grid place-items-center rounded-[4px] border-2 transition", parkingSpotClass(spot, !!spot.vehicle && offSiteVehicleIds.has(spot.vehicle.id)), spot.vehicle && reservationByVehicle.has(spot.vehicle.id) && "border-violet-500", sendOutBadgeOf(spot.vehicle) && "border-amber-500", isTarget(spot) && "border-dashed border-emerald-400 bg-emerald-50", (canReturnTo(spot) || canReturnMaintenanceTo(spot)) && !needsParkingSpotWarning(spot, pickingVehicle) && "spot-beckon", pickingVehicle && !spot.vehicle && !canUseSpot(pickingVehicle, spot) && "cursor-not-allowed opacity-60", (spot.vehicle?.id === selectedVehicleId || spot.vehicle?.id === movingVehicleId) && "z-20 ring-4 ring-blue-700", spot.vehicle && changedVehicleIds.includes(spot.vehicle.id) && "z-10 ring-4 ring-amber-300 animate-pulse")} style={{ left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.width}%`, height: `${spot.height}%`, ...((canReturnTo(spot) || canReturnMaintenanceTo(spot)) ? { "--beckon-delay": `${(spot.x / 100) * 0.9}s` } as CSSProperties : {}) }}>
           {spot.vehicle && reservationByVehicle.has(spot.vehicle.id) ? <ParkingReservationBadge reservation={reservationByVehicle.get(spot.vehicle.id)!} /> : null}
