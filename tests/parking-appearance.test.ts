@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { EmptyParkingSpotLabel, isWinterTireSeason, parkingSpotClass, VehicleMapIcon, visibleParkingSpots } from "../components/fleet-dashboard";
 import { ParkingSpotNotice } from "../components/customer-spot-notice";
 import { FrontSpotNotice } from "../components/front-spot-notice";
-import { settingsSpotStateClass, settingsSpotStateLabel } from "../components/spot-role-settings";
+import { settingsSpotStateClass, settingsSpotStateLabel, settingsSpotVehicleClassLabel } from "../components/spot-role-settings";
 import { blockingFrontSpots, freeRegularSpots, isCustomerSpot } from "../lib/parking-spots";
 import type { ParkingSpot, Vehicle } from "../lib/types";
 import { defaultFrontSpotCodes, parkingSpotGeometry } from "../prisma/parking-spot-seed";
@@ -48,10 +48,16 @@ assert.match(customerEmpty, />お客様用</, "お客様用区画の用途を文
 assert.deepEqual(visibleParkingSpots([{ id: "on", enabled: true }, { id: "off", enabled: false }]).map((item) => item.id), ["on"], "通常の配置図ではOFF区画を枠ごと表示しない");
 const parkingLayout = readFileSync("public/parking-layout.svg", "utf8");
 assert.doesNotMatch(parkingLayout, /id="Rectangle (?:[1-9]|1[0-9]|2[0-6])"|stroke-dasharray/, "背景SVGに区画の実線・点線を残さない");
+assert.match(parkingLayout, /d="M271 11L521\.305 11L521\.305 130L647\.6 130L647\.6 208\.134L758\.4 208\.134L895 288\.796" stroke="black" stroke-width="0\.8"/, "上側の既存線を残し、社屋境界線をサクラ区画の上・右から斜め線へつなぐ");
+assert.match(parkingLayout, /id="Building label" transform="translate\(0 -32\)"/, "社屋の文字を上側へ移動する");
+assert.match(parkingLayout, /id="Entrance label" x="553" y="52"[\s\S]*?writing-mode="vertical-rl" text-orientation="upright" dominant-baseline="central" letter-spacing="6">入口<\/text>/, "入口を1つの縦書き文字列として同じ中心軸に表示する");
 assert.match(settingsSpotStateClass(false), /border-dashed/, "設定画面のOFF区画を破線にする");
 assert.match(settingsSpotStateClass(false), /bg-slate-100/, "設定画面のOFF区画を落ち着いたグレーにする");
 assert.equal(settingsSpotStateLabel(false), "非表示", "設定画面のOFF区画に非表示ラベルを出す");
 assert.equal(settingsSpotStateLabel(true), null, "設定画面のON区画には非表示ラベルを出さない");
+assert.equal(settingsSpotVehicleClassLabel("KEI"), "軽", "設定画面の配置図に軽自動車用の略号を表示する");
+assert.equal(settingsSpotVehicleClassLabel("STANDARD"), "普", "設定画面の配置図に普通車用の略号を表示する");
+assert.equal(settingsSpotVehicleClassLabel("ANY"), null, "推奨車種がない区画には車種ラベルを出さない");
 const spotsForNotice: ParkingSpot[] = [
   { ...spot, id: "c1", code: "01", role: "CUSTOMER" },
   { ...spot, id: "r1", code: "03" },
