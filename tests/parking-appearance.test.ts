@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { isWinterTireSeason, parkingSpotClass, VehicleMapIcon } from "../components/fleet-dashboard";
+import { EmptyParkingSpotLabel, isWinterTireSeason, parkingSpotClass, VehicleMapIcon, visibleParkingSpots } from "../components/fleet-dashboard";
 import { ParkingSpotNotice } from "../components/customer-spot-notice";
 import { FrontSpotNotice } from "../components/front-spot-notice";
+import { settingsSpotStateClass, settingsSpotStateLabel } from "../components/spot-role-settings";
 import { blockingFrontSpots, freeRegularSpots, isCustomerSpot } from "../lib/parking-spots";
 import type { ParkingSpot, Vehicle } from "../lib/types";
 import { defaultFrontSpotCodes, parkingSpotGeometry } from "../prisma/parking-spot-seed";
@@ -32,6 +33,25 @@ assert.match(backMonitorIcon, /aria-label="バックモニター付"/, "バッ�
 const keiIcon = renderToStaticMarkup(createElement(VehicleMapIcon, { vehicle: { color: "#2563eb", hasBackMonitor: false, hasWinterTires: false, isKei: true }, className: "size-4" }));
 assert.match(keiIcon, /scale-80/, "軽自動車の車アイコンを縮める");
 assert.match(keiIcon, /aria-label="軽自動車"/, "軽自動車に軽マークを付ける");
+const dedicatedEmpty = renderToStaticMarkup(createElement(EmptyParkingSpotLabel, { spot: { ...spot, role: "DEDICATED", dedicatedVehicleName: "サクラ" } }));
+assert.match(dedicatedEmpty, />空き</, "専用区画も空いている状態を先に表示する");
+assert.match(dedicatedEmpty, />サクラ専用</, "空き専用区画の用途を文字で表示する");
+assert.doesNotMatch(dedicatedEmpty, /lucide-map-pin/, "意味の分かりにくいピンを空き区画に表示しない");
+const classEmpty = renderToStaticMarkup(createElement(EmptyParkingSpotLabel, { spot: { ...spot, vehicleClass: "KEI" } }));
+assert.doesNotMatch(classEmpty, />返却先</, "推奨車種がある空き区画は重複する返却先表示を省く");
+assert.match(classEmpty, />軽用</, "推奨車種も同じ区画内に表示する");
+const normalEmpty = renderToStaticMarkup(createElement(EmptyParkingSpotLabel, { spot }));
+assert.match(normalEmpty, />返却先</, "推奨車種がない通常の空き区画は返却先と表示する");
+const customerEmpty = renderToStaticMarkup(createElement(EmptyParkingSpotLabel, { spot: { ...spot, role: "CUSTOMER" } }));
+assert.match(customerEmpty, />空き</, "お客様用区画も空き状態を先に表示する");
+assert.match(customerEmpty, />お客様用</, "お客様用区画の用途を文字で表示する");
+assert.deepEqual(visibleParkingSpots([{ id: "on", enabled: true }, { id: "off", enabled: false }]).map((item) => item.id), ["on"], "通常の配置図ではOFF区画を枠ごと表示しない");
+const parkingLayout = readFileSync("public/parking-layout.svg", "utf8");
+assert.doesNotMatch(parkingLayout, /id="Rectangle (?:[1-9]|1[0-9]|2[0-6])"|stroke-dasharray/, "背景SVGに区画の実線・点線を残さない");
+assert.match(settingsSpotStateClass(false), /border-dashed/, "設定画面のOFF区画を破線にする");
+assert.match(settingsSpotStateClass(false), /bg-slate-100/, "設定画面のOFF区画を落ち着いたグレーにする");
+assert.equal(settingsSpotStateLabel(false), "非表示", "設定画面のOFF区画に非表示ラベルを出す");
+assert.equal(settingsSpotStateLabel(true), null, "設定画面のON区画には非表示ラベルを出さない");
 const spotsForNotice: ParkingSpot[] = [
   { ...spot, id: "c1", code: "01", role: "CUSTOMER" },
   { ...spot, id: "r1", code: "03" },

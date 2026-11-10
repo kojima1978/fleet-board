@@ -25,6 +25,10 @@ const roleTile: Record<ParkingSpotRole, string> = {
 };
 const field = "min-h-10 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-sm disabled:opacity-50";
 
+// 設定画面ではOFF区画も再設定できるように残し、通常区画とは明確に区別する。
+export const settingsSpotStateClass = (enabled: boolean) => enabled ? "" : "border-[3px] border-dashed border-slate-500 bg-slate-100/95";
+export const settingsSpotStateLabel = (enabled: boolean) => enabled ? null : "非表示";
+
 // 区画番号と表示名はサーバーと同じく全角を半角へそろえ、前後の空白を除いて比べる。
 const normalizeCode = (value: string) => value.normalize("NFKC").trim();
 
@@ -42,9 +46,9 @@ export function SpotRoleSettings({ data, mutate }: { data: DashboardData; mutate
       <p className="mb-2 text-xs font-bold text-slate-500">変更する区画を配置図からタップしてください</p>
       <div className="@container relative mx-auto aspect-[950/525] overflow-hidden rounded-xl border border-slate-200 bg-white" style={{ width: "min(100%, calc((100vh - 290px) * 1.81))" }}>
         <img src="/parking-layout.svg" alt="" className="pointer-events-none absolute inset-0 size-full select-none" draggable={false} />
-        {data.spots.map((spot) => <button key={spot.id} type="button" aria-pressed={spot.id === selectedId} title={`区画 ${spot.code}を選ぶ`} onClick={() => setSelectedId((current) => current === spot.id ? null : spot.id)} className={cn("absolute grid place-content-center rounded-[4px] border-2 text-center transition hover:border-blue-400", roleTile[spot.role], isDashedSpot(spot) && "border-[3px] border-dashed", !spot.enabled && "opacity-50", spot.enabled && frontIds.includes(spot.id) && "border-solid border-amber-500 bg-amber-100 ring-2 ring-amber-300", spot.id === selectedId && "z-10 border-solid border-blue-500 bg-blue-50 ring-4 ring-blue-300")} style={{ left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.width}%`, height: `${spot.height}%` }}>
-          <span className="block text-[10px] font-black leading-none text-slate-800 @2xl:text-sm">{spot.code}</span>
-          {spotRoleTag(spot) ? <span className="mt-0.5 block truncate px-0.5 text-[7px] font-bold leading-none text-slate-500 @2xl:text-[10px]">{spotRoleTag(spot)}</span> : null}
+        {data.spots.map((spot) => <button key={spot.id} type="button" aria-pressed={spot.id === selectedId} title={`区画 ${spot.code}（${spot.enabled ? "表示中" : "非表示"}）を選ぶ`} onClick={() => setSelectedId((current) => current === spot.id ? null : spot.id)} className={cn("absolute grid place-content-center rounded-[4px] border-2 text-center transition hover:border-blue-400", roleTile[spot.role], isDashedSpot(spot) && "border-[3px] border-dashed", settingsSpotStateClass(spot.enabled), spot.enabled && frontIds.includes(spot.id) && "border-solid border-amber-500 bg-amber-100 ring-2 ring-amber-300", spot.id === selectedId && "z-10 border-solid border-blue-500 bg-blue-50 ring-4 ring-blue-300")} style={{ left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.width}%`, height: `${spot.height}%` }}>
+          <span className={cn("block text-[10px] font-black leading-none @2xl:text-sm", spot.enabled ? "text-slate-800" : "text-slate-500")}>{spot.code}</span>
+          {settingsSpotStateLabel(spot.enabled) ? <span className="mt-0.5 block rounded bg-slate-600 px-1 py-0.5 text-[7px] font-black leading-none text-white @2xl:text-[9px]">{settingsSpotStateLabel(spot.enabled)}</span> : spotRoleTag(spot) ? <span className="mt-0.5 block truncate px-0.5 text-[7px] font-bold leading-none text-slate-500 @2xl:text-[10px]">{spotRoleTag(spot)}</span> : null}
           {spot.label ? <PenLine aria-label="表示名を変更済み" className="absolute right-0.5 top-0.5 size-2 text-blue-500 @2xl:size-3" /> : null}
         </button>)}
       </div>
@@ -66,6 +70,7 @@ export function SpotRoleSettings({ data, mutate }: { data: DashboardData; mutate
         </dl>
         <p className="mt-3 flex items-center gap-1.5 border-t border-slate-100 pt-3 text-xs text-slate-500"><PenLine className="size-3.5 text-blue-500" />表示名を変更した区画</p>
         <p className="mt-1.5 flex items-center gap-1.5 text-xs text-slate-500"><span aria-hidden="true" className="size-3.5 rounded-[3px] border-2 border-amber-500 bg-amber-100" />選んだ区画の手前の区画</p>
+        <p className="mt-1.5 flex items-center gap-1.5 text-xs text-slate-500"><span aria-hidden="true" className="size-3.5 rounded-[3px] border-[3px] border-dashed border-slate-500 bg-slate-100" />通常の配置図では非表示の区画</p>
       </Card>
     </div>
   </div>;
