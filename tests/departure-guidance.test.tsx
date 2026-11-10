@@ -49,7 +49,7 @@ assert.match(reserve, /この内容で予約/);
 assert.doesNotMatch(reserve, /予約した車両を利用開始|この内容で利用開始|>時刻指定<|>今すぐ</, "予約入口で現在の予約を利用開始しない");
 const lowFuelReserve = renderToStaticMarkup(<StartDialog intent="scheduled" kiosk={false} employees={[employee]} vehicles={[lowFuelVehicle]} trips={[]} initialEmployee={employee} initialVehicleId={lowFuelVehicle.id} submitting={false} onClose={noop} onSubmit={noop} />);
 assert.doesNotMatch(lowFuelReserve, /ガソリン残量が1\/2以下です/, "将来の予約時には現在の残量で給油案内を出さない");
-const baseSpot: ParkingSpot = { id: "s1", code: "15", x: 0, y: 0, width: 5, height: 5, orientation: "vertical", enabled: true, version: 1, vehicle, role: "REGULAR", dedicatedVehicleId: null, dedicatedVehicleName: null, label: null, frontSpotIds: ["s2"] };
+const baseSpot: ParkingSpot = { id: "s1", code: "15", x: 0, y: 0, width: 5, height: 5, orientation: "vertical", enabled: true, version: 1, vehicle, role: "REGULAR", vehicleClass: "ANY", dedicatedVehicleId: null, dedicatedVehicleName: null, label: null, frontSpotIds: ["s2"] };
 const blockedSpots: ParkingSpot[] = [baseSpot, { ...baseSpot, id: "s2", code: "14", vehicle: { ...vehicle, id: "v2", name: "プロボックス" }, frontSpotIds: [] }];
 const blockedStart = renderToStaticMarkup(<StartDialog kiosk={false} employees={[employee]} vehicles={[vehicle]} trips={[]} spots={blockedSpots} initialEmployee={employee} initialVehicleId={vehicle.id} submitting={false} onClose={noop} onSubmit={noop} />);
 assert.match(blockedStart, /手前の区画14（プロボックス）に車があります/, "今すぐ利用で手前の車を知らせる");

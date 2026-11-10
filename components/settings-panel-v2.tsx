@@ -4,8 +4,8 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import Link from "next/link";
 import { CarFront, Check, Download, FileJson, Mail, MapPin, Nfc, Pencil, Plus, Power, QrCode, RotateCcw, Search, Send, Upload, UserRound, Wrench, X } from "lucide-react";
 import type { DashboardData, Employee, ParkingSpot, Vehicle } from "@/lib/types";
-import { canUseSpot, formatSpotLabel, isCustomerSpot } from "@/lib/parking-spots";
-import { CustomerSpotNotice } from "./customer-spot-notice";
+import { canUseSpot, formatSpotLabel, matchesParkingVehicleClass, PARKING_VEHICLE_CLASS_LABELS } from "@/lib/parking-spots";
+import { ParkingSpotNotice } from "./customer-spot-notice";
 import { normalizeNfcUid, sameNfcUid } from "@/lib/nfc";
 import { isLightVehicleColor, VEHICLE_COLORS, vehicleColorName, vehicleIconStyle } from "@/lib/vehicle-colors";
 import { isRecordCode, normalizeRecordCode, RECORD_CODE_EXAMPLES, recordCodeMessage, sanitizeRecordCodeInput } from "@/lib/record-codes";
@@ -503,17 +503,21 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
     URL.revokeObjectURL(url);
   };
   // 新しい車両を置ける区画は、有効で空いていて専用区画でないもの。
-  const freeImportSpots = data.spots.filter((spot) => spot.enabled && !spot.vehicle && canUseSpot({ id: "" }, spot));
-  // 利用再開した車両は、空いている仮置き区画へ自動で置く。
-  const freeHoldingCount = freeImportSpots.filter((spot) => spot.role === "HOLDING").length;
+  const selectedRegistrationSpot = data.spots.find((spot) => spot.id === vehicleForm.spotId);
+  const freeImportSpots = data.spots.filter((spot) => spot.enabled && !spot.vehicle && spot.role !== "DEDICATED");
   const importPlacedCount = Object.values(importSpots).filter(Boolean).length;
   const importUnplacedCount = importRows.length - importPlacedCount;
   const assignImportSpots = () => {
     const used = new Set(Object.values(importSpots));
     const free = freeImportSpots.filter((spot) => !used.has(spot.id));
     const next = { ...importSpots };
-    importRows.forEach((_, index) => {
-      if (!next[index] && free.length) next[index] = free.shift()!.id;
+    // 車種が決まっている区画から埋め、共用区画はどちらの車種にも残す。
+    importRows.forEach((row, index) => {
+      if (next[index]) return;
+      const vehicle = { id: "", isKei: row.isKei === true };
+      let available = free.findIndex((spot) => spot.vehicleClass !== "ANY" && matchesParkingVehicleClass(vehicle, spot.vehicleClass));
+      if (available < 0) available = free.findIndex((spot) => spot.vehicleClass === "ANY");
+      if (available >= 0) next[index] = free.splice(available, 1)[0].id;
     });
     setImportSpots(next);
   };
@@ -701,7 +705,7 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
           version: confirmTarget.version,
           active: !confirmTarget.active,
         },
-        confirmTarget.active ? `${confirmTarget.name}の利用を停止しました` : `${confirmTarget.name}の利用を再開しました${freeHoldingCount ? "。仮置き区画に置きました" : "。仮置きが空いていないため位置未設定です"}`,
+        confirmTarget.active ? `${confirmTarget.name}の利用を停止しました` : `${confirmTarget.name}の利用を再開しました`,
       );
       if (ok) {
         setHighlightId(confirmTarget.id);
@@ -1136,6 +1140,8 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                               .filter(([key, spotId]) => Number(key) !== index && spotId)
                               .map(([, spotId]) => spotId),
                           );
+                          const chosenSpot = freeImportSpots.find((spot) => spot.id === importSpots[index]);
+                          const importVehicle = { id: "", isKei: row.isKei === true };
                           return (
                             <tr key={`${String(row.code)}-${index}`}>
                               <td className="p-2 font-bold">{String(row.code)}</td>
@@ -1161,10 +1167,11 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                                       .filter((spot) => !takenByOthers.has(spot.id))
                                       .map((spot) => (
                                         <option key={spot.id} value={spot.id}>
-                                          {formatSpotLabel(spot)}
+                                          {formatSpotLabel(spot)}{!matchesParkingVehicleClass(importVehicle, spot.vehicleClass) ? "（車種が異なります）" : ""}
                                         </option>
                                       ))}
                                   </select>
+                                  {chosenSpot ? <div className="mt-2 empty:hidden"><ParkingSpotNotice spot={chosenSpot} spots={freeImportSpots.filter((spot) => !takenByOthers.has(spot.id))} vehicle={importVehicle} /></div> : null}
                                 </td>
                               ) : null}
                             </tr>
@@ -1364,9 +1371,9 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
                           }
                         >
                           <option value="">駐車区画を選択してください</option>
-                          <ParkingSpotOptions spots={data.spots} />
+                          <ParkingSpotOptions spots={data.spots} isKei={vehicleForm.isKei} />
                         </select>
-                        {data.spots.some((spot) => spot.id === vehicleForm.spotId && isCustomerSpot(spot)) ? <div className="mt-2"><CustomerSpotNotice spots={data.spots} vehicle={null} /></div> : null}
+                        {selectedRegistrationSpot ? <div className="mt-2 empty:hidden"><ParkingSpotNotice spot={selectedRegistrationSpot} spots={data.spots} vehicle={{ id: "", isKei: vehicleForm.isKei }} /></div> : null}
                         <p className="mt-1 text-xs text-slate-500">登録と同時に配置図へ表示します。場所が決まっていない場合は仮置き区画を選び、決まったら配置図の「位置変更」で移動してください。</p>
                       </Field>
                     ) : null}
@@ -1631,14 +1638,14 @@ export function SettingsPanelV2({ kind, data, mutate }: { kind: "employee" | "ve
 }
 
 // 新規登録の車両はまだ専用区画の対象にならないため、専用区画は選択肢に出さない。
-function ParkingSpotOptions({ spots, vehicleId }: { spots: ParkingSpot[]; vehicleId?: string }) {
+function ParkingSpotOptions({ spots, isKei }: { spots: ParkingSpot[]; isKei: boolean }) {
   return (
     <>
       {spots
-        .filter((spot) => spot.enabled && (!spot.vehicle || spot.vehicle.id === vehicleId) && canUseSpot({ id: vehicleId ?? "" }, spot))
+        .filter((spot) => !spot.vehicle && canUseSpot({ id: "", isKei }, spot))
         .map((spot) => (
           <option key={spot.id} value={spot.id}>
-            {formatSpotLabel(spot)}
+            {formatSpotLabel(spot)}{spot.vehicleClass !== "ANY" ? `・${PARKING_VEHICLE_CLASS_LABELS[spot.vehicleClass]}` : ""}{!matchesParkingVehicleClass({ isKei }, spot.vehicleClass) ? "（車種が異なります）" : ""}
           </option>
         ))}
     </>

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, LoaderCircle, MapPin, PenLine, RotateCcw } from "lucide-react";
 import type { DashboardData, ParkingSpot, Vehicle } from "@/lib/types";
-import { PARKING_SPOT_ROLES, SPOT_LABEL_MAX_LENGTH, SPOT_ROLE_DESCRIPTIONS, SPOT_ROLE_LABELS, defaultSpotTag, isDashedSpot, spotRoleTag, type ParkingSpotRole } from "@/lib/parking-spots";
+import { PARKING_SPOT_ROLES, SPOT_LABEL_MAX_LENGTH, SPOT_ROLE_DESCRIPTIONS, SPOT_ROLE_LABELS, defaultSpotTag, isDashedSpot, PARKING_VEHICLE_CLASSES, PARKING_VEHICLE_CLASS_LABELS, spotRoleTag, type ParkingSpotRole, type ParkingVehicleClass } from "@/lib/parking-spots";
 import { Button, Card, cn } from "./ui";
 
 type Mutate = (body: object, success: string) => Promise<boolean>;
@@ -75,6 +75,7 @@ function SpotEditor({ spot, spots, vehicles, mutate, onFrontChange }: { spot: Pa
   const [code, setCode] = useState(spot.code);
   const [enabled, setEnabled] = useState(spot.enabled);
   const [role, setRole] = useState<ParkingSpotRole>(spot.role);
+  const [vehicleClass, setVehicleClass] = useState(spot.vehicleClass);
   const [vehicleId, setVehicleId] = useState(spot.dedicatedVehicleId ?? "");
   const [label, setLabel] = useState(spot.label ?? "");
   // 表示名は「自動」（用途から決まる名前）か「任意」（入力した名前）のどちらか。
@@ -84,7 +85,7 @@ function SpotEditor({ spot, spots, vehicles, mutate, onFrontChange }: { spot: Pa
   const [saving, setSaving] = useState(false);
   // 保存後や他の端末で変わったときは、最新の内容で入力し直す。
   const savedFrontKey = spot.frontSpotIds.join();
-  useEffect(() => { setCode(spot.code); setEnabled(spot.enabled); setRole(spot.role); setVehicleId(spot.dedicatedVehicleId ?? ""); setLabel(spot.label ?? ""); setLabelMode(spot.label ? "custom" : "auto"); setFrontIds(savedFrontKey ? savedFrontKey.split(",") : []); }, [spot.code, spot.enabled, spot.role, spot.dedicatedVehicleId, spot.label, savedFrontKey]);
+  useEffect(() => { setCode(spot.code); setEnabled(spot.enabled); setRole(spot.role); setVehicleClass(spot.vehicleClass); setVehicleId(spot.dedicatedVehicleId ?? ""); setLabel(spot.label ?? ""); setLabelMode(spot.label ? "custom" : "auto"); setFrontIds(savedFrontKey ? savedFrontKey.split(",") : []); }, [spot.code, spot.enabled, spot.role, spot.vehicleClass, spot.dedicatedVehicleId, spot.label, savedFrontKey]);
   useEffect(() => { onFrontChange(frontIds); }, [frontIds, onFrontChange]);
   useEffect(() => {
     if (!confirming) return;
@@ -95,14 +96,15 @@ function SpotEditor({ spot, spots, vehicles, mutate, onFrontChange }: { spot: Pa
   const nextCode = normalizeCode(code);
   const nextLabel = labelMode === "custom" ? normalizeCode(label) || null : null;
   const dedicatedVehicleId = role === "DEDICATED" ? vehicleId || null : null;
-  const dedicatedVehicleName = vehicles.find((vehicle) => vehicle.id === dedicatedVehicleId)?.name ?? null;
+  const dedicatedVehicle = vehicles.find((vehicle) => vehicle.id === dedicatedVehicleId);
+  const dedicatedVehicleName = dedicatedVehicle?.name ?? null;
   const autoLabel = defaultSpotTag({ code: nextCode, role, dedicatedVehicleId, dedicatedVehicleName });
   // 手前の区画の候補。仮置きは実在しないので出さない。
   const frontCandidates = spots.filter((item) => item.enabled && item.id !== spot.id && item.role !== "HOLDING").sort((a, b) => a.code.localeCompare(b.code, "ja", { numeric: true }));
   const toggleFront = (id: string) => setFrontIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   const codeChanged = nextCode !== spot.code;
   const frontChanged = [...frontIds].sort().join() !== [...spot.frontSpotIds].sort().join();
-  const changed = enabled !== spot.enabled || codeChanged || frontChanged || nextLabel !== spot.label || role !== spot.role || dedicatedVehicleId !== (spot.role === "DEDICATED" ? spot.dedicatedVehicleId : null);
+  const changed = enabled !== spot.enabled || vehicleClass !== spot.vehicleClass || codeChanged || frontChanged || nextLabel !== spot.label || role !== spot.role || dedicatedVehicleId !== (spot.role === "DEDICATED" ? spot.dedicatedVehicleId : null);
   const codeError = !nextCode ? "区画番号を入力してください" : nextCode.length > 12 ? "区画番号は12文字以内で入力してください" : /\s/.test(nextCode) ? "区画番号に空白は使えません" : codeChanged && spots.some((item) => item.id !== spot.id && item.code === nextCode) ? `区画番号${nextCode}はすでに使われています` : "";
   const labelError = labelMode === "custom" && !nextLabel ? "表示名を入力するか、自動を選んでください" : (nextLabel?.length ?? 0) > SPOT_LABEL_MAX_LENGTH ? `表示名は${SPOT_LABEL_MAX_LENGTH}文字以内で入力してください` : "";
   // 専用にするとき、別の車がすでに停まっている区画は先に移動してもらう。
@@ -116,7 +118,7 @@ function SpotEditor({ spot, spots, vehicles, mutate, onFrontChange }: { spot: Pa
     if (!changed || !valid || saving) return;
     setSaving(true);
     try {
-      const ok = await mutate({ action: "updateSpot", id: spot.id, version: spot.version, enabled, code: nextCode, label: nextLabel ?? "", role, dedicatedVehicleId, frontSpotIds: frontIds }, codeChanged ? `区画 ${spot.code} を ${nextCode} に変更しました` : `区画 ${spot.code} の設定を変更しました`);
+      const ok = await mutate({ action: "updateSpot", id: spot.id, version: spot.version, enabled, vehicleClass, code: nextCode, label: nextLabel ?? "", role, dedicatedVehicleId, frontSpotIds: frontIds }, codeChanged ? `区画 ${spot.code} を ${nextCode} に変更しました` : `区画 ${spot.code} の設定を変更しました`);
       if (ok) setConfirming(false);
     } finally { setSaving(false); }
   };
@@ -159,6 +161,13 @@ function SpotEditor({ spot, spots, vehicles, mutate, onFrontChange }: { spot: Pa
       <select aria-label={`区画 ${spot.code}の用途`} disabled={saving} value={role} onChange={(event) => changeRole(event.target.value as ParkingSpotRole)} className={field}>
         {PARKING_SPOT_ROLES.map((item) => <option key={item} value={item}>{SPOT_ROLE_LABELS[item]}</option>)}
       </select>
+    </label>
+    <label className="block">
+      <span className="mb-1.5 block text-xs font-bold text-slate-600">推奨車種</span>
+      <select className={field} value={vehicleClass} disabled={saving} onChange={(event) => setVehicleClass(event.target.value as ParkingVehicleClass)}>
+        {PARKING_VEHICLE_CLASSES.map((value) => <option key={value} value={value}>{PARKING_VEHICLE_CLASS_LABELS[value]}</option>)}
+      </select>
+      <span className="mt-1 block text-xs text-slate-500">車種が異なる場合は、駐車の確定前に注意を表示します。</span>
     </label>
     {role === "DEDICATED" ? <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-600">専用にする車両</span>
       <select aria-label={`区画 ${spot.code}の専用車両`} disabled={saving} value={vehicleId} onChange={(event) => changeVehicle(event.target.value)} className={field}>

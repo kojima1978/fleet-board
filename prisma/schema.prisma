@@ -86,6 +86,12 @@ enum ParkingSpotRole {
 }
 
 // 配置図での区画の向き。
+enum ParkingVehicleClass {
+  ANY
+  STANDARD
+  KEI
+}
+
 enum ParkingSpotOrientation {
   vertical
   horizontal
@@ -231,6 +237,7 @@ model ParkingSpot {
   orientation ParkingSpotOrientation
   enabled     Boolean  @default(true)
   role        ParkingSpotRole @default(REGULAR)
+  vehicleClass ParkingVehicleClass @default(ANY)
   dedicatedVehicleId String?
   dedicatedVehicle Vehicle? @relation("DedicatedVehicle", fields: [dedicatedVehicleId], references: [id], onDelete: NoAction)
   label       String?
