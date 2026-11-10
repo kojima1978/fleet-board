@@ -37,7 +37,7 @@ await client.connect();
 try {
   codes = await freeRecordCodes(client, "VehicleNumber", "Y", 14);
   for (const [i, id] of spots.entries()) {
-    await client.query('INSERT INTO "ParkingSpot" (id,code,x,y,width,height,orientation,enabled,version) VALUES ($1,$2,0,0,5,5,\'horizontal\',$3,1)', [id, `P${suffix}${i}`, i !== 2]);
+    await client.query('INSERT INTO "ParkingSpot" (id,code,x,y,width,height,orientation,enabled,version) VALUES ($1,$2,0,0,5,5,\'horizontal\',true,1)', [id, `P${suffix}${i}`]);
   }
   realHoldingSpots = (await client.query('UPDATE "ParkingSpot" SET enabled=false WHERE role=\'HOLDING\' AND enabled RETURNING id')).rows.map((row) => row.id);
   await client.query('UPDATE "ParkingSpot" SET role=\'HOLDING\' WHERE id=ANY($1::text[])', [holdingSpots]);
@@ -45,6 +45,11 @@ try {
   assert.equal(first.status, 200, JSON.stringify(first.body));
   let created = await vehicle(0);
   assert.equal(created.parkingSpotId, spots[0], "通常登録時に駐車区画を保存する");
+  assert.equal((await updateSpot(spots[0], { enabled: false })).status, 400, "駐車中の区画はオフにできない");
+  assert.equal((await spotRow(spots[0])).enabled, true);
+  const disabledSpot = await updateSpot(spots[2], { enabled: false });
+  assert.equal(disabledSpot.status, 200, JSON.stringify(disabledSpot.body));
+  assert.equal((await spotRow(spots[2])).enabled, false);
   const edited = await post({ action: "updateVehicle", id: created.id, version: created.version, name: "NFCなし編集", plateNumber: plates[0], color: "#059669", nfcUid: "" });
   assert.equal(edited.status, 200, JSON.stringify(edited.body));
   assert.equal((await vehicle(0)).parkingSpotId, spots[0], "NFCなしで編集しても位置を保持する");
@@ -60,7 +65,7 @@ try {
   assert.equal(unlocated.parkingSpotId, holdingSpots[0]);
   assert.equal((await post({ action: "moveVehicle", vehicleId: unlocated.id, version: unlocated.version, spotId: spots[2] })).status, 400, "無効区画への後設定を拒否する");
   assert.equal((await post({ action: "moveVehicle", vehicleId: unlocated.id, version: unlocated.version, spotId: spots[0] })).status, 400, "使用中区画への後設定を拒否する");
-  await client.query('UPDATE "ParkingSpot" SET enabled=true WHERE id=$1', [spots[2]]);
+  assert.equal((await updateSpot(spots[2], { enabled: true })).status, 200, "オンに戻すと駐車先として使える");
   const moved = await post({ action: "moveVehicle", vehicleId: unlocated.id, version: unlocated.version, spotId: spots[2] });
   assert.equal(moved.status, 200, JSON.stringify(moved.body));
   assert.equal((await vehicle(6)).parkingSpotId, spots[2], "駐車位置未確定車両に後から設定できる");

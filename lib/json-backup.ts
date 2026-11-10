@@ -176,6 +176,7 @@ export function parseFleetBackup(value: unknown): FleetBackup {
   const employeeNumberIds = new Set(data.employeeNumbers.map((item) => item.id));
   const vehicleNumberIds = new Set(data.vehicleNumbers.map((item) => item.id));
   const parkingSpotIds = new Set(data.parkingSpots.map((item) => item.id));
+  const disabledParkingSpotIds = new Set(data.parkingSpots.filter((spot) => !spot.enabled).map((spot) => spot.id));
   const nfcTagIds = new Set(data.nfcTags.map((item) => item.id));
   const employeeIds = new Set(data.employees.map((item) => item.id));
   const vehicleIds = new Set(data.vehicles.map((item) => item.id));
@@ -186,6 +187,9 @@ export function parseFleetBackup(value: unknown): FleetBackup {
   for (const vehicle of data.vehicles) {
     assertReference(vehicleNumberIds, vehicle.vehicleNumberId, "車両番号");
     assertReference(parkingSpotIds, vehicle.parkingSpotId, "駐車区画");
+    if (vehicle.parkingSpotId !== null && disabledParkingSpotIds.has(vehicle.parkingSpotId)) {
+      throw new FleetBackupValidationError("利用停止中の駐車区画に車両が割り当てられています");
+    }
   }
   for (const spot of data.parkingSpots) {
     assertReference(vehicleIds, spot.dedicatedVehicleId ?? null, "専用区画の車両");

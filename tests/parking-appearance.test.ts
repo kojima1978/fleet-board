@@ -60,6 +60,8 @@ const frontSpots: ParkingSpot[] = [
   { ...spot, id: "f16", code: "16", frontSpotIds: ["f15"] },
 ];
 assert.deepEqual(blockingFrontSpots(frontSpots[2], frontSpots).map((item) => item.code), ["13", "14"], "手前の区画のうち車がある区画を返す");
+const withDisabledFront = frontSpots.map((spot) => ({ ...spot, enabled: spot.code !== "13" }));
+assert.deepEqual(blockingFrontSpots(frontSpots[2], withDisabledFront).map((spot) => spot.code), ["14"], "オフの区画は手前の区画の判定に含めない");
 assert.deepEqual(blockingFrontSpots({ ...frontSpots[2], frontSpotIds: [] }, frontSpots), [], "手前の区画を設定していなければ注意しない");
 assert.deepEqual(blockingFrontSpots(frontSpots[3], frontSpots, "v15"), [], "動かす車自身は手前の車に数えない");
 assert.deepEqual(blockingFrontSpots(undefined, frontSpots), [], "区画がなければ注意しない");

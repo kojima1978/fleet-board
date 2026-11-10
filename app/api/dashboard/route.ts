@@ -200,7 +200,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("correctActualStart"), tripId: idSchema, version: z.number().int().nonnegative(), actualStart: z.string().datetime(), reason: z.string().trim().min(1).max(200), ...actorSchema, actorEmployeeId: idSchema }),
   z.object({ action: z.literal("cancelTrip"), tripId: idSchema, version: z.number().int().nonnegative(), ...actorSchema }),
   z.object({ action: z.literal("moveVehicle"), vehicleId: idSchema, version: z.number().int().nonnegative(), spotId: idSchema, ...actorSchema }),
-  z.object({ action: z.literal("updateSpot"), id: idSchema, version: z.number().int().nonnegative(), code: spotCodeSchema, label: spotLabelSchema.nullable(), role: z.enum(PARKING_SPOT_ROLES), dedicatedVehicleId: idSchema.nullable(), frontSpotIds: z.array(idSchema).max(FRONT_SPOT_MAX).optional() }),
+  z.object({ action: z.literal("updateSpot"), enabled: z.boolean().optional(), id: idSchema, version: z.number().int().nonnegative(), code: spotCodeSchema, label: spotLabelSchema.nullable(), role: z.enum(PARKING_SPOT_ROLES), dedicatedVehicleId: idSchema.nullable(), frontSpotIds: z.array(idSchema).max(FRONT_SPOT_MAX).optional() }),
   z.object({ action: z.literal("resetSpotFronts"), id: idSchema, version: z.number().int().nonnegative() }),
   z.object({ action: z.literal("setFuelLevel"), vehicleId: idSchema, version: z.number().int().nonnegative(), fuelLevel: z.number().int().min(0).max(FUEL_LEVEL_MAX), ...actorSchema }),
   z.object({ action: z.literal("createDepartment"), name: departmentNameSchema }),
@@ -229,7 +229,8 @@ async function findSelectableDepartment(tx: Prisma.TransactionClient, name: stri
 }
 
 // 専用区画に別の車を置こうとしたら止める。vehicleIdがnullなら、これから登録する車両として扱う。
-async function assertSpotAllowsVehicle(tx: Prisma.TransactionClient, spot: { code: string; role: (typeof PARKING_SPOT_ROLES)[number]; dedicatedVehicleId: string | null; label: string | null }, vehicleId: string | null) {
+async function assertSpotAllowsVehicle(tx: Prisma.TransactionClient, spot: { enabled: boolean; code: string; role: (typeof PARKING_SPOT_ROLES)[number]; dedicatedVehicleId: string | null; label: string | null }, vehicleId: string | null) {
+  if (!spot.enabled) throw new Error("選択した駐車区画は利用できません");
   if (canUseSpot({ id: vehicleId ?? "" }, spot)) return;
   const dedicated = spot.dedicatedVehicleId ? await tx.vehicle.findUnique({ where: { id: spot.dedicatedVehicleId }, select: { name: true } }) : null;
   throw new Error(`${formatSpotLabel({ ...spot, dedicatedVehicleName: dedicated?.name ?? null })}には他の車両を駐車できません`);
@@ -1088,6 +1089,11 @@ export async function POST(request: Request) {
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('fleet-spot-codes'))::text AS spot_code_lock`;
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`fleet-spot:${input.id}`}))::text AS spot_lock`;
         const spot = await tx.parkingSpot.findUniqueOrThrow({ where: { id: input.id }, include: { vehicle: { select: { id: true, name: true } }, fronts: { select: { frontSpotId: true } } } });
+        const enabled = input.enabled ?? spot.enabled;
+        const enabledChanged = enabled !== spot.enabled;
+        if (enabledChanged && !enabled && spot.vehicle) {
+          throw new Error(`区画${spot.code}には${spot.vehicle.name}が駐車中です。先に移動してください`);
+        }
         const savedFrontSpotIds = spot.fronts.map((item) => item.frontSpotId);
         const dedicatedVehicleId = input.role === "DEDICATED" ? input.dedicatedVehicleId : null;
         let dedicatedVehicleName: string | null = null;
@@ -1106,12 +1112,12 @@ export async function POST(request: Request) {
         const frontSpots = frontSpotIds.length ? await tx.parkingSpot.findMany({ where: { id: { in: frontSpotIds } }, select: { id: true, code: true }, orderBy: { code: "asc" } }) : [];
         if (frontSpots.length !== frontSpotIds.length) throw new Error("手前の区画に存在しない区画が含まれています");
         const frontSpotsChanged = [...savedFrontSpotIds].sort().join() !== [...frontSpotIds].sort().join();
-        if (!codeChanged && !roleChanged && !labelChanged && !frontSpotsChanged) throw new Error("区画番号・用途・表示名・手前の区画は変更されていません");
+        if (!enabledChanged && !codeChanged && !roleChanged && !labelChanged && !frontSpotsChanged) throw new Error("駐車区画の設定は変更されていません");
         if (codeChanged) {
           const sameCode = await tx.parkingSpot.findUnique({ where: { code: input.code }, select: { id: true } });
           if (sameCode) throw new Error(`区画番号${input.code}はすでに使われています`);
         }
-        const updated = await tx.parkingSpot.updateMany({ where: { id: input.id, version: input.version }, data: { code: input.code, role: input.role, dedicatedVehicleId, label: input.label, version: { increment: 1 } } });
+        const updated = await tx.parkingSpot.updateMany({ where: { id: input.id, version: input.version }, data: { enabled, code: input.code, role: input.role, dedicatedVehicleId, label: input.label, version: { increment: 1 } } });
         if (updated.count !== 1) throw new Error("CONFLICT");
         if (frontSpotsChanged) {
           await tx.parkingSpotFront.deleteMany({ where: { spotId: input.id } });
@@ -1119,7 +1125,7 @@ export async function POST(request: Request) {
         }
         const previousName = spot.dedicatedVehicleId ? (await tx.vehicle.findUnique({ where: { id: spot.dedicatedVehicleId }, select: { name: true } }))?.name ?? null : null;
         const describe = (role: typeof input.role, name: string | null) => role === "DEDICATED" ? `${name ?? "車両未設定"}専用` : SPOT_ROLE_LABELS[role];
-        const changes = [codeChanged ? `番号を${input.code}へ` : "", roleChanged ? `用途を「${describe(spot.role, previousName)}」から「${describe(input.role, dedicatedVehicleName)}」へ` : "", labelChanged ? `表示名を${input.label ? `「${input.label}」` : "自動"}へ` : "", frontSpotsChanged ? `手前の区画を${frontSpots.length ? frontSpots.map((item) => item.code).join("・") : "なし"}へ` : ""].filter(Boolean).join("、");
+        const changes = [enabledChanged ? `区画の表示・利用を${enabled ? "オン" : "オフ"}へ` : "", codeChanged ? `番号を${input.code}へ` : "", roleChanged ? `用途を「${describe(spot.role, previousName)}」から「${describe(input.role, dedicatedVehicleName)}」へ` : "", labelChanged ? `表示名を${input.label ? `「${input.label}」` : "自動"}へ` : "", frontSpotsChanged ? `手前の区画を${frontSpots.length ? frontSpots.map((item) => item.code).join("・") : "なし"}へ` : ""].filter(Boolean).join("、");
         await tx.auditLog.create({ data: { operationId, actorName: "設定画面", action: "区画設定変更", targetType: "ParkingSpot", targetId: input.id, description: `区画${spot.code}の${changes}変更` } });
       });
     }

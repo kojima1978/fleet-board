@@ -45,7 +45,7 @@ async function main() {
       await prisma.nfcAssignment.create({ data: { employeeId: employee.id, nfcTagId: nfcTag.id } });
     }
   }
-  const spots = await prisma.parkingSpot.findMany({ orderBy: { code: "asc" } });
+  const spots = await prisma.parkingSpot.findMany({ where: { enabled: true }, orderBy: { code: "asc" } });
   const existingVehicles = await prisma.vehicle.findMany({ include: { vehicleNumber: true }, orderBy: { createdAt: "desc" } });
   const existingByCode = new Map<string, (typeof existingVehicles)[number]>();
   for (const vehicle of existingVehicles) if (!existingByCode.has(vehicle.vehicleNumber.code) || vehicle.active) existingByCode.set(vehicle.vehicleNumber.code, vehicle);
