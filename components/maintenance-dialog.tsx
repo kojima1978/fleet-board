@@ -5,9 +5,9 @@ import { CalendarClock, CarFront, Check, MapPin, Wrench, X } from "lucide-react"
 import type { DashboardData, Vehicle, VehicleMaintenance } from "@/lib/types";
 import { needsReturnFuelReminder } from "@/lib/fuel-level";
 import { formatMaintenanceTime, MAINTENANCE_KIND_LABELS, MAINTENANCE_KIND_SHORT_LABELS,MAINTENANCE_MAX_DAYS, MAINTENANCE_NOTE_MAX, MAINTENANCE_SCHEDULE_DAYS_AHEAD, type MaintenanceKind } from "@/lib/maintenance";
-import { blockingFrontSpots, canUseSpot, formatSpotLabel, isCustomerSpot } from "@/lib/parking-spots";
+import { blockingFrontSpots, canUseSpot, formatSpotLabel } from "@/lib/parking-spots";
 import { useParkingGuidanceAnnouncement } from "@/lib/use-parking-guidance";
-import { CustomerSpotNotice } from "./customer-spot-notice";
+import { ParkingSpotNotice } from "./customer-spot-notice";
 import { FrontSpotNotice } from "./front-spot-notice";
 import { FuelLevelPicker, FuelReminder } from "./fuel-controls";
 import { Button, cn, DialogActions } from "./ui";
@@ -138,7 +138,7 @@ export function MaintenanceDialog({ vehicle, data, mutate, fromSettings, current
           <legend className="px-1 text-sm font-black text-slate-800">車検を終了</legend>
           <div className={cn("flex items-center gap-2 rounded-xl border px-3 py-2", selectedSpot ? "border-slate-200 bg-slate-50" : "border-amber-200 bg-amber-50 text-amber-800")}><MapPin className="size-4 shrink-0" /><p className="mr-auto text-sm font-black"><span className="mr-2 text-xs font-bold opacity-70">駐車区画</span>{selectedSpot ? formatSpotLabel(selectedSpot) : "未選択"}</p>{selectedSpot && onChooseSpot ? <Button variant="ghost" className="min-h-9 shrink-0 px-3 text-xs" onClick={onChooseSpot}>変更</Button> : null}</div>
           {onChooseSpot ? !selectedSpot ? <Button className="min-h-12 w-full" onClick={onChooseSpot}><MapPin className="size-4" />配置図で駐車区画を選ぶ</Button> : null : <label className="block"><span className="mb-1 block text-xs font-bold text-slate-600">駐車区画を選択</span><select className={field} value={spotId} onChange={(event) => setSpotId(event.target.value)}><option value="">選んでください</option>{freeSpots.map((spot) => <option key={spot.id} value={spot.id}>{formatSpotLabel(spot)}</option>)}</select></label>}
-          {selectedSpot && isCustomerSpot(selectedSpot) ? <CustomerSpotNotice spots={data.spots} vehicle={vehicle} /> : null}
+          {selectedSpot ? <ParkingSpotNotice spot={selectedSpot} spots={data.spots} vehicle={vehicle} /> : null}
           <FrontSpotNotice spot={selectedSpot} spots={data.spots} vehicleId={vehicle.id} direction="in" />
           {selectedSpot ? <><FuelLevelPicker value={fuelLevel} onChange={changeFuelLevel} />
             {needsReturnFuelReminder(fuelLevel) ? <FuelReminder key={fuelLevel} context="return" attention /> : null}

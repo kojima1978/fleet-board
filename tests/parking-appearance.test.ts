@@ -3,13 +3,13 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { isWinterTireSeason, parkingSpotClass, VehicleMapIcon } from "../components/fleet-dashboard";
-import { CustomerSpotNotice } from "../components/customer-spot-notice";
+import { ParkingSpotNotice } from "../components/customer-spot-notice";
 import { FrontSpotNotice } from "../components/front-spot-notice";
 import { blockingFrontSpots, freeRegularSpots, isCustomerSpot } from "../lib/parking-spots";
 import type { ParkingSpot, Vehicle } from "../lib/types";
 import { defaultFrontSpotCodes, parkingSpotGeometry } from "../prisma/parking-spot-seed";
 
-const spot: ParkingSpot = { id: "s1", code: "01", x: 0, y: 0, width: 5, height: 5, orientation: "vertical", enabled: true, version: 1, vehicle: null, role: "REGULAR", dedicatedVehicleId: null, dedicatedVehicleName: null, label: null, frontSpotIds: [] };
+const spot: ParkingSpot = { id: "s1", code: "01", x: 0, y: 0, width: 5, height: 5, orientation: "vertical", enabled: true, version: 1, vehicle: null, role: "REGULAR", vehicleClass: "ANY", dedicatedVehicleId: null, dedicatedVehicleName: null, label: null, frontSpotIds: [] };
 const vehicle: Vehicle = { id: "v1", code: "C001", name: "テスト車", plateNumber: "テスト001", nfcUid: "", qrCode: "", hasEtc: false, hasNavigation: false, hasWinterTires: false, hasBackMonitor: false, isKei: false, fuelCard: "", fuelLevel: null, color: "#2563eb", status: "AVAILABLE", parkingSpotId: spot.id, active: true, version: 1 };
 assert.equal(parkingSpotClass(spot), "border-slate-300 bg-white/70");
 assert.equal(parkingSpotClass({ ...spot, role: "TEMPORARY" }), "border-[3px] border-dashed border-slate-300/70 bg-slate-50/50");
@@ -45,12 +45,15 @@ assert.equal(isCustomerSpot({ role: "CUSTOMER" }), true);
 assert.equal(isCustomerSpot({ role: "REGULAR" }), false);
 assert.deepEqual(freeRegularSpots(spotsForNotice, vehicle).map((item) => item.code), ["03", "07"], "空いている通常区画とその車の専用区画だけを案内する");
 assert.deepEqual(freeRegularSpots(spotsForNotice, null).map((item) => item.code), ["03"], "車が決まっていなければ通常区画だけ");
-const notice = renderToStaticMarkup(createElement(CustomerSpotNotice, { spots: spotsForNotice, vehicle, onChooseOther: () => {} }));
+const notice = renderToStaticMarkup(createElement(ParkingSpotNotice, { spot: { ...spot, role: "CUSTOMER" }, spots: spotsForNotice, vehicle, onChooseOther: () => {} }));
 assert.match(notice, /お客様用の区画です/);
 assert.match(notice, /できるだけ通常の区画に止めてください/);
 assert.match(notice, /空いている通常区画：03・07/);
 assert.match(notice, /別の区画を選ぶ/);
-const noOther = renderToStaticMarkup(createElement(CustomerSpotNotice, { spots: [spotsForNotice[0]], vehicle, onChooseOther: () => {} }));
+const mismatchedNotice = renderToStaticMarkup(createElement(ParkingSpotNotice, { spot: { ...spot, vehicleClass: "KEI" }, spots: spotsForNotice, vehicle: { ...vehicle, isKei: false } }));
+assert.match(mismatchedNotice, /軽自動車用の区画です/);
+assert.match(mismatchedNotice, /選んだ車両は普通車です/);
+const noOther = renderToStaticMarkup(createElement(ParkingSpotNotice, { spot: { ...spot, role: "CUSTOMER" }, spots: [spotsForNotice[0]], vehicle, onChooseOther: () => {} }));
 assert.match(noOther, /いま空いている通常区画はありません/);
 assert.doesNotMatch(noOther, /別の区画を選ぶ/, "選び直す先がなければボタンを出さない");
 const frontSpots: ParkingSpot[] = [
@@ -60,6 +63,8 @@ const frontSpots: ParkingSpot[] = [
   { ...spot, id: "f16", code: "16", frontSpotIds: ["f15"] },
 ];
 assert.deepEqual(blockingFrontSpots(frontSpots[2], frontSpots).map((item) => item.code), ["13", "14"], "手前の区画のうち車がある区画を返す");
+const withDisabledFront = frontSpots.map((spot) => ({ ...spot, enabled: spot.code !== "13" }));
+assert.deepEqual(blockingFrontSpots(frontSpots[2], withDisabledFront).map((spot) => spot.code), ["14"], "オフの区画は手前の区画の判定に含めない");
 assert.deepEqual(blockingFrontSpots({ ...frontSpots[2], frontSpotIds: [] }, frontSpots), [], "手前の区画を設定していなければ注意しない");
 assert.deepEqual(blockingFrontSpots(frontSpots[3], frontSpots, "v15"), [], "動かす車自身は手前の車に数えない");
 assert.deepEqual(blockingFrontSpots(undefined, frontSpots), [], "区画がなければ注意しない");

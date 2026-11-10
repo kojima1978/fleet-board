@@ -1,4 +1,4 @@
-import type { ParkingSpotRole } from "@/lib/parking-spots";
+import type { ParkingSpotRole, ParkingVehicleClass } from "@/lib/parking-spots";
 import type { MaintenanceKind } from "@/lib/maintenance";
 
 export type Employee = { id: string; code: string; name: string; email: string; department: string; nfcUid: string; qrCode: string; active: boolean; version: number };
@@ -13,7 +13,7 @@ export type Vehicle = {
 export type ParkingSpot = {
   id: string; code: string; x: number; y: number; width: number; height: number;
   orientation: "vertical" | "horizontal"; enabled: boolean; version: number; vehicle: Vehicle | null;
-  role: ParkingSpotRole; dedicatedVehicleId: string | null; dedicatedVehicleName: string | null; label: string | null;
+  role: ParkingSpotRole; vehicleClass: ParkingVehicleClass; dedicatedVehicleId: string | null; dedicatedVehicleName: string | null; label: string | null;
   frontSpotIds: string[];
 };
 export type Trip = {

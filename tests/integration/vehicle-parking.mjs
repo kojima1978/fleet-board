@@ -21,7 +21,7 @@ async function post(body) {
   });
   return { status: response.status, body: await response.json() };
 }
-const create = (i, spotId) => post({ action: "createVehicle", code: codes[i], name: `駐車登録テスト${i}`, plateNumber: plates[i], color: "#2563eb", nfcUid: "", ...(spotId ? { spotId } : {}) });
+const create = (i, spotId, isKei = false) => post({ action: "createVehicle", code: codes[i], name: `駐車登録テスト${i}`, plateNumber: plates[i], color: "#2563eb", nfcUid: "", isKei, ...(spotId ? { spotId } : {}) });
 const spotRow = async (id) => (await client.query('SELECT s.*, COALESCE((SELECT array_agg(f."frontSpotId") FROM "ParkingSpotFront" f WHERE f."spotId"=s.id), ARRAY[]::text[]) AS "frontSpotIds" FROM "ParkingSpot" s WHERE s.id=$1', [id])).rows[0];
 const updateSpot = async (id, changes, version) => { const row = await spotRow(id); return post({ action: "updateSpot", id, version: version ?? row.version, code: row.code, label: row.label, role: row.role, dedicatedVehicleId: row.dedicatedVehicleId, frontSpotIds: row.frontSpotIds, ...changes }); };
 const setRole = (id, role, dedicatedVehicleId = null, version) => updateSpot(id, { role, dedicatedVehicleId }, version);
@@ -37,7 +37,7 @@ await client.connect();
 try {
   codes = await freeRecordCodes(client, "VehicleNumber", "Y", 14);
   for (const [i, id] of spots.entries()) {
-    await client.query('INSERT INTO "ParkingSpot" (id,code,x,y,width,height,orientation,enabled,version) VALUES ($1,$2,0,0,5,5,\'horizontal\',$3,1)', [id, `P${suffix}${i}`, i !== 2]);
+    await client.query('INSERT INTO "ParkingSpot" (id,code,x,y,width,height,orientation,enabled,version) VALUES ($1,$2,0,0,5,5,\'horizontal\',true,1)', [id, `P${suffix}${i}`]);
   }
   realHoldingSpots = (await client.query('UPDATE "ParkingSpot" SET enabled=false WHERE role=\'HOLDING\' AND enabled RETURNING id')).rows.map((row) => row.id);
   await client.query('UPDATE "ParkingSpot" SET role=\'HOLDING\' WHERE id=ANY($1::text[])', [holdingSpots]);
@@ -45,6 +45,11 @@ try {
   assert.equal(first.status, 200, JSON.stringify(first.body));
   let created = await vehicle(0);
   assert.equal(created.parkingSpotId, spots[0], "通常登録時に駐車区画を保存する");
+  assert.equal((await updateSpot(spots[0], { enabled: false })).status, 400, "駐車中の区画はオフにできない");
+  assert.equal((await spotRow(spots[0])).enabled, true);
+  const disabledSpot = await updateSpot(spots[2], { enabled: false });
+  assert.equal(disabledSpot.status, 200, JSON.stringify(disabledSpot.body));
+  assert.equal((await spotRow(spots[2])).enabled, false);
   const edited = await post({ action: "updateVehicle", id: created.id, version: created.version, name: "NFCなし編集", plateNumber: plates[0], color: "#059669", nfcUid: "" });
   assert.equal(edited.status, 200, JSON.stringify(edited.body));
   assert.equal((await vehicle(0)).parkingSpotId, spots[0], "NFCなしで編集しても位置を保持する");
@@ -60,9 +65,12 @@ try {
   assert.equal(unlocated.parkingSpotId, holdingSpots[0]);
   assert.equal((await post({ action: "moveVehicle", vehicleId: unlocated.id, version: unlocated.version, spotId: spots[2] })).status, 400, "無効区画への後設定を拒否する");
   assert.equal((await post({ action: "moveVehicle", vehicleId: unlocated.id, version: unlocated.version, spotId: spots[0] })).status, 400, "使用中区画への後設定を拒否する");
-  await client.query('UPDATE "ParkingSpot" SET enabled=true WHERE id=$1', [spots[2]]);
+  assert.equal((await updateSpot(spots[2], { enabled: true })).status, 200, "オンに戻すと駐車先として使える");
+  assert.equal((await spotRow(spots[2])).vehicleClass, "ANY", "既存と同様に車種制限なしが初期値");
+  assert.equal((await updateSpot(spots[2], { vehicleClass: "KEI" })).status, 200);
+  assert.equal((await spotRow(spots[2])).role, "REGULAR", "車種制限は区画の用途と独立して保存する");
   const moved = await post({ action: "moveVehicle", vehicleId: unlocated.id, version: unlocated.version, spotId: spots[2] });
-  assert.equal(moved.status, 200, JSON.stringify(moved.body));
+  assert.equal(moved.status, 200, `普通車を軽自動車用区画へ移動できる: ${JSON.stringify(moved.body)}`);
   assert.equal((await vehicle(6)).parkingSpotId, spots[2], "駐車位置未確定車両に後から設定できる");
   assert.equal((await post({ action: "moveVehicle", vehicleId: unlocated.id, version: unlocated.version, spotId: spots[2] })).status, 409, "古い車両バージョンを拒否する");
   const publicResponse = await fetch(`${appUrl}/api/dashboard`);
@@ -123,10 +131,11 @@ try {
   await client.query('UPDATE "ParkingSpot" SET enabled=false WHERE id=$1', [spots[5]]);
   assert.equal((await importVehicles([importItem(8, spots[5])])).status, 400, "無効区画への取込を拒否する");
   await client.query('UPDATE "ParkingSpot" SET enabled=true WHERE id=$1', [spots[5]]);
+  assert.equal((await updateSpot(spots[5], { vehicleClass: "KEI" })).status, 200);
   const imported = await importVehicles([importItem(8, spots[4]), importItem(9, spots[5]), importItem(10)]);
   assert.equal(imported.status, 200, JSON.stringify(imported.body));
   assert.equal((await vehicle(8)).parkingSpotId, spots[4], "JSON取込で区画を割り当てる");
-  assert.equal((await vehicle(9)).parkingSpotId, spots[5], "JSON取込で複数の区画を割り当てる");
+  assert.equal((await vehicle(9)).parkingSpotId, spots[5], "JSON取込で普通車も軽自動車用区画に割り当てられる");
   assert.equal((await vehicle(10)).parkingSpotId, null, "区画を選ばない行は位置未設定で登録する");
   assert.equal((await create(11, holdingSpots[0])).status, 200);
   assert.equal((await create(12, holdingSpots[1])).status, 200);

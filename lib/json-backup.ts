@@ -11,6 +11,7 @@ import { defaultSpotRoles } from "@/prisma/parking-spot-seed";
 import { createQrToken } from "@/lib/qr-code";
 import { validateBackupIntegrity } from "@/lib/backup-integrity";
 import { parkingGuidanceEvent } from "@/lib/parking-guidance";
+import { PARKING_VEHICLE_CLASSES } from "@/lib/parking-spots";
 
 export const JSON_BACKUP_FORMAT_VERSION = 1;
 export const JSON_BACKUP_MAX_BYTES = 50 * 1024 * 1024;
@@ -22,7 +23,7 @@ const nullableDateTime = dateTime.nullable();
 const departmentSchema = z.object({ id, name: z.string().min(1).max(100), active: z.boolean(), sortOrder: z.number().int().optional(), version: z.number().int().nonnegative().optional(), createdAt: dateTime, updatedAt: dateTime }).strict();
 const employeeNumberSchema = z.object({ id, code: z.string().min(1).max(100), createdAt: dateTime, updatedAt: dateTime }).strict();
 const vehicleNumberSchema = z.object({ id, code: z.string().min(1).max(100), createdAt: dateTime, updatedAt: dateTime }).strict();
-const parkingSpotSchema = z.object({ id, code: z.string().min(1).max(100), x: z.number().finite(), y: z.number().finite(), width: z.number().finite().positive(), height: z.number().finite().positive(), orientation: z.enum(["vertical", "horizontal"]), enabled: z.boolean(), role: z.enum(["REGULAR", "TEMPORARY", "CUSTOMER", "DEDICATED", "HOLDING"]).optional(), dedicatedVehicleId: id.nullable().optional(), label: z.string().max(100).nullable().optional(), frontSpotIds: z.array(id).max(100).optional(), version: z.number().int().nonnegative() }).strict();
+const parkingSpotSchema = z.object({ id, code: z.string().min(1).max(100), x: z.number().finite(), y: z.number().finite(), width: z.number().finite().positive(), height: z.number().finite().positive(), orientation: z.enum(["vertical", "horizontal"]), enabled: z.boolean(), vehicleClass: z.enum(PARKING_VEHICLE_CLASSES).default("ANY"), role: z.enum(["REGULAR", "TEMPORARY", "CUSTOMER", "DEDICATED", "HOLDING"]).optional(), dedicatedVehicleId: id.nullable().optional(), label: z.string().max(100).nullable().optional(), frontSpotIds: z.array(id).max(100).optional(), version: z.number().int().nonnegative() }).strict();
 const nfcTagSchema = z.object({ id, uid: z.string().min(1).max(100), createdAt: dateTime, updatedAt: dateTime }).strict();
 const employeeSchema = z.object({ id, employeeNumberId: id, departmentId: id, name: z.string().min(1).max(100), email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()).nullable().optional(), qrToken: z.string().min(16).max(100).optional(), active: z.boolean(), version: z.number().int().nonnegative(), createdAt: dateTime, updatedAt: dateTime }).strict();
 const fuelLevelSchema = z.number().int().min(0).max(FUEL_LEVEL_MAX).nullable().optional();
@@ -176,6 +177,7 @@ export function parseFleetBackup(value: unknown): FleetBackup {
   const employeeNumberIds = new Set(data.employeeNumbers.map((item) => item.id));
   const vehicleNumberIds = new Set(data.vehicleNumbers.map((item) => item.id));
   const parkingSpotIds = new Set(data.parkingSpots.map((item) => item.id));
+  const spotsById = new Map(data.parkingSpots.map((spot) => [spot.id, spot]));
   const nfcTagIds = new Set(data.nfcTags.map((item) => item.id));
   const employeeIds = new Set(data.employees.map((item) => item.id));
   const vehicleIds = new Set(data.vehicles.map((item) => item.id));
@@ -186,6 +188,10 @@ export function parseFleetBackup(value: unknown): FleetBackup {
   for (const vehicle of data.vehicles) {
     assertReference(vehicleNumberIds, vehicle.vehicleNumberId, "車両番号");
     assertReference(parkingSpotIds, vehicle.parkingSpotId, "駐車区画");
+    const spot = vehicle.parkingSpotId === null ? undefined : spotsById.get(vehicle.parkingSpotId);
+    if (spot && !spot.enabled) {
+      throw new FleetBackupValidationError("利用停止中の駐車区画に車両が割り当てられています");
+    }
   }
   for (const spot of data.parkingSpots) {
     assertReference(vehicleIds, spot.dedicatedVehicleId ?? null, "専用区画の車両");

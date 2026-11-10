@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, LoaderCircle, MapPin, PenLine, RotateCcw } from "lucide-react";
 import type { DashboardData, ParkingSpot, Vehicle } from "@/lib/types";
-import { PARKING_SPOT_ROLES, SPOT_LABEL_MAX_LENGTH, SPOT_ROLE_DESCRIPTIONS, SPOT_ROLE_LABELS, defaultSpotTag, isDashedSpot, spotRoleTag, type ParkingSpotRole } from "@/lib/parking-spots";
+import { PARKING_SPOT_ROLES, SPOT_LABEL_MAX_LENGTH, SPOT_ROLE_DESCRIPTIONS, SPOT_ROLE_LABELS, defaultSpotTag, isDashedSpot, PARKING_VEHICLE_CLASSES, PARKING_VEHICLE_CLASS_LABELS, spotRoleTag, type ParkingSpotRole, type ParkingVehicleClass } from "@/lib/parking-spots";
 import { Button, Card, cn } from "./ui";
 
 type Mutate = (body: object, success: string) => Promise<boolean>;
@@ -42,7 +42,7 @@ export function SpotRoleSettings({ data, mutate }: { data: DashboardData; mutate
       <p className="mb-2 text-xs font-bold text-slate-500">変更する区画を配置図からタップしてください</p>
       <div className="@container relative mx-auto aspect-[950/525] overflow-hidden rounded-xl border border-slate-200 bg-white" style={{ width: "min(100%, calc((100vh - 290px) * 1.81))" }}>
         <img src="/parking-layout.svg" alt="" className="pointer-events-none absolute inset-0 size-full select-none" draggable={false} />
-        {data.spots.map((spot) => <button key={spot.id} type="button" aria-pressed={spot.id === selectedId} title={`区画 ${spot.code}を選ぶ`} onClick={() => setSelectedId((current) => current === spot.id ? null : spot.id)} className={cn("absolute grid place-content-center rounded-[4px] border-2 text-center transition hover:border-blue-400", roleTile[spot.role], isDashedSpot(spot) && "border-[3px] border-dashed", !spot.enabled && "opacity-50", frontIds.includes(spot.id) && "border-solid border-amber-500 bg-amber-100 ring-2 ring-amber-300", spot.id === selectedId && "z-10 border-solid border-blue-500 bg-blue-50 ring-4 ring-blue-300")} style={{ left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.width}%`, height: `${spot.height}%` }}>
+        {data.spots.map((spot) => <button key={spot.id} type="button" aria-pressed={spot.id === selectedId} title={`区画 ${spot.code}を選ぶ`} onClick={() => setSelectedId((current) => current === spot.id ? null : spot.id)} className={cn("absolute grid place-content-center rounded-[4px] border-2 text-center transition hover:border-blue-400", roleTile[spot.role], isDashedSpot(spot) && "border-[3px] border-dashed", !spot.enabled && "opacity-50", spot.enabled && frontIds.includes(spot.id) && "border-solid border-amber-500 bg-amber-100 ring-2 ring-amber-300", spot.id === selectedId && "z-10 border-solid border-blue-500 bg-blue-50 ring-4 ring-blue-300")} style={{ left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.width}%`, height: `${spot.height}%` }}>
           <span className="block text-[10px] font-black leading-none text-slate-800 @2xl:text-sm">{spot.code}</span>
           {spotRoleTag(spot) ? <span className="mt-0.5 block truncate px-0.5 text-[7px] font-bold leading-none text-slate-500 @2xl:text-[10px]">{spotRoleTag(spot)}</span> : null}
           {spot.label ? <PenLine aria-label="表示名を変更済み" className="absolute right-0.5 top-0.5 size-2 text-blue-500 @2xl:size-3" /> : null}
@@ -54,7 +54,7 @@ export function SpotRoleSettings({ data, mutate }: { data: DashboardData; mutate
         <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-600">変更する区画</span>
           <select aria-label="変更する区画" value={selectedId ?? ""} onChange={(event) => setSelectedId(event.target.value || null)} className={field}>
             <option value="">配置図または一覧から選ぶ</option>
-            {sortedSpots.map((spot) => <option key={spot.id} value={spot.id}>{spot.code}（{spotRoleTag(spot) || SPOT_ROLE_LABELS[spot.role]}）</option>)}
+            {sortedSpots.map((spot) => <option key={spot.id} value={spot.id}>{spot.code}（{spot.enabled ? spotRoleTag(spot) || SPOT_ROLE_LABELS[spot.role] : "利用停止中"}）</option>)}
           </select>
         </label>
         {selected ? <SpotEditor key={selected.id} spot={selected} spots={data.spots} vehicles={vehicles} mutate={mutate} onFrontChange={setDraftFrontIds} /> : <div className="mt-4 grid place-items-center rounded-xl border border-dashed border-slate-300 px-4 py-10 text-center text-xs text-slate-400"><MapPin className="mb-1 size-5" />区画を選ぶと、区画番号と用途を変更できます</div>}
@@ -73,7 +73,9 @@ export function SpotRoleSettings({ data, mutate }: { data: DashboardData; mutate
 
 function SpotEditor({ spot, spots, vehicles, mutate, onFrontChange }: { spot: ParkingSpot; spots: ParkingSpot[]; vehicles: Vehicle[]; mutate: Mutate; onFrontChange: (ids: string[]) => void }) {
   const [code, setCode] = useState(spot.code);
+  const [enabled, setEnabled] = useState(spot.enabled);
   const [role, setRole] = useState<ParkingSpotRole>(spot.role);
+  const [vehicleClass, setVehicleClass] = useState(spot.vehicleClass);
   const [vehicleId, setVehicleId] = useState(spot.dedicatedVehicleId ?? "");
   const [label, setLabel] = useState(spot.label ?? "");
   // 表示名は「自動」（用途から決まる名前）か「任意」（入力した名前）のどちらか。
@@ -83,7 +85,7 @@ function SpotEditor({ spot, spots, vehicles, mutate, onFrontChange }: { spot: Pa
   const [saving, setSaving] = useState(false);
   // 保存後や他の端末で変わったときは、最新の内容で入力し直す。
   const savedFrontKey = spot.frontSpotIds.join();
-  useEffect(() => { setCode(spot.code); setRole(spot.role); setVehicleId(spot.dedicatedVehicleId ?? ""); setLabel(spot.label ?? ""); setLabelMode(spot.label ? "custom" : "auto"); setFrontIds(savedFrontKey ? savedFrontKey.split(",") : []); }, [spot.code, spot.role, spot.dedicatedVehicleId, spot.label, savedFrontKey]);
+  useEffect(() => { setCode(spot.code); setEnabled(spot.enabled); setRole(spot.role); setVehicleClass(spot.vehicleClass); setVehicleId(spot.dedicatedVehicleId ?? ""); setLabel(spot.label ?? ""); setLabelMode(spot.label ? "custom" : "auto"); setFrontIds(savedFrontKey ? savedFrontKey.split(",") : []); }, [spot.code, spot.enabled, spot.role, spot.vehicleClass, spot.dedicatedVehicleId, spot.label, savedFrontKey]);
   useEffect(() => { onFrontChange(frontIds); }, [frontIds, onFrontChange]);
   useEffect(() => {
     if (!confirming) return;
@@ -94,19 +96,21 @@ function SpotEditor({ spot, spots, vehicles, mutate, onFrontChange }: { spot: Pa
   const nextCode = normalizeCode(code);
   const nextLabel = labelMode === "custom" ? normalizeCode(label) || null : null;
   const dedicatedVehicleId = role === "DEDICATED" ? vehicleId || null : null;
-  const dedicatedVehicleName = vehicles.find((vehicle) => vehicle.id === dedicatedVehicleId)?.name ?? null;
+  const dedicatedVehicle = vehicles.find((vehicle) => vehicle.id === dedicatedVehicleId);
+  const dedicatedVehicleName = dedicatedVehicle?.name ?? null;
   const autoLabel = defaultSpotTag({ code: nextCode, role, dedicatedVehicleId, dedicatedVehicleName });
   // 手前の区画の候補。仮置きは実在しないので出さない。
-  const frontCandidates = spots.filter((item) => item.id !== spot.id && item.role !== "HOLDING").sort((a, b) => a.code.localeCompare(b.code, "ja", { numeric: true }));
+  const frontCandidates = spots.filter((item) => item.enabled && item.id !== spot.id && item.role !== "HOLDING").sort((a, b) => a.code.localeCompare(b.code, "ja", { numeric: true }));
   const toggleFront = (id: string) => setFrontIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   const codeChanged = nextCode !== spot.code;
   const frontChanged = [...frontIds].sort().join() !== [...spot.frontSpotIds].sort().join();
-  const changed = codeChanged || frontChanged || nextLabel !== spot.label || role !== spot.role || dedicatedVehicleId !== (spot.role === "DEDICATED" ? spot.dedicatedVehicleId : null);
+  const changed = enabled !== spot.enabled || vehicleClass !== spot.vehicleClass || codeChanged || frontChanged || nextLabel !== spot.label || role !== spot.role || dedicatedVehicleId !== (spot.role === "DEDICATED" ? spot.dedicatedVehicleId : null);
   const codeError = !nextCode ? "区画番号を入力してください" : nextCode.length > 12 ? "区画番号は12文字以内で入力してください" : /\s/.test(nextCode) ? "区画番号に空白は使えません" : codeChanged && spots.some((item) => item.id !== spot.id && item.code === nextCode) ? `区画番号${nextCode}はすでに使われています` : "";
   const labelError = labelMode === "custom" && !nextLabel ? "表示名を入力するか、自動を選んでください" : (nextLabel?.length ?? 0) > SPOT_LABEL_MAX_LENGTH ? `表示名は${SPOT_LABEL_MAX_LENGTH}文字以内で入力してください` : "";
   // 専用にするとき、別の車がすでに停まっている区画は先に移動してもらう。
   const blockedByParked = role === "DEDICATED" && !!spot.vehicle && !!vehicleId && spot.vehicle.id !== vehicleId;
-  const valid = !codeError && !labelError && (role !== "DEDICATED" || (!!vehicleId && !blockedByParked));
+  const disablingOccupied = spot.enabled && !enabled && !!spot.vehicle;
+  const valid = !disablingOccupied && !codeError && !labelError && (role !== "DEDICATED" || (!!vehicleId && !blockedByParked));
   // 用途や専用車両を変えたら、前の用途に合わせた表示名は使わず自動に戻す。
   const changeRole = (value: ParkingSpotRole) => { setRole(value); setLabel(""); setLabelMode("auto"); };
   const changeVehicle = (value: string) => { setVehicleId(value); setLabel(""); setLabelMode("auto"); };
@@ -114,7 +118,7 @@ function SpotEditor({ spot, spots, vehicles, mutate, onFrontChange }: { spot: Pa
     if (!changed || !valid || saving) return;
     setSaving(true);
     try {
-      const ok = await mutate({ action: "updateSpot", id: spot.id, version: spot.version, code: nextCode, label: nextLabel ?? "", role, dedicatedVehicleId, frontSpotIds: frontIds }, codeChanged ? `区画 ${spot.code} を ${nextCode} に変更しました` : `区画 ${spot.code} の設定を変更しました`);
+      const ok = await mutate({ action: "updateSpot", id: spot.id, version: spot.version, enabled, vehicleClass, code: nextCode, label: nextLabel ?? "", role, dedicatedVehicleId, frontSpotIds: frontIds }, codeChanged ? `区画 ${spot.code} を ${nextCode} に変更しました` : `区画 ${spot.code} の設定を変更しました`);
       if (ok) setConfirming(false);
     } finally { setSaving(false); }
   };
@@ -127,6 +131,28 @@ function SpotEditor({ spot, spots, vehicles, mutate, onFrontChange }: { spot: Pa
     finally { setSaving(false); }
   };
   return <div data-kiosk-auto-home-blocked={changed || saving} className="mt-4 space-y-3">
+    <div className="rounded-xl border border-slate-200 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <span id="spot-display-label" className="text-sm font-bold">配置図に表示</span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={enabled}
+          aria-labelledby="spot-display-label"
+          aria-describedby="spot-display-help"
+          disabled={saving}
+          onClick={() => setEnabled((current) => !current)}
+          className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-lg px-1 text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:opacity-50"
+        >
+          <span aria-hidden="true" className={cn("relative h-6 w-11 shrink-0 rounded-full transition-colors", enabled ? "bg-blue-600" : "bg-slate-500")}>
+            <span className={cn("absolute left-0.5 top-0.5 size-5 rounded-full bg-white shadow-sm motion-safe:transition-transform", enabled && "translate-x-5")} />
+          </span>
+          <span aria-hidden="true" className={cn("min-w-[2em] shrink-0 whitespace-nowrap text-center leading-none", enabled ? "text-blue-700" : "text-slate-600")}>{enabled ? "オン" : "オフ"}</span>
+        </button>
+      </div>
+      <p id="spot-display-help" className="mt-1 text-xs text-slate-500">オフにすると駐車できなくなり、手前の区画の判定からも外れます。</p>
+      {disablingOccupied ? <p className="mt-1 text-xs font-bold text-rose-600">駐車中の車を移動してからオフにしてください。</p> : null}
+    </div>
     <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-600">区画番号</span>
       <input aria-label={`区画 ${spot.code}の番号`} disabled={saving} value={code} maxLength={20} onChange={(event) => setCode(event.target.value)} className={cn(field, codeError && "border-rose-300")} />
       {codeError ? <span className="mt-1 block text-[11px] font-bold text-rose-600">{codeError}</span> : <span className="mt-1 block text-[11px] text-slate-400">過去の利用履歴は、変更前の番号のまま残ります</span>}
@@ -135,6 +161,13 @@ function SpotEditor({ spot, spots, vehicles, mutate, onFrontChange }: { spot: Pa
       <select aria-label={`区画 ${spot.code}の用途`} disabled={saving} value={role} onChange={(event) => changeRole(event.target.value as ParkingSpotRole)} className={field}>
         {PARKING_SPOT_ROLES.map((item) => <option key={item} value={item}>{SPOT_ROLE_LABELS[item]}</option>)}
       </select>
+    </label>
+    <label className="block">
+      <span className="mb-1.5 block text-xs font-bold text-slate-600">推奨車種</span>
+      <select className={field} value={vehicleClass} disabled={saving} onChange={(event) => setVehicleClass(event.target.value as ParkingVehicleClass)}>
+        {PARKING_VEHICLE_CLASSES.map((value) => <option key={value} value={value}>{PARKING_VEHICLE_CLASS_LABELS[value]}</option>)}
+      </select>
+      <span className="mt-1 block text-xs text-slate-500">車種が異なる場合は、駐車の確定前に注意を表示します。</span>
     </label>
     {role === "DEDICATED" ? <label className="block"><span className="mb-1.5 block text-xs font-bold text-slate-600">専用にする車両</span>
       <select aria-label={`区画 ${spot.code}の専用車両`} disabled={saving} value={vehicleId} onChange={(event) => changeVehicle(event.target.value)} className={field}>

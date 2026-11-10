@@ -10,6 +10,19 @@ export const SPOT_ROLE_DESCRIPTIONS: Record<ParkingSpotRole, string> = {
   HOLDING: "実在しない区画。駐車場所を確定できない場合だけ使う",
 };
 
+export const PARKING_VEHICLE_CLASSES = ["ANY", "STANDARD", "KEI"] as const;
+export type ParkingVehicleClass = (typeof PARKING_VEHICLE_CLASSES)[number];
+
+export const PARKING_VEHICLE_CLASS_LABELS: Record<ParkingVehicleClass, string> = {
+  ANY: "指定なし",
+  STANDARD: "普通車用",
+  KEI: "軽自動車用",
+};
+
+export function matchesParkingVehicleClass(vehicle: { isKei?: boolean } | null, vehicleClass: ParkingVehicleClass = "ANY") {
+  return vehicleClass === "ANY" || (vehicle?.isKei !== undefined && vehicle.isKei === (vehicleClass === "KEI"));
+}
+
 type SpotRoleInfo = { code: string; role: ParkingSpotRole; dedicatedVehicleId: string | null; dedicatedVehicleName: string | null; label: string | null };
 
 export const SPOT_LABEL_MAX_LENGTH = 10;
@@ -30,17 +43,20 @@ export const formatSpotLabel = (spot: SpotRoleInfo) =>
 
 export const isDashedSpot = (spot: Pick<SpotRoleInfo, "role">) => spot.role === "HOLDING" || spot.role === "TEMPORARY";
 
-// 専用区画には指定した車両だけを置ける。
-export const canUseSpot = (vehicle: { id: string }, spot: Pick<SpotRoleInfo, "role" | "dedicatedVehicleId">) =>
-  spot.role !== "DEDICATED" || spot.dedicatedVehicleId === vehicle.id;
+// 無効な区画と、他の車の専用区画には駐車できない。車種の違いは注意だけを出す。
+export const canUseSpot = (vehicle: { id: string; isKei?: boolean }, spot: Pick<SpotRoleInfo, "role" | "dedicatedVehicleId"> & { enabled?: boolean }) =>
+  spot.enabled !== false && (spot.role !== "DEDICATED" || spot.dedicatedVehicleId === vehicle.id);
 
 // お客様用の区画。社用車も止められるが、できるだけ止めないよう案内する。
 export const isCustomerSpot = (spot: Pick<SpotRoleInfo, "role">) => spot.role === "CUSTOMER";
 
+export const needsParkingSpotWarning = (spot: Pick<SpotRoleInfo, "role"> & { vehicleClass?: ParkingVehicleClass }, vehicle?: { isKei?: boolean } | null) =>
+  isCustomerSpot(spot) || (vehicle?.isKei !== undefined && !matchesParkingVehicleClass(vehicle, spot.vehicleClass));
+
 // お客様用の区画の代わりに案内する、空いている通常区画（その車の専用区画を含む）。
-export const freeRegularSpots = <T extends Pick<SpotRoleInfo, "code" | "role" | "dedicatedVehicleId"> & { enabled: boolean; vehicle?: unknown }>(spots: T[], vehicle: { id: string } | null) =>
-  spots.filter((spot) => spot.enabled && !spot.vehicle && (spot.role === "REGULAR" || (spot.role === "DEDICATED" && !!vehicle && spot.dedicatedVehicleId === vehicle.id)));
+export const freeRegularSpots = <T extends Pick<SpotRoleInfo, "code" | "role" | "dedicatedVehicleId"> & { enabled: boolean; vehicleClass?: ParkingVehicleClass; vehicle?: unknown }>(spots: T[], vehicle: { id: string; isKei?: boolean } | null) =>
+  spots.filter((spot) => !spot.vehicle && (spot.role === "REGULAR" || spot.role === "DEDICATED") && canUseSpot(vehicle ?? { id: "" }, spot) && matchesParkingVehicleClass(vehicle, spot.vehicleClass));
 
 // 手前の区画に駐車中の区画。中央の道路から出し入れするとき、先にその車を動かす必要がある。
-export const blockingFrontSpots = <T extends { id: string; vehicle?: { id: string } | null }>(spot: { frontSpotIds?: string[] } | null | undefined, spots: T[], vehicleId?: string | null) =>
-  spot?.frontSpotIds?.length ? spots.filter((item) => spot.frontSpotIds!.includes(item.id) && !!item.vehicle && item.vehicle.id !== vehicleId) : [];
+export const blockingFrontSpots = <T extends { id: string; enabled?: boolean; vehicle?: { id: string } | null }>(spot: { frontSpotIds?: string[] } | null | undefined, spots: T[], vehicleId?: string | null) =>
+  spot?.frontSpotIds?.length ? spots.filter((item) => item.enabled !== false && spot.frontSpotIds!.includes(item.id) && !!item.vehicle && item.vehicle.id !== vehicleId) : [];
