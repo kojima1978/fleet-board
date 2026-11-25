@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AnimationMixer, Material, Object3D, Scene, WebGLRenderer } from "three";
+import { ACTIVITY_EVENT } from "./idle-traffic";
 
 const MODEL_URL = "/local-assets/minions/minion.glb";
 const MODEL_PROBE_URL = "/api/local-assets/minion";
@@ -10,6 +11,8 @@ const FRAME_INTERVAL_MS = 1000 / 30;
 const LAP_SECONDS = 52;
 const HALF_WIDTH = 7.55;
 const HALF_HEIGHT = 3.95;
+const MINION_IDLE_MS = 30_000;
+const IDLE_RESET_EVENTS = ["pointerdown", "click", "keydown", "wheel", ACTIVITY_EVENT] as const;
 
 export type PerimeterRunnerPose = { x: number; y: number; rotationY: number };
 
@@ -28,7 +31,37 @@ export function perimeterRunnerPose(progress: number): PerimeterRunnerPose {
   return { x: -HALF_WIDTH, y: -HALF_HEIGHT + distance, rotationY: Math.PI };
 }
 
-export function MinionPerimeterRunners({ paused = false }: { paused?: boolean }) {
+export function subscribeToMinionIdle(onIdle: (idle: boolean) => void) {
+  let timer: number | undefined;
+  const restart = () => {
+    window.clearTimeout(timer);
+    onIdle(false);
+    if (!document.hidden) timer = window.setTimeout(() => onIdle(true), MINION_IDLE_MS);
+  };
+  for (const event of IDLE_RESET_EVENTS) window.addEventListener(event, restart, { capture: true, passive: true });
+  document.addEventListener("visibilitychange", restart);
+  restart();
+  return () => {
+    window.clearTimeout(timer);
+    for (const event of IDLE_RESET_EVENTS) window.removeEventListener(event, restart, true);
+    document.removeEventListener("visibilitychange", restart);
+  };
+}
+
+export function MinionPerimeterRunners({ blocked }: { blocked: boolean }) {
+  const [activity, setActivity] = useState({ started: false, idle: false });
+  useEffect(() => {
+    const update = (idle: boolean) => setActivity((current) => (
+      current.idle === idle ? current : { started: current.started || idle, idle }
+    ));
+    update(false);
+    if (!blocked) return subscribeToMinionIdle(update);
+  }, [blocked]);
+
+  return activity.started ? <MinionCanvas paused={blocked || !activity.idle} /> : null;
+}
+
+function MinionCanvas({ paused }: { paused: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pausedRef = useRef(paused);
 
@@ -163,5 +196,5 @@ export function MinionPerimeterRunners({ paused = false }: { paused?: boolean })
     };
   }, []);
 
-  return <canvas ref={canvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 z-[4] size-full" />;
+  return <canvas ref={canvasRef} aria-hidden="true" className="pointer-events-none absolute inset-0 z-[4] size-full" style={{ visibility: paused ? "hidden" : undefined }} />;
 }

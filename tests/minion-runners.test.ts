@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { perimeterRunnerPose } from "../components/minion-perimeter-runners";
+import { perimeterRunnerPose, subscribeToMinionIdle } from "../components/minion-perimeter-runners";
+import { ACTIVITY_EVENT } from "../components/idle-traffic";
 
 const closeTo = (actual: number, expected: number) => assert.ok(Math.abs(actual - expected) < 0.0001, `${actual} should equal ${expected}`);
 const topLeft = perimeterRunnerPose(0);
@@ -36,5 +37,42 @@ assert.match(dashboard, /minionAnimationEnabled \? <MinionPerimeterRunners/);
 assert.match(systemSettings, /駐車場3Dアニメーション/);
 assert.match(probeRoute, /status: 204/);
 assert.match(probeRoute, /X-FleetFlow-Model-Available/);
+
+const browser = new EventTarget();
+const page = Object.assign(new EventTarget(), { hidden: false });
+let pending: (() => void) | undefined;
+Object.assign(globalThis, {
+  window: Object.assign(browser, {
+    setTimeout(callback: () => void, delay: number) {
+      assert.equal(delay, 30_000);
+      pending = callback;
+      return 1;
+    },
+    clearTimeout() { pending = undefined; },
+  }),
+  document: page,
+});
+
+let idle = true;
+const unsubscribe = subscribeToMinionIdle((value) => { idle = value; });
+assert.equal(idle, false);
+for (const event of ["pointerdown", "click", "keydown", "wheel", ACTIVITY_EVENT]) {
+  assert.ok(pending);
+  pending();
+  assert.equal(idle, true);
+  const previousTimer = pending;
+  browser.dispatchEvent(new Event(event));
+  assert.equal(idle, false);
+  assert.notEqual(pending, previousTimer);
+}
+page.hidden = true;
+page.dispatchEvent(new Event("visibilitychange"));
+assert.equal(idle, false);
+assert.equal(pending, undefined);
+page.hidden = false;
+page.dispatchEvent(new Event("visibilitychange"));
+assert.ok(pending);
+unsubscribe();
+assert.equal(pending, undefined);
 
 console.log("Minion perimeter runner tests passed: four-edge route, quiet optional-asset probe, local-only ignore and read-only mounts");
