@@ -21,7 +21,7 @@ import { RESERVATION_GRACE_MINUTES } from "@/lib/reservations";
 import { formatFuelLevel, isLowFuel, needsReturnFuelReminder } from "@/lib/fuel-level";
 import { scannerBridgeStatusText, useNfcBridge, useNfcBridgeHealth, useQrBridgeHealth, useScannerBridge, type NfcBridgeStatus, type ScannerEvent } from "@/lib/use-nfc-bridge";
 import { useKioskIdle, useKioskUserTimeout } from "@/lib/use-kiosk-idle";
-import { playNfcSound } from "@/lib/nfc-sound";
+import { playNfcSound, prepareOperationSound } from "@/lib/nfc-sound";
 import { FuelLevelLabel, FuelLevelPicker, FuelReminder } from "./fuel-controls";
 export { FuelLevelLabel, FuelReminder } from "./fuel-controls";
 import { clearSavedEmployee, forgetPersistentEmployee, readSavedEmployee, saveEmployee } from "@/lib/employee-session";
@@ -132,6 +132,7 @@ export const isWinterTireSeason = (value = new Date()) => {
 };
 
 export function FleetDashboard({ view }: { view: DashboardView }) {
+  const router = useRouter();
   const [data, setData] = useState<DashboardData | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [employee, setEmployee] = useState<Employee | null>(null);
@@ -411,6 +412,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
 
   const mutate: Mutate = useCallback(async (body, success) => {
     if (pendingRef.current) return false;
+    prepareOperationSound();
     pendingRef.current = true;
     setPendingAction(true);
     try {
@@ -437,6 +439,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
       const returnedWithFuelLevel = response.ok && (operation.action === "end" || operation.action === "endMaintenance") && !!operation.vehicleId && typeof operation.fuelLevel === "number";
       const refueled = returnedWithFuelLevel && wasRefueled(previousFuelLevel, operation.fuelLevel!);
       setToast({ message: response.ok ? success : result.message, tone: response.ok ? "success" : "error" });
+      playNfcSound(response.ok ? "complete" : "error");
       await load(true);
       if (returnedWithFuelLevel) setFuelWaveRequest({ vehicleId: operation.vehicleId!, nonce: Date.now() });
       if (refueled && result.fuelThankYou) {
@@ -445,6 +448,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
       } else if (response.ok && result.fuelReturnNotice) setFuelNotice({ operationId, notice: result.fuelReturnNotice, kiosk, kind: "notice" });
       return response.ok;
     } catch (error) {
+      playNfcSound("error");
       await load(true);
       setToast({ message: error instanceof Error && error.message === "OFFLINE" ? "オフラインのため操作できません。接続復旧後に再試行してください" : "通信結果を確認できませんでした。最新状態を再取得しました。内容を確認して再試行してください", tone: "error" });
       return false;
@@ -586,7 +590,41 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
       {fuelNotice?.kind === "notice" && fuelNotice.notice.displayMode === "MODAL" && dialog === null && !pendingAction ? <FuelReturnNoticeDialog key={fuelNotice.operationId} notice={fuelNotice.notice} kiosk={fuelNotice.kiosk} onClose={() => setFuelNotice(null)} /> : null}
       {dialog === "nfc" && <NfcDialog employees={activeEmployees} vehicles={activeVehicles} onEmployee={(person) => { authenticateEmployee(person); setDialog(null); }} onVehicle={(vehicle) => { setDialog(null); openVehicleFromNfc(vehicle); }} onClose={() => setDialog(null)} />}
       {dialog === "user" && <UserPickerDialog kiosk={kiosk} employees={activeEmployees} currentId={employee?.id ?? null} nfcEnabled={kiosk && nfcAvailable} onSelect={(person) => { authenticateEmployee(person); setDialog(null); }} onClose={() => setDialog(null)} />}
-      {dialog === "start" && <StartDialog key={`${startIntent}:${selectedVehicleId}`} intent={startIntent} kiosk={kiosk} submitting={pendingAction} employees={activeEmployees} vehicles={startIntent === "scheduled" ? activeVehicles : available} trips={data.trips} spots={data.spots} initialEmployee={employee?.active ? employee : null} initialVehicleId={selectedVehicleId} onClose={() => setDialog(null)} onSubmit={async (values) => { const identifiedEmployee = activeEmployees.find((person) => person.id === values.employeeId) ?? null; const scheduled = values.plannedStart !== null; const ok = await mutate(scheduled ? { action: "reserve", employeeId: values.employeeId, vehicleId: values.vehicleId, plannedStart: values.plannedStart!, minutes: values.minutes, actorName: values.employeeName, actorEmployeeId: values.employeeId } : { action: "start", employeeId: values.employeeId, vehicleId: values.vehicleId, minutes: values.minutes, actorName: values.employeeName, actorEmployeeId: values.employeeId }, scheduled ? "予約を登録しました" : "利用を開始しました"); if (ok) { setParkingVehicleId(null); setDialog(null); } if (ok && identifiedEmployee) { if (kiosk) finishKioskCheck(); else if (!employee) selectEmployee(identifiedEmployee); if (!scheduled) window.location.assign(`/timeline?started=1&vehicleId=${encodeURIComponent(values.vehicleId)}&employeeId=${encodeURIComponent(values.employeeId)}`); } }} />}
+      {dialog === "start" && <StartDialog
+        key={`${startIntent}:${selectedVehicleId}`}
+        intent={startIntent}
+        kiosk={kiosk}
+        submitting={pendingAction}
+        employees={activeEmployees}
+        vehicles={startIntent === "scheduled" ? activeVehicles : available}
+        trips={data.trips}
+        spots={data.spots}
+        initialEmployee={employee?.active ? employee : null}
+        initialVehicleId={selectedVehicleId}
+        onClose={() => setDialog(null)}
+        onSubmit={async (values) => {
+          const identifiedEmployee = activeEmployees.find((person) => person.id === values.employeeId);
+          const { employeeId, vehicleId, minutes, employeeName, plannedStart } = values;
+          const operation = { employeeId, vehicleId, minutes, actorName: employeeName, actorEmployeeId: employeeId };
+          const ok = plannedStart === null
+            ? await mutate({ action: "start", ...operation }, "利用を開始しました")
+            : await mutate({ action: "reserve", ...operation, plannedStart }, "予約を登録しました");
+          if (!ok) return;
+          setParkingVehicleId(null);
+          setDialog(null);
+          if (!identifiedEmployee) return;
+          if (kiosk) finishKioskCheck();
+          else if (!employee) selectEmployee(identifiedEmployee);
+          if (plannedStart !== null) return;
+          if (view === "timeline") {
+            setStayOnTimeline(false);
+            setStartContext({ vehicleId, employeeId });
+          } else {
+            const query = new URLSearchParams({ started: "1", vehicleId, employeeId });
+            router.push(`/timeline?${query}`);
+          }
+        }}
+      />}
       {dialog === "end" && returnTrip && <EndDialog submitting={pendingAction} trip={returnTrip} spots={data.spots} initialSpotId={returnSpotId} onChangeSpot={changeReturnSpot ? () => { setDialog(null); changeReturnSpot(); } : undefined} onClose={() => setDialog(null)} onSubmit={async (spotId, fuelLevel) => { const ok = await completeReturn(returnTrip, spotId, fuelLevel); if (ok) setDialog(null); }} />}
       {dialog === "parkingReturn" && returnSpot && <ParkingReturnDialog submitting={pendingAction} spot={returnSpot} spots={data.spots} trips={activeTrips} vehicles={data.vehicles} onClose={() => setDialog(null)} onSubmit={async (trip, fuelLevel) => { const ok = await completeReturn(trip, returnSpot.id, fuelLevel); if (ok) { setDialog(null); setReturnSpot(null); } }} />}
       {dialog === "fuel" && fuelVehicle && <FuelLevelDialog submitting={pendingAction} vehicle={fuelVehicle} onClose={() => setDialog(null)} onSubmit={async (fuelLevel) => { const ok = await mutate({ action: "setFuelLevel", vehicleId: fuelVehicle.id, version: fuelVehicle.version, fuelLevel, actorName: employee?.name ?? "共用端末" }, `${fuelVehicle.name}のガソリン残量を${formatFuelLevel(fuelLevel)}へ変更しました`); if (ok) setDialog(null); }} />}

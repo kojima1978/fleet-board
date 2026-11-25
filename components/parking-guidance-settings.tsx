@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, LoaderCircle, MapPin, Play, RotateCcw, Save, Trash2, Upload, Volume2, VolumeX } from "lucide-react";
 import { PARKING_GUIDANCE_AUDIO_MAX_BYTES, parkingGuidanceLabels, type ParkingGuidanceEvent, type ParkingGuidanceSetting } from "@/lib/parking-guidance";
 import { refreshParkingGuidance } from "@/lib/use-parking-guidance";
+import { beginParkingGuidance, playGuidancePreview } from "@/lib/guidance-audio-priority";
 import { Button, Card, cn } from "./ui";
 
 type UploadFile = { fileName: string; base64: string };
@@ -55,6 +56,10 @@ function GuidanceEditor({ setting, onSaved }: { setting: ParkingGuidanceSetting;
   const input = useRef<HTMLInputElement>(null);
   const player = useRef<HTMLAudioElement>(null);
   const audioUrl = audio ? `data:audio/${audio.fileName.toLowerCase().endsWith(".wav") ? "wav" : "mpeg"};base64,${audio.base64}` : audio === null ? null : setting.audioUrl;
+  useEffect(() => {
+    const element = player.current;
+    return () => { element?.pause(); };
+  }, [audioUrl]);
   const audioName = reading ? "読み込み中…" : audio?.fileName ?? (audio === null ? "端末の読み上げを使用" : setting.audioName ?? "端末の読み上げを使用");
   const dirty = enabled !== setting.enabled || message !== setting.message || audio !== undefined;
   async function choose(file?: File) {
@@ -79,8 +84,16 @@ function GuidanceEditor({ setting, onSaved }: { setting: ParkingGuidanceSetting;
     finally { setBusy(false); }
   }
   const preview = () => {
-    if (audioUrl && player.current) { player.current.currentTime = 0; void player.current.play().catch(() => setError("音声を再生できません")); return; }
-    if ("speechSynthesis" in window) { window.speechSynthesis.cancel(); const utterance = new SpeechSynthesisUtterance(message); utterance.lang = "ja-JP"; window.speechSynthesis.speak(utterance); }
+    setError("");
+    if (audioUrl && player.current) {
+      void playGuidancePreview(player.current, "parking").catch(() => setError("音声を試聴できません。ほかの案内の終了後にお試しください。"));
+      return;
+    }
+    if ("speechSynthesis" in window && beginParkingGuidance(null)) {
+      const utterance = new SpeechSynthesisUtterance(message);
+      utterance.lang = "ja-JP";
+      window.speechSynthesis.speak(utterance);
+    }
   };
   return <form data-kiosk-auto-home-blocked={dirty || busy || reading} onSubmit={(event) => { event.preventDefault(); if (dirty && message.trim()) void save(); }} className="px-4 py-5 sm:px-5">
     <div className="mb-4 flex items-start gap-3"><div className="mr-auto min-w-0"><h4 className="text-sm font-black text-slate-900">{parkingGuidanceLabels[setting.event].label}</h4><p className="mt-1 text-xs text-slate-500">{parkingGuidanceLabels[setting.event].hint}</p></div><button type="button" role="switch" aria-checked={enabled} disabled={busy} onClick={() => setEnabled((value) => !value)} className={cn("flex min-h-9 w-28 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border px-2 text-xs font-bold", enabled ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-500")}><span className={cn("relative h-4 w-7 shrink-0 rounded-full", enabled ? "bg-blue-600" : "bg-slate-200")}><span className={cn("absolute top-0.5 size-3 rounded-full bg-white shadow-sm transition", enabled ? "left-[14px]" : "left-0.5")} /></span><span>{enabled ? "案内あり" : "案内なし"}</span></button></div>

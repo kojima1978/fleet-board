@@ -5,6 +5,7 @@ import { Check, Fuel, LoaderCircle, Play, RotateCcw, Save, Trash2, Upload, Volum
 import { FUEL_NOTICE_AUDIO_MAX_BYTES, FUEL_NOTICE_DISPLAY_MODES, fuelNoticeDisplayModeLabel, type FuelNoticeDisplayMode, type FuelNoticePhase, type FuelReturnNotice } from "@/lib/fuel-return-notice";
 import { formatFuelLevel } from "@/lib/fuel-level";
 import { Button, Card, cn } from "./ui";
+import { playGuidancePreview } from "@/lib/guidance-audio-priority";
 import { FuelThankYouSettings } from "./fuel-thank-you-settings";
 
 type UploadFile = { fileName: string; base64: string };
@@ -116,7 +117,7 @@ function NoticeEditor({ notice, onSaved }: { notice: FuelReturnNotice; onSaved: 
         <p className={cn("mt-2 text-[11px] font-bold", dragging ? "text-blue-700" : "text-slate-500")}>{dragging ? "ここにドロップしてください" : "MP3・WAVをここへドロップ、またはファイルを選択"}</p>
         {audio !== undefined ? <p className="mt-2 text-[11px] font-bold text-amber-700">保存すると反映されます</p> : null}
         <input ref={input} type="file" accept=".mp3,.wav,audio/mpeg,audio/wav" disabled={busy || reading} onChange={(event) => void choose(event.target.files?.[0])} className="sr-only" />
-        <div className="mt-auto flex flex-wrap gap-2 pt-3"><Button type="button" variant="ghost" className="min-h-9 rounded-lg px-3 text-xs" disabled={busy || reading} onClick={() => input.current?.click()}><Upload className="size-3.5" />{audioUrl ? "音声を変更" : "音声を選択"}</Button>{audioUrl ? <Button type="button" variant="ghost" className="min-h-9 rounded-lg px-3 text-xs" disabled={busy || reading} onClick={() => { if (player.current) { player.current.currentTime = 0; void player.current.play().catch(() => setError("音声を再生できません。MP3・WAVの内容をご確認ください。")); } }}><Play className="size-3.5" />試聴</Button> : null}{audioUrl ? <Button type="button" variant="ghost" className="min-h-9 rounded-lg px-3 text-xs" disabled={busy || reading} onClick={() => { player.current?.pause(); setAudio(null); if (input.current) input.current.value = ""; }}><Trash2 className="size-3.5" />外す</Button> : null}</div>
+        <div className="mt-auto flex flex-wrap gap-2 pt-3"><Button type="button" variant="ghost" className="min-h-9 rounded-lg px-3 text-xs" disabled={busy || reading} onClick={() => input.current?.click()}><Upload className="size-3.5" />{audioUrl ? "音声を変更" : "音声を選択"}</Button>{audioUrl ? <Button type="button" variant="ghost" className="min-h-9 rounded-lg px-3 text-xs" disabled={busy || reading} onClick={() => { if (player.current) { void playGuidancePreview(player.current, "fuel").catch(() => setError("音声を再生できません。MP3・WAVの内容をご確認ください。")); } }}><Play className="size-3.5" />試聴</Button> : null}{audioUrl ? <Button type="button" variant="ghost" className="min-h-9 rounded-lg px-3 text-xs" disabled={busy || reading} onClick={() => { player.current?.pause(); setAudio(null); if (input.current) input.current.value = ""; }}><Trash2 className="size-3.5" />外す</Button> : null}</div>
         {audioUrl ? <audio ref={player} preload="none" src={audioUrl} className="hidden" /> : null}
       </div></div>
     </div>
