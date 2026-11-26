@@ -736,9 +736,10 @@ DBスキーマは`prisma/migrations`の番号付きSQLで管理し、開発・�
 
 ### 依存関係の監査方針
 
-2026年10月23日時点でNext.jsは`16.4.2`です（16.4.0のセキュリティアドバイザリに対応）。Prisma CLI 7.10.0が固定する推移依存も含め、既知の脆弱性を避けるため`package.json`の`overrides`で次を固定しています。
+2026年11月26日時点でNext.jsは`16.4.6`です（`next upgrade --agent=security`が指定した修正版）。Prisma CLI 7.10.0が固定する推移依存も含め、既知の脆弱性を避けるため`package.json`の`overrides`で次を固定しています。
 
 - `deepmerge-ts` 8.0.2
+- `effect` 3.22.1（[GHSA-7589-6fvf-x4pw](https://github.com/advisories/GHSA-7589-6fvf-x4pw)対応）
 - `mysql2` 3.24.5
 - `source-map-js` 1.2.2
 
