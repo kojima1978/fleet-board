@@ -6,7 +6,7 @@ import { ACTIVITY_EVENT } from "./idle-traffic";
 
 const MODEL_URL = "/local-assets/minions/minion.glb";
 const MODEL_PROBE_URL = "/api/local-assets/minion";
-const RUNNER_COUNT = 3;
+const RUNNER_COUNT = 1;
 const FRAME_INTERVAL_MS = 1000 / 30;
 const LAP_SECONDS = 52;
 const HALF_WIDTH = 7.55;
