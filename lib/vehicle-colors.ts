@@ -3,7 +3,8 @@ import type { CSSProperties } from "react";
 // 車両の表示色は実車の色に合わせて選ぶ。一覧にない色は「その他」で自由に指定できる。
 export const VEHICLE_COLORS = [
   { name: "ホワイト", value: "#F8FAFC" },
-  { name: "シルバー", value: "#C0C6CF" },
+  // ホワイトと並べても見分けられるよう、実車より少し濃くしている。
+  { name: "シルバー", value: "#A3ACB9" },
   { name: "グレー", value: "#6B7280" },
   { name: "ブラック", value: "#1F2937" },
   { name: "ネイビー", value: "#1E3A8A" },
@@ -20,7 +21,7 @@ export function vehicleColorName(color: string) {
   return VEHICLE_COLORS.find((item) => item.value.toLowerCase() === color.toLowerCase())?.name ?? null;
 }
 
-// 白・シルバー・ベージュ・イエローなど明るい色は白い背景に溶けるため、縁取りを付けて見えるようにする。
+// 白・シルバー・ベージュ・イエローなど明るい色は白い背景に溶けるため、色の丸には縁取りを付けて見えるようにする。
 export function isLightVehicleColor(color: string) {
   const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color);
   if (!match) return false;
@@ -31,10 +32,11 @@ export function isLightVehicleColor(color: string) {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.45;
 }
 
-const LIGHT_OUTLINE = "drop-shadow(0 0 0.5px rgb(15 23 42 / 0.9)) drop-shadow(0 0 0.5px rgb(15 23 42 / 0.9))";
+// 車アイコンは線だけだと色の出る面積が小さく、白と銀が見分けにくい。車体を実車の色で塗り、線は濃い色の縁取りにする。
+const VEHICLE_ICON_OUTLINE = "#334155";
 
 export function vehicleIconStyle(color: string): CSSProperties {
-  return isLightVehicleColor(color) ? { color, filter: LIGHT_OUTLINE } : { color };
+  return { color: VEHICLE_ICON_OUTLINE, fill: color };
 }
 
 export function vehicleDotStyle(color: string): CSSProperties {
