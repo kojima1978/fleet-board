@@ -1786,10 +1786,10 @@ export const vehicleTileContent = (vehicle: Vehicle, horizontal: boolean, offSit
   // 横向きの区画は高さが足りないので、装備タグは上の帯（区画番号の右）に1行4列で置く。
   // 位置変更モードでは右上に移動用のつまみが出るので、重ならないよう装備タグを隠す。
   if (horizontal) return <span className="absolute inset-0 flex items-center gap-1 px-0.5 pb-1.5 pt-2 text-left @4xl:pb-[9px] @4xl:pt-[15px]"><span className="flex shrink-0 flex-col items-center"><VehicleMapIcon vehicle={vehicle} className="size-4" />{maintenance}</span><span className="min-w-0 leading-none">{code}{name}{plate}</span>{maintenance ? null : <VehicleEquipmentBadges vehicle={vehicle} compact row className="absolute right-0.5 top-0.5 mt-0 [[data-move-mode]_&]:invisible" />}</span>;
-  // 縦向きの区画は、車の絵だけを区画の上に置き、車両番号・車両名・ナンバー・装備タグは下端のガソリン残量の上にまとめる。
-  // 装備タグ（整備中の表示）の段は2行ぶんの高さを常に取るので、装備の有無や車両名の長さに関係なく隣の区画と同じ高さに並び、
-  // 画面が広く区画が高いときもナンバーと装備タグの間が空きすぎない。
-  return <span className="absolute inset-0 flex min-w-0 flex-col items-center pb-1.5 pt-2 @4xl:pb-3 @4xl:pt-4"><VehicleMapIcon vehicle={vehicle} className="size-3.5 @2xl:size-4" /><span className="mt-auto flex w-full min-w-0 flex-col items-center">{code}{name}{plate}</span><span className="block h-[15px] @2xl:h-[17px]">{extra}</span></span>;
+  // 縦向きの区画は、上から車の絵、車両番号・車両名・ナンバー、装備タグの3段を、区画番号とガソリン残量の間に等しい間隔で置く。
+  // 装備タグ（整備中の表示）の段は2行ぶんの高さを常に取るので、装備の有無や車両名の長さに関係なく隣の区画と同じ高さに並ぶ。
+  // 画面が広く区画が高いときは、空いた分が車の絵の上、各段の間、装備タグの下に均等に入る。
+  return <span className="absolute inset-0 flex min-w-0 flex-col items-center justify-evenly pb-1.5 pt-2 @4xl:pb-3 @4xl:pt-4"><VehicleMapIcon vehicle={vehicle} className="size-3.5 @2xl:size-4" /><span className="flex w-full min-w-0 flex-col items-center">{code}{name}{plate}</span><span className="block h-[15px] @2xl:h-[17px]">{extra}</span></span>;
 };
 
 // 軽自動車は枠の大きさを変えずに車を8割に縮める。「軽」の札は車両番号の横に付ける。
@@ -1813,7 +1813,7 @@ function useFuelChangeWave(request: FuelWaveRequest | null) {
   return wavingVehicleIds;
 }
 function FuelFill({ level, waving }: { level: number; waving: boolean }) {
-  return <span aria-hidden className={cn("pointer-events-none absolute inset-x-0 bottom-0 rounded-b-[2px] border-t transition-[height] duration-700 ease-out motion-reduce:transition-none", { empty: "border-red-500/80 bg-red-300/70", low: "border-amber-500/80 bg-amber-300/70", normal: "border-blue-500/70 bg-blue-300/50" }[fuelTone(level)], waving && "fuel-wave border-transparent")} style={{ height: fuelFillHeight(level) }} />;
+  return <span aria-hidden className={cn("pointer-events-none absolute inset-x-0 bottom-0 rounded-b-[2px] border-t transition-[height] duration-700 ease-out motion-reduce:transition-none", { empty: "border-red-500/80 bg-red-300/70", low: "border-amber-500/80 bg-amber-300/70", normal: "border-sky-400/80 bg-sky-200/70" }[fuelTone(level)], waving && "fuel-wave border-transparent")} style={{ height: fuelFillHeight(level) }} />;
 }
 function FuelLevelDialog({ vehicle, submitting, onClose, onSubmit }: { vehicle: Vehicle; submitting: boolean; onClose: () => void; onSubmit: (fuelLevel: number) => void }) {
   const [fuelLevel, setFuelLevel] = useState(vehicle.fuelLevel);

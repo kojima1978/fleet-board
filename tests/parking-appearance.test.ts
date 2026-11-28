@@ -64,14 +64,14 @@ for (const horizontal of [false, true]) {
   assert.doesNotMatch(standardTile, /軽自動車/, "普通車には軽の札を付けない");
   assert.match(standardTile, />C001<\/span><span aria-label="普通車"[^>]*bg-white[^>]*>普<\/span>/, "普通車は車両番号の横に白い「普」の札を付ける");
   assert.match(keiTile, /<span class="grid w-fit grid-cols-\[auto_auto\][^"]*"><span class="[^"]*bg-slate-800/, "車両番号と普・軽の札は2列に固定して並べる");
-  if (!horizontal) assert.match(keiTile, /<\/svg><\/span><span class="mt-auto [^"]*"><span class="grid w-fit/, "縦向きの区画は車の絵を車両番号の段に入れず、最上段に1つだけ置く");
+  if (!horizontal) assert.match(keiTile, /<\/svg><\/span><span class="flex w-full [^"]*"><span class="grid w-fit/, "縦向きの区画は車の絵を車両番号の段に入れず、最上段に1つだけ置く");
 }
 // 縦向きの区画は上下中央に寄せず上から順に置き、装備タグは下端にそろえる（装備や車両名の長さで高さがずれない）。
 {
   const verticalTile = renderToStaticMarkup(vehicleTileContent({ ...vehicle, hasEtc: true }, false));
-  assert.match(verticalTile, /^<span class="absolute inset-0 flex [^"]*flex-col[^"]*@4xl:pt-4"/, "縦向きの区画は車の絵を区画の上の決まった位置に置く");
-  assert.match(verticalTile, /<\/svg><\/span><span class="mt-auto [^"]*"><span class="grid w-fit/, "車の絵の下は空けて、車両番号からを下へまとめる");
-  assert.match(verticalTile, /<\/small><\/span><span class="block h-\[15px\] @2xl:h-\[17px\]"><span class="[^"]*grid-cols-\[auto_auto\][^"]*" aria-label="装備：/, "装備タグはナンバーのすぐ下に、決まった高さの段で置く");
+  assert.match(verticalTile, /^<span class="absolute inset-0 flex [^"]*flex-col[^"]*justify-evenly[^"]*@4xl:pt-4"/, "縦向きの区画は車の絵・文字・装備タグの3段を等しい間隔で置く");
+  assert.match(verticalTile, /<\/svg><\/span><span class="flex w-full [^"]*"><span class="grid w-fit/, "車両番号・車両名・ナンバーは車の絵と装備タグの間に1つの段として置く");
+  assert.match(verticalTile, /<\/small><\/span><span class="block h-\[15px\] @2xl:h-\[17px\]"><span class="[^"]*grid-cols-\[auto_auto\][^"]*" aria-label="装備：/, "装備タグは決まった高さの段で置く");
   for (const name of ["プリウス", "ヴォクシー", "確認用テスト車"]) assert.match(renderToStaticMarkup(vehicleTileContent({ ...vehicle, name }, false)).match(/<b class="([^"]*)"/)?.[1] ?? "", /@4xl:leading-\[13px\]/, "車両名の行の高さは名前の長さによらず一定にする");
 }
 const dedicatedEmpty = renderToStaticMarkup(createElement(EmptyParkingSpotLabel, { spot: { ...spot, role: "DEDICATED", dedicatedVehicleName: "サクラ" } }));
