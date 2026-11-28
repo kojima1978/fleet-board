@@ -113,7 +113,7 @@ async function main() {
     resetResponse = await resetParking(resetRequest("/api/settings/parking-guidance/reset"));
     assert.equal(resetResponse.status, 200);
     resetData = await resetResponse.json();
-    assert.equal(resetData.settings.length, 5); assert.equal(resetData.settings.filter((setting: { enabled: boolean }) => setting.enabled).length, 2); assert.equal(resetData.settings.find((setting: { event: string }) => setting.event === "BLOCKED_OUT").audioName, "parking-blocked-warning.mp3");
+    assert.equal(resetData.settings.length, 6); assert.equal(resetData.settings.filter((setting: { enabled: boolean }) => setting.enabled).length, 3); assert.equal(resetData.settings.find((setting: { event: string }) => setting.event === "BLOCKED_OUT").audioName, "parking-blocked-warning.mp3"); assert.equal(resetData.settings.find((setting: { event: string }) => setting.event === "CUSTOMER_SPOT").audioName, "parking-customer-spot.mp3");
     resetResponse = await resetThankYou(resetRequest("/api/settings/fuel-thank-you/reset"));
     assert.equal(resetResponse.status, 200); assert.equal((await resetResponse.json()).setting.audioName, "fuel-refueled-thank-you.wav");
     assert.equal(await prisma.auditLog.count({ where: { action: { contains: "初期化" } } }), 4);

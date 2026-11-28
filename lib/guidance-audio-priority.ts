@@ -1,7 +1,9 @@
 "use client";
 
 let parkingAudio: HTMLAudioElement | null = null;
-let fuelAudio: HTMLAudioElement | null = null;
+// ガソリン案内は音声ファイルのほか、ファイルがないときの読み上げ（SpeechSynthesisUtterance）でも流す。
+type FuelGuidanceSound = HTMLAudioElement | SpeechSynthesisUtterance;
+let fuelAudio: FuelGuidanceSound | null = null;
 let stopOperationSound: (() => void) | null = null;
 
 function interruptOperationSound() {
@@ -40,17 +42,24 @@ export function endParkingGuidance(audio: HTMLAudioElement) {
   if (parkingAudio === audio) parkingAudio = null;
 }
 
-export function beginFuelGuidance(audio: HTMLAudioElement) {
+export function createGuidanceUtterance(text: string) {
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "ja-JP";
+  utterance.rate = 0.95;
+  return utterance;
+}
+
+export function beginFuelGuidance(audio: FuelGuidanceSound) {
   interruptOperationSound();
   // 給油のお願いを聞き逃さないよう、再生中の駐車案内を停止する。
   parkingAudio?.pause();
   parkingAudio = null;
   cancelSpeech();
-  if (fuelAudio && fuelAudio !== audio) fuelAudio.pause();
+  if (fuelAudio && fuelAudio !== audio && "pause" in fuelAudio) fuelAudio.pause();
   fuelAudio = audio;
 }
 
-export function endFuelGuidance(audio: HTMLAudioElement) {
+export function endFuelGuidance(audio: FuelGuidanceSound) {
   if (fuelAudio === audio) fuelAudio = null;
 }
 

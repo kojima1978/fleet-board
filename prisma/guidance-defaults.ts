@@ -10,12 +10,16 @@ type GuidanceDb = PrismaClient | Prisma.TransactionClient;
 
 const audioSamples = {
   parkingBlocked: { fileName: "parking-blocked-warning.mp3", mime: "audio/mpeg" },
+  parkingCustomer: { fileName: "parking-customer-spot.mp3", mime: "audio/mpeg" },
   fuelReturnLow: { fileName: "fuel-return-low-reminder.wav", mime: "audio/wav" },
   fuelReturnEmpty: { fileName: "fuel-return-empty-reminder.mp3", mime: "audio/mpeg" },
   fuelThankYou: { fileName: "fuel-refueled-thank-you.wav", mime: "audio/wav" },
 } satisfies Record<string, AudioSample>;
 
 export const guidanceDefaultAudioFiles = Object.values(audioSamples).map((item) => item.fileName);
+
+const parkingAudioSample = (event: ParkingGuidanceEvent) =>
+  event === "BLOCKED_OUT" || event === "BLOCKED_IN" ? audioSamples.parkingBlocked : event === "CUSTOMER_SPOT" ? audioSamples.parkingCustomer : null;
 
 const parkingMessageOverrides: Partial<Record<ParkingGuidanceEvent, string>> = {
   BLOCKED_OUT: "手前に車があるため出庫できません。",
@@ -46,7 +50,7 @@ async function createParkingDefaults(prisma: PrismaClient) {
   for (const event of PARKING_GUIDANCE_EVENTS) {
     if (await prisma.parkingGuidanceSetting.findUnique({ where: { event }, select: { event: true } })) continue;
     const setting = defaultParkingGuidanceSetting(event);
-    const sample = event === "BLOCKED_OUT" || event === "BLOCKED_IN" ? audioSamples.parkingBlocked : null;
+    const sample = parkingAudioSample(event);
     await prisma.parkingGuidanceSetting.create({
       data: {
         event,
@@ -105,7 +109,7 @@ export async function seedGuidanceDefaults(prisma: PrismaClient) {
 export async function resetParkingGuidanceDefaults(db: GuidanceDb) {
   for (const event of PARKING_GUIDANCE_EVENTS) {
     const setting = defaultParkingGuidanceSetting(event);
-    const sample = event === "BLOCKED_OUT" || event === "BLOCKED_IN" ? audioSamples.parkingBlocked : null;
+    const sample = parkingAudioSample(event);
     const audioId = sample ? (await createAudio(db, sample)).id : null;
     const data = { enabled: setting.enabled, message: parkingMessageOverrides[event] ?? setting.message, audioId };
     await db.parkingGuidanceSetting.upsert({

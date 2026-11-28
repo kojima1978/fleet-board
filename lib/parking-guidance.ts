@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { noticeAudioSchema } from "./fuel-return-notice";
 
-export const PARKING_GUIDANCE_EVENTS = ["DEPARTURE", "SELECT_SPOT", "ARRIVAL", "BLOCKED_OUT", "BLOCKED_IN"] as const;
+export const PARKING_GUIDANCE_EVENTS = ["DEPARTURE", "SELECT_SPOT", "ARRIVAL", "BLOCKED_OUT", "BLOCKED_IN", "CUSTOMER_SPOT"] as const;
 export type ParkingGuidanceEvent = (typeof PARKING_GUIDANCE_EVENTS)[number];
 export const parkingGuidanceEvent = z.enum(PARKING_GUIDANCE_EVENTS);
 export const PARKING_GUIDANCE_AUDIO_MAX_BYTES = 2 * 1024 * 1024;
@@ -12,12 +12,13 @@ export const parkingGuidanceLabels: Record<ParkingGuidanceEvent, { label: string
   ARRIVAL: { label: "入庫内容を確認", hint: "駐車区画を選び、ガソリン残量などを確認するとき", defaultMessage: "駐車区画と周囲の安全を確認してください。" },
   BLOCKED_OUT: { label: "出庫できない", hint: "手前の区画に車があり、そのまま出庫できないとき", defaultMessage: "手前に車があるため出庫できません。先に手前の車を移動してください。" },
   BLOCKED_IN: { label: "入庫できない", hint: "手前の区画に車があり、そのまま入庫できないとき", defaultMessage: "手前に車があるため入庫できません。先に手前の車を移動してください。" },
+  CUSTOMER_SPOT: { label: "お客様用区画", hint: "返却・車検終了・位置変更で、お客様用の区画を選んだとき", defaultMessage: "お客様用の区画です。できるだけ通常の区画に止めてください。" },
 };
 
 export type ParkingGuidanceSetting = { event: ParkingGuidanceEvent; enabled: boolean; message: string; version: number; audioName: string | null; audioUrl: string | null };
 export const defaultParkingGuidanceSetting = (event: ParkingGuidanceEvent): ParkingGuidanceSetting => ({
   event,
-  enabled: event === "BLOCKED_OUT" || event === "BLOCKED_IN",
+  enabled: event === "BLOCKED_OUT" || event === "BLOCKED_IN" || event === "CUSTOMER_SPOT",
   message: parkingGuidanceLabels[event].defaultMessage,
   version: 0,
   audioName: null,

@@ -10,7 +10,7 @@ import { upgradeLegacyCodes } from "@/lib/record-codes";
 import { defaultSpotRoles } from "@/prisma/parking-spot-seed";
 import { createQrToken } from "@/lib/qr-code";
 import { validateBackupIntegrity } from "@/lib/backup-integrity";
-import { parkingGuidanceEvent } from "@/lib/parking-guidance";
+import { PARKING_GUIDANCE_EVENTS, parkingGuidanceEvent } from "@/lib/parking-guidance";
 import { PARKING_VEHICLE_CLASSES } from "@/lib/parking-spots";
 
 export const JSON_BACKUP_FORMAT_VERSION = 1;
@@ -85,7 +85,7 @@ export const fleetBackupSchema = z.object({
     vehicleMaintenances: z.array(vehicleMaintenanceSchema).max(100_000).default([]),
     fuelReturnNotices: z.array(fuelReturnNoticeSchema).max(5).default([]),
     fuelStartNotices: z.array(fuelStartNoticeSchema).max(5).default([]),
-    parkingGuidanceSettings: z.array(parkingGuidanceSettingSchema).max(5).default([]),
+    parkingGuidanceSettings: z.array(parkingGuidanceSettingSchema).max(PARKING_GUIDANCE_EVENTS.length).default([]),
     fuelThankYouSettings: z.array(fuelThankYouSettingSchema).max(1).default([]),
     auditLogs: z.array(auditLogSchema).max(300_000),
   }).strict(),

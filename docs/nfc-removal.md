@@ -156,7 +156,6 @@ DROP TABLE "NfcTag";
 - **lib/device-mode.ts**:
   - `isKioskDevice(mode, nfcStatus)`の引数を見直す。
   - 設定キー`fleetflow.nfcSound`は、既存端末の設定が消えないよう、キーを残すか移行処理を入れる。
-  - `isNfcSoundEnabled`は`lib/fuel-voice.ts`も使っている。
 - **lib/nfc-sound.ts**: `playNfcSound`はQR読み取り音としても使っているか確認し、使っていれば`scan-sound`などに改名する。
 - **lib/nfc.ts**: 参照がなくなったら削除する。
 - **lib/employee-session.ts**: NFCに触れたコメントを直す。

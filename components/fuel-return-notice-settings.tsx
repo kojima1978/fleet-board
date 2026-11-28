@@ -51,7 +51,7 @@ export function FuelReturnNoticeSettings() {
   return <Card data-kiosk-auto-home-blocked={resetting} className="w-full max-w-[900px] overflow-hidden border-slate-200 bg-white p-0">
     <div className="flex flex-wrap items-start gap-3 border-b border-slate-100 px-4 py-4 sm:px-5">
       <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-600"><Fuel className="size-5" /></span>
-      <div className="mr-auto min-w-0"><h3 className="text-base font-black text-slate-900">ガソリン残量別の案内</h3><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">利用開始時と返却時の案内を残量ごとに設定します。音声は共用端末だけで1回再生します。</p></div>
+      <div className="mr-auto min-w-0"><h3 className="text-base font-black text-slate-900">ガソリン残量別の案内</h3><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">利用開始時と返却時の案内を残量ごとに設定します。音声は共用端末だけで1回再生します。音声ファイルがないときは、メッセージを端末の読み上げで読みます。</p></div>
       {notices.length ? <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-600">5段階中 {enabledCount}件を使用</span> : null}
       <Button type="button" variant="ghost" className="min-h-7 gap-1 rounded-lg border-slate-300 px-2 text-[11px] text-slate-800" disabled={resetting || !notices.length} onClick={() => void resetDefaults()}>{resetting ? <LoaderCircle className="size-3 animate-spin" /> : <RotateCcw className="size-3" />}{resetting ? "戻しています…" : `${phase === "START" ? "利用開始時" : "返却時"}を初期設定に戻す`}</Button>
     </div>
@@ -78,7 +78,7 @@ function NoticeEditor({ notice, onSaved }: { notice: FuelReturnNotice; onSaved: 
   const input = useRef<HTMLInputElement>(null);
   const levelLabel = formatFuelLevel(notice.level);
   const audioUrl = audio ? `data:audio/${audio.fileName.toLowerCase().endsWith(".wav") ? "wav" : "mpeg"};base64,${audio.base64}` : audio === null ? null : notice.audioUrl;
-  const audioName = reading ? "読み込み中…" : audio?.fileName ?? (audio === null ? "音声なし" : notice.audioName ?? "音声なし");
+  const audioName = reading ? "読み込み中…" : audio?.fileName ?? (audio === null ? "端末の読み上げを使用" : notice.audioName ?? "端末の読み上げを使用");
   const dirty = message !== notice.message || displayMode !== notice.displayMode || audioEnabled !== notice.audioEnabled || audio !== undefined;
 
   useEffect(() => { const element = player.current; return () => { element?.pause(); }; }, [audioUrl]);

@@ -43,7 +43,7 @@ function ThankYouEditor({ setting, onSaved }: { setting: FuelThankYouSetting; on
     const element = player.current;
     return () => { element?.pause(); };
   }, [audioUrl]);
-  const audioName = reading ? "読み込み中…" : audio?.fileName ?? (audio === null ? "音声なし" : setting.audioName ?? "音声なし");
+  const audioName = reading ? "読み込み中…" : audio?.fileName ?? (audio === null ? "端末の読み上げを使用" : setting.audioName ?? "端末の読み上げを使用");
   const dirty = enabled !== setting.enabled || audioEnabled !== setting.audioEnabled || message !== setting.message || audio !== undefined;
 
   async function choose(file?: File) {

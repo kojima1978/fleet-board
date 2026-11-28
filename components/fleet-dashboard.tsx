@@ -14,7 +14,7 @@ import { getParkingReservations, PARKING_RESERVATION_NOTICE_MINUTES } from "@/li
 import { MaintenanceSendOutBadge, ParkingReservationBadge, ParkingReservations, UpcomingMaintenances } from "./parking-reservations";
 import { resolveNfcUid } from "@/lib/resolve-nfc";
 import { resolveQrCode } from "@/lib/resolve-qr";
-import { blockingFrontSpots, canUseSpot, formatSpotLabel, isDashedSpot, needsParkingSpotWarning, PARKING_VEHICLE_CLASS_LABELS, spotRoleTag } from "@/lib/parking-spots";
+import { blockingFrontSpots, canUseSpot, formatSpotLabel, isCustomerSpot, isDashedSpot, needsParkingSpotWarning, PARKING_VEHICLE_CLASS_LABELS, spotRoleTag } from "@/lib/parking-spots";
 import { ParkingSpotNotice } from "./customer-spot-notice";
 import { FrontSpotNotice } from "./front-spot-notice";
 import { RESERVATION_GRACE_MINUTES } from "@/lib/reservations";
@@ -37,7 +37,7 @@ import { Button, Card, cn, DialogActions } from "./ui";
 import { ReservationTimeActions, ReservationTimeFields, useReservationTimeEdit } from "./reservation-time-editor";
 import { IdleTraffic, reportActivity } from "./idle-traffic";
 import { AppHeader, HeaderDeviceMode, HeaderSystemStatus, HeaderUserControl, Navigation, type HeaderSyncState } from "./app-header";
-import { useParkingGuidanceAnnouncement } from "@/lib/use-parking-guidance";
+import { ParkingGuidanceKioskContext, useParkingGuidanceAnnouncement } from "@/lib/use-parking-guidance";
 
 const MINUTES_PER_DAY = 24 * 60;
 const DAY_VIEW_START_MINUTE = 6 * 60;
@@ -537,7 +537,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
     } catch (error) { playNfcSound("error"); setToast({ message: error instanceof Error ? error.message : `${scan.kind === "nfc" ? "NFCタグ" : "QRコード"}を確認できませんでした`, tone: "error", brief: true }); }
   };
   return (
-    <div className="min-h-screen bg-[#f4f7fb] text-slate-900">
+    <ParkingGuidanceKioskContext value={kiosk}><div className="min-h-screen bg-[#f4f7fb] text-slate-900">
       <AppHeader view={view} kiosk={kiosk} autoHomeBlocked={dialog !== null || pendingAction} actions={<>
             <HeaderSystemStatus syncState={syncState} lastSuccessfulSync={lastSuccessfulSync} nfcStatus={nfcHealth} qrStatus={qrHealth} />
             <HeaderDeviceMode nfcStatus={scannerHealth} />
@@ -634,7 +634,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
       {idleWarningSeconds !== null ? <div role="alert" className="fixed bottom-24 left-1/2 z-[75] flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950 shadow-2xl md:bottom-5"><AlertTriangle className="size-5 shrink-0 text-amber-600" /><div><p className="text-sm font-black">まもなく共用端末をリセットします</p><p className="text-xs text-amber-800">あと{idleWarningSeconds}秒。画面を操作すると継続できます。</p></div></div> : null}
       {toast ? <div role={toast.tone === "error" ? "alert" : "status"} className={cn("fixed bottom-24 left-1/2 z-[70] flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-xl px-5 py-3 text-sm font-bold text-white shadow-2xl md:bottom-5", toast.tone === "error" ? "bg-rose-700" : "bg-slate-950")} >{toast.tone === "error" ? <AlertTriangle className="size-4 shrink-0" /> : <Check className="size-4 shrink-0" />}<span className="flex flex-col gap-1"><span>{toast.message}</span>{toast.thanks ? <span className="flex items-center gap-1.5 text-base font-black text-emerald-300"><Fuel className="size-5 shrink-0" />{toast.thanks}</span> : null}</span><button type="button" aria-label={toast.tone === "error" ? "エラー通知を閉じる" : "完了通知を閉じる"} onClick={() => setToast(null)} className="ml-1 grid size-7 shrink-0 place-items-center rounded-lg bg-white/15 hover:bg-white/25"><X className="size-3.5" /></button></div> : null}
       <Navigation view={view} className="fixed inset-x-3 bottom-3 z-40 flex rounded-2xl border border-slate-200 bg-white/95 p-1.5 shadow-2xl backdrop-blur lg:hidden" />
-    </div>
+    </div></ParkingGuidanceKioskContext>
   );
 }
 
@@ -1357,6 +1357,7 @@ function ParkingMap({ minionBlocked, selectedVehicleId, setSelectedVehicleId, da
   }, [returnRequest?.nonce]);
   const pickingVehicle = movingVehicle ?? returningTrip?.vehicle ?? returningMaintenanceVehicle ?? null;
   useParkingGuidanceAnnouncement(pickingVehicle ? "SELECT_SPOT" : null);
+  useParkingGuidanceAnnouncement(moveWarningSpot && movingVehicle && isCustomerSpot(moveWarningSpot) ? "CUSTOMER_SPOT" : null);
   // 車検・修理で外出中の車両。区画は空けているので、右の一覧に出す。
   const offSiteMaintenances = data.maintenances.filter((item) => item.status === "ACTIVE" && item.kind === "OFF_SITE");
   const offSiteVehicleIds = new Set(offSiteMaintenances.map((item) => item.vehicleId));
@@ -1657,7 +1658,7 @@ function ParkingReturnDialog({ spot, spots, trips: allTrips, vehicles, submittin
   const trips = allTrips.filter((trip) => canUseSpot(trip.vehicle, spot));
   const selected = trips.find((trip) => trip.id === tripId);
   const arrivalBlocked = blockingFrontSpots(spot, spots, selected?.vehicleId).length > 0;
-  useParkingGuidanceAnnouncement(selected ? arrivalBlocked ? "BLOCKED_IN" : "ARRIVAL" : null);
+  useParkingGuidanceAnnouncement(selected ? arrivalBlocked ? "BLOCKED_IN" : isCustomerSpot(spot) ? "CUSTOMER_SPOT" : "ARRIVAL" : null);
   const fuelLevel = selected ? fuelChoice?.tripId === selected.id ? fuelChoice.level : selected.vehicle.fuelLevel : null;
   const changeFuelLevel = (level: number) => {
     if (!selected) return;
@@ -1705,7 +1706,7 @@ function EndDialog({ trip, spots, initialSpotId = "", onChangeSpot, submitting, 
   };
   const selected = free.find((spot) => spot.id === spotId);
   const arrivalBlocked = !!selected && blockingFrontSpots(selected, spots, trip.vehicleId).length > 0;
-  useParkingGuidanceAnnouncement(selected ? arrivalBlocked ? "BLOCKED_IN" : "ARRIVAL" : null);
+  useParkingGuidanceAnnouncement(selected ? arrivalBlocked ? "BLOCKED_IN" : isCustomerSpot(selected) ? "CUSTOMER_SPOT" : "ARRIVAL" : null);
   const [choosing, setChoosing] = useState(!selected);
   const holdingCodes = free.filter((spot) => spot.role === "HOLDING").map((spot) => spot.code);
   const changeSpot = () => { if (onChangeSpot) onChangeSpot(); else setChoosing(true); };
@@ -1730,7 +1731,7 @@ export function MaintenanceReturnDialog({ vehicle, spot, spots, mutate, currentE
   // 開いている間にほかの車が停まったら、返却先を選び直してもらう。
   const selected = !spot.vehicle && canUseSpot(vehicle, spot) ? spot : null;
   const arrivalBlocked = !!selected && blockingFrontSpots(selected, spots, vehicle.id).length > 0;
-  useParkingGuidanceAnnouncement(selected ? arrivalBlocked ? "BLOCKED_IN" : "ARRIVAL" : null);
+  useParkingGuidanceAnnouncement(selected ? arrivalBlocked ? "BLOCKED_IN" : isCustomerSpot(selected) ? "CUSTOMER_SPOT" : "ARRIVAL" : null);
   const submit = async () => {
     if (!selected || submitting) return;
     setSubmitting(true);

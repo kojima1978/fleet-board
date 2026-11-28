@@ -8,6 +8,7 @@ assert.deepEqual(guidanceDefaultAudioFiles.sort(), [
   "fuel-return-empty-reminder.mp3",
   "fuel-return-low-reminder.wav",
   "parking-blocked-warning.mp3",
+  "parking-customer-spot.mp3",
 ]);
 
 async function main() {
