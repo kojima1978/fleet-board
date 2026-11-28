@@ -5,7 +5,7 @@ import type { CSSProperties, ReactNode } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, BookOpen, CalendarClock, Camera, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Fuel, Gift, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Move, Nfc, Play, Plus, Printer, QrCode, RefreshCw, Snowflake, UserRound, Utensils, Wrench, X } from "lucide-react";
+import { AlertTriangle, BookOpen, CalendarClock, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Fuel, Gift, GripVertical, LayoutGrid, List, LoaderCircle, LogOut, Map as MapIcon, MapPin, Move, Nfc, Play, Plus, Printer, QrCode, RefreshCw, UserRound, Utensils, Wrench, X } from "lucide-react";
 import type { DashboardData, Employee, ParkingSpot, Trip, Vehicle, VehicleMaintenance } from "@/lib/types";
 import { normalizeNfcUid } from "@/lib/nfc";
 import { vehicleDotStyle, vehicleIconStyle } from "@/lib/vehicle-colors";
@@ -18,7 +18,7 @@ import { blockingFrontSpots, canUseSpot, formatSpotLabel, isCustomerSpot, isDash
 import { ParkingSpotNotice } from "./customer-spot-notice";
 import { FrontSpotNotice } from "./front-spot-notice";
 import { RESERVATION_GRACE_MINUTES } from "@/lib/reservations";
-import { formatFuelLevel, isLowFuel, needsReturnFuelReminder } from "@/lib/fuel-level";
+import { formatFuelLevel, fuelTone, needsReturnFuelReminder } from "@/lib/fuel-level";
 import { scannerBridgeStatusText, useNfcBridge, useNfcBridgeHealth, useQrBridgeHealth, useScannerBridge, type NfcBridgeStatus, type ScannerEvent } from "@/lib/use-nfc-bridge";
 import { useKioskIdle, useKioskUserTimeout } from "@/lib/use-kiosk-idle";
 import { playNfcSound, prepareOperationSound } from "@/lib/nfc-sound";
@@ -125,10 +125,6 @@ export const visibleParkingSpots = <T extends { enabled: boolean }>(spots: T[]) 
 const tokyoDayStart = (value = new Date()) => {
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(value);
   return new Date(`${day}T00:00:00+09:00`);
-};
-export const isWinterTireSeason = (value = new Date()) => {
-  const month = Number(new Intl.DateTimeFormat("en", { timeZone: "Asia/Tokyo", month: "numeric" }).format(value));
-  return month >= 11 || month <= 4;
 };
 
 export function FleetDashboard({ view }: { view: DashboardView }) {
@@ -564,7 +560,7 @@ export function FleetDashboard({ view }: { view: DashboardView }) {
               <OperationalAlerts data={data} compact />
               {undoReturn ? <span title={`間違えた場合は、あと${undoSecondsLeft}秒のうちに取り消せます`} className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-bold border-amber-300 bg-amber-50 text-amber-950">{undoReturn.vehicleName}を返却しました<button type="button" disabled={pendingAction} onClick={undoLastReturn} className="ml-0.5 rounded-full border border-amber-300 bg-white px-2 py-0.5 text-amber-900 hover:bg-amber-100 disabled:opacity-60">取り消す<span className="tabular-nums text-amber-700">（{undoSecondsLeft}秒）</span></button><button type="button" aria-label="返却取消の案内を閉じる" onClick={() => setUndoReturn(null)} className="grid size-5 place-items-center rounded-full text-amber-700 hover:bg-amber-100"><X className="size-3.5" /></button></span> : null}
             </div>
-            <div className="flex flex-1 basis-full flex-wrap justify-end gap-x-3 gap-y-1 md:basis-0">{activeVehicles.some((vehicle) => vehicle.hasBackMonitor) ? <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-bold text-slate-600" title="カメラマークはバックモニター付の車両です"><Camera className="size-3.5" />カメラ：バックモニター付</span> : null}{isWinterTireSeason() && activeVehicles.some((vehicle) => vehicle.hasWinterTires) ? <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-bold text-slate-600" title="雪マークはスタッドレスタイヤ装着中の車両です"><Snowflake className="size-3.5" />雪マーク：スタッドレスタイヤ</span> : null}</div>
+            {/* 左の見出しと幅をそろえ、中央の案内を中央に保つ。 */}<div aria-hidden className="hidden flex-1 md:block md:basis-0" />
           </div>
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_240px]">
             <ParkingMap minionBlocked={dialog !== null || pendingAction || fuelNotice?.notice.displayMode === "MODAL"} selectedVehicleId={parkingVehicleId} setSelectedVehicleId={setParkingVehicleId} data={data} trips={activeTrips} changedVehicleIds={changedVehicleIds} fuelWaveRequest={fuelWaveRequest} fuelThankYou={fuelNotice?.kind === "thankYou" && dialog === null && !pendingAction ? fuelNotice : null} onCloseFuelThankYou={(operationId) => setFuelNotice((current) => current?.operationId === operationId ? null : current)} mutate={mutate} openStart={openStart} openReserve={openReserve} openReturn={openParkingReturn} openFuel={openFuel} openEdit={openEdit} openEnd={openEnd} actorName={employee?.name ?? "共用端末"} currentEmployeeId={employee?.id ?? null} returnRequest={mapReturnRequest} />
@@ -1233,13 +1229,23 @@ function Timeline({ data, openReserve, openEdit, mutate, actorName, highlightTri
   {selectedMaintenance && selectedMaintenanceVehicle && selectedMaintenance.status === "SCHEDULED" ? <ScheduledMaintenancePopover key={selectedMaintenance.id} maintenance={selectedMaintenance} vehicle={selectedMaintenanceVehicle} now={now.getTime()} onStart={() => router.push(`/?sendOutMaintenance=${selectedMaintenance.id}`)} onClose={() => setSelectedMaintenanceId(null)} className="fixed inset-x-4 bottom-4 z-40" /> : null}</>;
 }
 
-function VehicleEquipmentBadges({ vehicle, compact = false, className }: { vehicle: Pick<Vehicle, "hasEtc" | "hasNavigation" | "hasBackMonitor" | "hasWinterTires">; compact?: boolean; className?: string }) {
-  if (!vehicle.hasEtc && !vehicle.hasNavigation && (compact || (!vehicle.hasBackMonitor && !vehicle.hasWinterTires))) return null;
-  return <span className={cn("flex items-center gap-1", compact ? "mt-0.5 justify-center" : "mt-1.5", className)} aria-label={`装備：${[vehicle.hasEtc ? "ETC" : "", vehicle.hasNavigation ? "ナビ" : "", !compact && vehicle.hasBackMonitor ? "バックモニター" : "", !compact && vehicle.hasWinterTires ? "冬タイヤ" : ""].filter(Boolean).join("、")}`}>
-    {vehicle.hasEtc ? <span className={cn("rounded bg-sky-100 font-black text-sky-700", compact ? "px-1 text-[6px] leading-[9px] @2xl:text-[7px]" : "px-1.5 py-0.5 text-[10px]")}>ETC</span> : null}
-    {vehicle.hasNavigation ? <span className={cn("rounded bg-violet-100 font-black text-violet-700", compact ? "px-1 text-[6px] leading-[9px] @2xl:text-[7px]" : "px-1.5 py-0.5 text-[10px]")}>ナビ</span> : null}
-    {!compact && vehicle.hasBackMonitor ? <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-black text-emerald-700">バックモニター</span> : null}
-    {!compact && vehicle.hasWinterTires ? <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-black text-slate-700">冬タイヤ</span> : null}
+// 装備は文字のタグで示し、押さえると正式な名前が出る。
+// 配置図の区画では4つの置き場所を固定し、ない装備の場所は空けておく（どの車でも同じ装備が同じ位置に来る）。
+// 縦向きの区画は2行2列で、大事なETC・ナビを上の行に置く。横向きの区画は高さが足りないので1行4列にする。
+const equipmentTags = [
+  { key: "hasEtc", label: "ETC", fullLabel: "ETC", tone: "bg-sky-100 text-sky-700" },
+  { key: "hasNavigation", label: "ナビ", fullLabel: "ナビ", tone: "bg-violet-100 text-violet-700" },
+  { key: "hasBackMonitor", label: "バック", fullLabel: "バックモニター", tone: "bg-emerald-100 text-emerald-700" },
+  { key: "hasWinterTires", label: "冬", fullLabel: "冬タイヤ", tone: "bg-slate-100 text-slate-700" },
+] as const;
+function VehicleEquipmentBadges({ vehicle, compact = false, row = false, className }: { vehicle: Pick<Vehicle, "hasEtc" | "hasNavigation" | "hasBackMonitor" | "hasWinterTires">; compact?: boolean; row?: boolean; className?: string }) {
+  const tags = equipmentTags.filter((tag) => vehicle[tag.key]);
+  if (!tags.length) return null;
+  if (compact) return <span className={cn("mt-0.5 grid gap-px", row ? "grid-cols-[repeat(4,auto)]" : "grid-cols-[auto_auto]", className)} aria-label={`装備：${tags.map((item) => item.fullLabel).join("、")}`}>
+    {equipmentTags.map((item) => <span key={item.key} title={vehicle[item.key] ? item.fullLabel : undefined} aria-hidden={vehicle[item.key] ? undefined : true} className={cn("whitespace-nowrap rounded text-center text-[6px]", row ? "px-px" : "px-0.5", "font-black leading-[7px] @2xl:text-[7px] @2xl:leading-[8px]", vehicle[item.key] ? item.tone : "invisible")}>{item.label}</span>)}
+  </span>;
+  return <span className={cn("mt-1.5 flex flex-wrap items-center gap-1", className)} aria-label={`装備：${tags.map((item) => item.fullLabel).join("、")}`}>
+    {tags.map((item) => <span key={item.key} className={cn("rounded px-1.5 py-0.5 text-[10px] font-black", item.tone)}>{item.fullLabel}</span>)}
   </span>;
 }
 
@@ -1411,11 +1417,10 @@ function ParkingMap({ minionBlocked, selectedVehicleId, setSelectedVehicleId, da
         <IdleTraffic enabled={idleTrafficEnabled} colors={data.vehicles.filter((vehicle) => vehicle.active).map((vehicle) => vehicle.color)} />
         {visibleParkingSpots(data.spots).map((spot) => <div key={spot.id} data-parking-spot-id={spot.id} onDragOver={(e) => { if (isTarget(spot)) e.preventDefault(); }} onDrop={(e) => { e.preventDefault(); if (returningTrip) returnTo(spot); else if (returningMaintenance) returnMaintenanceTo(spot); else moveTo(spot); }} className={cn("absolute grid place-items-center rounded-[4px] border-2 transition", parkingSpotClass(spot, !!spot.vehicle && offSiteVehicleIds.has(spot.vehicle.id)), spot.vehicle && reservationByVehicle.has(spot.vehicle.id) && "border-violet-500", sendOutBadgeOf(spot.vehicle) && "border-amber-500", isTarget(spot) && "border-dashed border-emerald-400 bg-emerald-50", (canReturnTo(spot) || canReturnMaintenanceTo(spot)) && !needsParkingSpotWarning(spot, pickingVehicle) && "spot-beckon", pickingVehicle && !spot.vehicle && !canUseSpot(pickingVehicle, spot) && "cursor-not-allowed opacity-60", (spot.vehicle?.id === selectedVehicleId || spot.vehicle?.id === movingVehicleId) && "z-20 ring-4 ring-blue-700", spot.vehicle && changedVehicleIds.includes(spot.vehicle.id) && "z-10 ring-4 ring-amber-300 animate-pulse")} style={{ left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.width}%`, height: `${spot.height}%`, ...((canReturnTo(spot) || canReturnMaintenanceTo(spot)) ? { "--beckon-delay": `${(spot.x / 100) * 0.9}s` } as CSSProperties : {}) }}>
           {spot.vehicle && reservationByVehicle.has(spot.vehicle.id) ? <ParkingReservationBadge reservation={reservationByVehicle.get(spot.vehicle.id)!} /> : null}
-          {spot.vehicle && spot.vehicleClass !== "ANY" ? <span title={PARKING_VEHICLE_CLASS_LABELS[spot.vehicleClass]} className="pointer-events-none absolute right-0.5 top-1 z-[1] rounded bg-white px-0.5 text-[8px] font-black leading-tight text-slate-700">{spot.vehicleClass === "KEI" ? "軽" : "普"}</span> : null}
           {sendOutBadgeOf(spot.vehicle) ? <MaintenanceSendOutBadge maintenance={sendOutBadgeOf(spot.vehicle)!} now={reservationNow} /> : null}
           {spot.vehicle && spot.vehicle.fuelLevel !== null && !offSiteVehicleIds.has(spot.vehicle.id) ? <FuelFill level={spot.vehicle.fuelLevel} waving={wavingVehicleIds.includes(spot.vehicle.id)} /> : null}
           <span className="absolute left-1 top-0.5 z-[1] text-[9px] font-black text-slate-500">{spot.code}{spotRoleTag(spot) ? <small className={cn("ml-0.5 text-[7px]", spot.role !== "HOLDING" && "hidden @2xl:inline", spot.role === "TEMPORARY" && "text-slate-400")}>{spotRoleTag(spot)}</small> : null}</span>
-          {spot.vehicle ? <div className="relative size-full">{moveMode ? <button type="button" draggable aria-pressed={spot.vehicle.id === movingVehicleId} title={`${spot.vehicle.name}を移動`} onClick={() => setMovingVehicleId((current) => current === spot.vehicle?.id ? null : spot.vehicle?.id ?? null)} onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setMovingVehicleId(spot.vehicle?.id ?? null); }} className="grid size-full cursor-grab place-content-center overflow-hidden text-center active:cursor-grabbing">{vehicleTileContent(spot.vehicle, spot.orientation === "horizontal", offSiteVehicleIds.has(spot.vehicle.id))}<GripVertical aria-hidden className="pointer-events-none absolute right-0.5 top-0.5 size-3.5 text-slate-400" /></button> : <button type="button" aria-pressed={spot.vehicle.id === selectedVehicleId} title={`${spot.vehicle.name}の詳細を表示`} onClick={() => selectVehicle(spot.vehicle?.id === selectedVehicleId ? null : spot.vehicle ?? null)} className={cn("grid size-full place-content-center overflow-hidden text-center", offSiteVehicleIds.has(spot.vehicle.id) && "opacity-60")}>{vehicleTileContent(spot.vehicle, spot.orientation === "horizontal", offSiteVehicleIds.has(spot.vehicle.id))}</button>}{spot.vehicle.fuelLevel !== null && !offSiteVehicleIds.has(spot.vehicle.id) ? <span className={cn("pointer-events-none absolute bottom-0.5 right-0.5 max-w-[calc(100%-0.25rem)] overflow-hidden whitespace-nowrap text-right text-[6px] font-black leading-none @2xl:text-[7px] @5xl:text-[8px]", isLowFuel(spot.vehicle.fuelLevel) ? "text-amber-800" : "text-emerald-800")}><FuelLevelLabel level={spot.vehicle.fuelLevel} compact /></span> : null}</div> : <button type="button" title={`${formatSpotLabel(spot)}へ返却`} onClick={() => { if (returningTrip) returnTo(spot); else if (returningMaintenance) returnMaintenanceTo(spot); else if (moveMode) moveTo(spot); else openReturn(spot); }} className={cn("grid size-full place-content-center overflow-hidden text-center transition", pickingVehicle ? !isTarget(spot) && "cursor-default" : "hover:bg-slate-100/70")}><EmptyParkingSpotLabel spot={spot} /></button>}
+          {spot.vehicle ? <div className="relative size-full" data-move-mode={moveMode || undefined}>{moveMode ? <button type="button" draggable aria-pressed={spot.vehicle.id === movingVehicleId} title={`${spot.vehicle.name}を移動`} onClick={() => setMovingVehicleId((current) => current === spot.vehicle?.id ? null : spot.vehicle?.id ?? null)} onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setMovingVehicleId(spot.vehicle?.id ?? null); }} className="grid size-full cursor-grab place-content-center overflow-hidden text-center active:cursor-grabbing">{vehicleTileContent(spot.vehicle, spot.orientation === "horizontal", offSiteVehicleIds.has(spot.vehicle.id))}<GripVertical aria-hidden className="pointer-events-none absolute right-0.5 top-0.5 size-3.5 text-slate-400" /></button> : <button type="button" aria-pressed={spot.vehicle.id === selectedVehicleId} title={`${spot.vehicle.name}の詳細を表示`} onClick={() => selectVehicle(spot.vehicle?.id === selectedVehicleId ? null : spot.vehicle ?? null)} className={cn("grid size-full place-content-center overflow-hidden text-center", offSiteVehicleIds.has(spot.vehicle.id) && "opacity-60")}>{vehicleTileContent(spot.vehicle, spot.orientation === "horizontal", offSiteVehicleIds.has(spot.vehicle.id))}</button>}{spot.vehicle.fuelLevel !== null && !offSiteVehicleIds.has(spot.vehicle.id) ? <span className={cn("pointer-events-none absolute bottom-0.5 right-0.5 max-w-[calc(100%-0.25rem)] overflow-hidden whitespace-nowrap text-right text-[6px] font-black leading-none @2xl:text-[7px] @5xl:text-[8px]", { empty: "text-red-700", low: "text-amber-800", normal: "text-emerald-800" }[fuelTone(spot.vehicle.fuelLevel)])}><FuelLevelLabel level={spot.vehicle.fuelLevel} compact /></span> : null}</div> : <button type="button" title={`${formatSpotLabel(spot)}へ返却`} onClick={() => { if (returningTrip) returnTo(spot); else if (returningMaintenance) returnMaintenanceTo(spot); else if (moveMode) moveTo(spot); else openReturn(spot); }} className={cn("grid size-full place-content-center overflow-hidden text-center transition", pickingVehicle ? !isTarget(spot) && "cursor-default" : "hover:bg-slate-100/70")}><EmptyParkingSpotLabel spot={spot} /></button>}
         </div>)}
         {selectedVehicle || selectedTrip || selectedOffSite || selectedScheduled ? <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-[25] bg-slate-950/[0.07]" /> : null}
         {selectedVehicle && selectedSpot ? <div role="region" aria-label={`${selectedVehicle.name}の詳細`} className="absolute inset-x-2 bottom-2 z-30 mx-auto flex max-w-xl flex-col gap-3 rounded-2xl border border-slate-300 bg-white p-3 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.55)] ring-1 ring-white/80">
@@ -1752,36 +1757,42 @@ export function MaintenanceReturnDialog({ vehicle, spot, spots, mutate, currentE
   </div></DialogShell>;
 }
 
-// 区画内は「車両番号の札（軽自動車は横に「軽」の札）」「車両名」「ナンバー」の順に並べる。
-// 車両番号は濃い札にして地図上で探しやすくし、車両名を最も大きく表示する。収まらない車両名は折り返す。
+// 区画内は「車両番号の札（横に軽自動車は黄色の「軽」、普通車は白い「普」の札）」「車両名」「ナンバー」の順に並べる。
+// 車両番号と普・軽の札は2列に固定し、どの車でも同じ位置に来るようにする。
+// 車両番号は濃い札にして地図上で探しやすくし、車両名を最も大きく表示する。横向きの区画で収まらない車両名は折り返す。
 // ナンバーは数字の幅をそろえ、似た番号を見比べやすくする。
 // 横向きの区画は高さが低いので、車の絵を左、文字を右に並べた2列にする。6文字の車両名が1行に収まるよう区画の幅いっぱいを使う。
+// 縦向きの区画は幅が狭いので、長い車両名は文字を小さくして1行に収め、下の装備タグやガソリン残量と重ならないようにする。
+// 半角の文字は全角の約半分の幅として数える。
+const verticalNameSize = (name: string) => {
+  const width = [...name].reduce((sum, char) => sum + (/[ -~｡-ﾟ]/.test(char) ? 0.6 : 1), 0);
+  if (width <= 4.3) return "text-[9px] @2xl:text-[11px] @4xl:text-[13px]";
+  if (width <= 5.5) return "text-[8px] @2xl:text-[10px] @4xl:text-[10px]";
+  if (width <= 6.3) return "text-[7px] @2xl:text-[8px] @4xl:text-[9px]";
+  if (width <= 7) return "text-[6px] @2xl:text-[7px] @4xl:text-[8px]";
+  return "text-[6px] @2xl:text-[6px] @4xl:text-[7px]";
+};
 const tileTagClass = "inline-block rounded px-1 text-[8px] font-black leading-tight @2xl:text-[10px]";
 export const vehicleTileContent = (vehicle: Vehicle, horizontal: boolean, offSite = false) => {
-  const code = <span className="flex items-center gap-0.5"><span className={cn(tileTagClass, horizontal && "@4xl:leading-[1.1]", "bg-slate-800 tracking-[0.06em] text-white")}>{vehicle.code}</span>{vehicle.isKei ? <span aria-label="軽自動車" title="軽自動車" className={cn(tileTagClass, horizontal && "@4xl:leading-[1.1]", "bg-yellow-300 text-yellow-950")}>軽</span> : null}</span>;
+  const code = <span className="grid w-fit grid-cols-[auto_auto] items-center gap-0.5"><span className={cn(tileTagClass, horizontal && "@4xl:leading-[1.1]", "bg-slate-800 tracking-[0.06em] text-white")}>{vehicle.code}</span>{vehicle.isKei ? <span aria-label="軽自動車" title="軽自動車" className={cn(tileTagClass, horizontal && "@4xl:leading-[1.1]", "bg-yellow-300 text-yellow-950")}>軽</span> : <span aria-label="普通車" title="普通車" className={cn(tileTagClass, horizontal && "@4xl:leading-[1.1]", "bg-white text-slate-700 ring-1 ring-inset ring-slate-300")}>普</span>}</span>;
   // 文字の大きさの後に行の高さを指定する（cnは後から来た文字の大きさで行の高さを消すため）。
-  const name = <b className={cn("mt-px block max-w-full break-words font-black text-slate-950", horizontal ? "text-[9px] @2xl:text-[11px] @4xl:text-[12px]" : "px-1 text-[9px] @2xl:text-[11px] @4xl:text-[13px]", "leading-[1.1]")}>{vehicle.name}</b>;
+  const name = <b className={cn("mt-px block max-w-full font-black text-slate-950", horizontal ? "break-words text-[9px] @2xl:text-[11px] @4xl:text-[12px]" : cn("truncate px-0.5", verticalNameSize(vehicle.name)), "leading-[1.1]")} title={horizontal ? undefined : vehicle.name}>{vehicle.name}</b>;
   const plate = <small className={cn("block whitespace-nowrap font-bold tabular-nums text-slate-700", horizontal ? "text-[8px] @2xl:text-[10px] @4xl:text-[11px]" : "text-[8px] @2xl:text-[10px] @4xl:text-[12px]", "leading-none")}>{formatPlateShort(vehicle.plateNumber)}</small>;
-  const extra = vehicle.status === "MAINTENANCE" ? <small className="mt-0.5 block whitespace-nowrap text-[7px] font-black text-amber-800">{offSite ? "車検で不在" : "整備中"}</small> : <VehicleEquipmentBadges vehicle={vehicle} compact />;
+  const maintenance = vehicle.status === "MAINTENANCE" ? <small className="mt-0.5 block whitespace-nowrap text-[7px] font-black text-amber-800">{offSite ? "車検で不在" : "整備中"}</small> : null;
+  const extra = maintenance ?? <VehicleEquipmentBadges vehicle={vehicle} compact />;
   // 上下に余白を取り、左上の区画番号と右下のガソリン残量の間に収める。
-  if (horizontal) return <span className="absolute inset-0 flex items-center gap-1 px-0.5 pb-1.5 pt-2 text-left @4xl:pb-[9px] @4xl:pt-[15px]"><span className="flex shrink-0 flex-col items-center"><VehicleMapIcon vehicle={vehicle} className="size-4" layout="horizontal" />{extra}</span><span className="min-w-0 leading-none">{code}{name}{plate}</span></span>;
-  return <span className="flex min-w-0 flex-col items-center pb-1.5 pt-2 @4xl:pb-2.5 @4xl:pt-[22px]"><span className="flex flex-wrap items-center justify-center gap-0.5"><VehicleMapIcon vehicle={vehicle} className="size-3.5 @2xl:size-4" />{code}</span>{name}{plate}{extra}</span>;
+  // 横向きの区画は高さが足りないので、装備タグは上の帯（区画番号の右）に1行4列で置く。
+  // 位置変更モードでは右上に移動用のつまみが出るので、重ならないよう装備タグを隠す。
+  if (horizontal) return <span className="absolute inset-0 flex items-center gap-1 px-0.5 pb-1.5 pt-2 text-left @4xl:pb-[9px] @4xl:pt-[15px]"><span className="flex shrink-0 flex-col items-center"><VehicleMapIcon vehicle={vehicle} className="size-4" />{maintenance}</span><span className="min-w-0 leading-none">{code}{name}{plate}</span>{maintenance ? null : <VehicleEquipmentBadges vehicle={vehicle} compact row className="absolute right-0.5 top-0.5 mt-0 [[data-move-mode]_&]:invisible" />}</span>;
+  // 縦向きの区画は、車の絵をいつも最上段に1つだけ置き、「軽」の有無で位置がずれないようにする。
+  return <span className="flex min-w-0 flex-col items-center pb-1.5 pt-2 @4xl:pb-2.5 @4xl:pt-[22px]"><VehicleMapIcon vehicle={vehicle} className="size-3.5 @2xl:size-4" />{code}{name}{plate}{extra}</span>;
 };
 
 // 軽自動車は枠の大きさを変えずに車を8割に縮める。「軽」の札は車両番号の横に付ける。
-// バックモニター付は左上にカメラ、スタッドレス装着中は右上に雪のマークを付ける。
-// 小さくても見分けられるよう、カメラは緑（車両詳細の「バックモニター」と同じ色）、雪は青にする。
-// 印がはみ出す分だけアイコンの外側に余白を取り、隣の車両番号や区画の端に重ねない。
-// 横向きの区画は文字の幅に余裕がないため、印を一回り小さくして車両名を1行に収める。
-const equipmentMarkStyles = {
-  vertical: { mark: "-top-1.5 size-3.5 @4xl:size-4", glyph: "size-2.5 @4xl:size-3", left: "-left-1.5", right: "-right-1.5", space: { left: "ml-1.5", right: "mr-1.5", top: "mt-1.5" } },
-  horizontal: { mark: "-top-1 size-3 @4xl:size-3.5", glyph: "size-2 @4xl:size-2.5", left: "-left-1", right: "-right-1", space: { left: "ml-0.5", right: "", top: "mt-1" } },
-};
-const equipmentMarkClass = "absolute grid place-items-center rounded-full border shadow-sm";
-export function VehicleMapIcon({ vehicle, className, layout = "vertical" }: { vehicle: Pick<Vehicle, "color" | "hasBackMonitor" | "hasWinterTires" | "isKei">; className: string; layout?: keyof typeof equipmentMarkStyles }) {
-  const marks = equipmentMarkStyles[layout];
+// バックモニターやスタッドレスタイヤは車の絵に印を重ねず、区画内の装備タグで示す。
+export function VehicleMapIcon({ vehicle, className }: { vehicle: Pick<Vehicle, "color" | "isKei">; className: string }) {
   // 区画の背景やガソリンの液面の色に車の色が左右されないよう、アイコンの後ろに白い丸い台を敷く。
-  return <span className={cn("relative inline-grid shrink-0 place-items-center", vehicle.hasBackMonitor && marks.space.left, vehicle.hasWinterTires && marks.space.right, (vehicle.hasBackMonitor || vehicle.hasWinterTires) && marks.space.top)}><span className="grid place-items-center rounded-full bg-white p-0.5 ring-1 ring-slate-300"><CarFront className={cn(className, vehicle.isKei && "scale-80")} style={vehicleIconStyle(vehicle.color)} /></span>{vehicle.hasBackMonitor ? <span aria-label="バックモニター付" title="バックモニター付" className={cn(equipmentMarkClass, marks.mark, marks.left, "border-emerald-600 bg-emerald-50 text-emerald-700")}><Camera aria-hidden className={marks.glyph} /></span> : null}{vehicle.hasWinterTires ? <span aria-label="スタッドレスタイヤ装着中" title="スタッドレスタイヤ装着中" className={cn(equipmentMarkClass, marks.mark, marks.right, "border-sky-600 bg-sky-50 text-sky-700")}><Snowflake aria-hidden className={marks.glyph} /></span> : null}</span>;
+  return <span className="grid shrink-0 place-items-center rounded-full bg-white p-0.5 ring-1 ring-slate-300"><CarFront className={cn(className, vehicle.isKei && "scale-80")} style={vehicleIconStyle(vehicle.color)} /></span>;
 }
 const fuelFillHeight = (level: number) => `${Math.max(6, level * 25)}%`;
 // 残量が変わった車両だけ、少しの間タイルの液面を波打たせる。初回表示では揺らさない。
@@ -1798,7 +1809,7 @@ function useFuelChangeWave(request: FuelWaveRequest | null) {
   return wavingVehicleIds;
 }
 function FuelFill({ level, waving }: { level: number; waving: boolean }) {
-  return <span aria-hidden className={cn("pointer-events-none absolute inset-x-0 bottom-0 rounded-b-[2px] border-t transition-[height] duration-700 ease-out motion-reduce:transition-none", isLowFuel(level) ? "border-amber-500/80 bg-amber-300/70" : "border-blue-500/70 bg-blue-300/50", waving && "fuel-wave border-transparent")} style={{ height: fuelFillHeight(level) }} />;
+  return <span aria-hidden className={cn("pointer-events-none absolute inset-x-0 bottom-0 rounded-b-[2px] border-t transition-[height] duration-700 ease-out motion-reduce:transition-none", { empty: "border-red-500/80 bg-red-300/70", low: "border-amber-500/80 bg-amber-300/70", normal: "border-blue-500/70 bg-blue-300/50" }[fuelTone(level)], waving && "fuel-wave border-transparent")} style={{ height: fuelFillHeight(level) }} />;
 }
 function FuelLevelDialog({ vehicle, submitting, onClose, onSubmit }: { vehicle: Vehicle; submitting: boolean; onClose: () => void; onSubmit: (fuelLevel: number) => void }) {
   const [fuelLevel, setFuelLevel] = useState(vehicle.fuelLevel);

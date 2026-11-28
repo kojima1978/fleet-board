@@ -4,7 +4,14 @@ import { defaultFuelReturnNotice } from "../lib/fuel-return-notice";
 import { defaultFuelThankYouSetting, wasRefueled } from "../lib/fuel-thank-you";
 import { renderToStaticMarkup } from "react-dom/server";
 import { FuelLevelLabel, FuelReminder, FuelThankYouPopup } from "../components/fleet-dashboard";
-import { FUEL_LEVEL_LABELS, needsReturnFuelReminder, needsStartFuelReminder } from "../lib/fuel-level";
+import { FUEL_LEVEL_LABELS, fuelTone, needsReturnFuelReminder, needsStartFuelReminder } from "../lib/fuel-level";
+import { FuelLevelPicker } from "../components/fuel-controls";
+
+// 残量Eだけを赤、1/4を黄色にする。
+assert.deepEqual(FUEL_LEVEL_LABELS.map((_, level) => fuelTone(level)), ["empty", "low", "normal", "normal", "normal"], "Eは赤、1/4は黄色、1/2以上は通常の色にする");
+const picker = renderToStaticMarkup(<FuelLevelPicker value={null} onChange={() => {}} />);
+assert.equal((picker.match(/bg-red-300/g) ?? []).length, 1, "残量の目盛りはEだけを赤にする");
+assert.equal((picker.match(/bg-amber-300/g) ?? []).length, 1, "残量の目盛りは1/4だけを黄色にする");
 
 FUEL_LEVEL_LABELS.forEach((label, level) => {
   const compact = renderToStaticMarkup(<FuelLevelLabel level={level} compact />);

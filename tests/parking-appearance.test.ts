@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { EmptyParkingSpotLabel, isWinterTireSeason, parkingSpotClass, VehicleMapIcon, vehicleTileContent, visibleParkingSpots } from "../components/fleet-dashboard";
+import { EmptyParkingSpotLabel, parkingSpotClass, VehicleMapIcon, vehicleTileContent, visibleParkingSpots } from "../components/fleet-dashboard";
 import { ParkingSpotNotice } from "../components/customer-spot-notice";
 import { FrontSpotNotice } from "../components/front-spot-notice";
 import { settingsSpotStateClass, settingsSpotStateLabel, settingsSpotVehicleClassLabel } from "../components/spot-role-settings";
@@ -18,30 +18,53 @@ assert.equal(parkingSpotClass({ ...spot, vehicle }), "border-blue-400 bg-blue-50
 assert.equal(parkingSpotClass({ ...spot, vehicle: { ...vehicle, status: "MAINTENANCE" } }), "border-slate-400 bg-slate-100");
 assert.equal(parkingSpotClass({ ...spot, vehicle }, true), "border-[3px] border-dashed border-amber-400 bg-amber-50/70");
 assert.doesNotMatch(parkingSpotClass(spot), /\bopacity-/, "文字や枠線まで透過させない");
-assert.equal(isWinterTireSeason(new Date("2026-10-31T14:59:59Z")), false, "東京時間の10月中は冬タイヤ凡例を出さない");
-assert.equal(isWinterTireSeason(new Date("2026-10-31T15:00:00Z")), true, "東京時間の11月から冬タイヤ凡例を出す");
-assert.equal(isWinterTireSeason(new Date("2027-04-30T14:59:59Z")), true, "東京時間の4月末までは冬タイヤ凡例を出す");
-assert.equal(isWinterTireSeason(new Date("2027-04-30T15:00:00Z")), false, "東京時間の5月から冬タイヤ凡例を出さない");
-const winterIcon = renderToStaticMarkup(createElement(VehicleMapIcon, { vehicle: { color: "#2563eb", hasBackMonitor: false, hasWinterTires: true, isKei: false }, className: "size-4" }));
-assert.match(winterIcon, /スタッドレスタイヤ装着中/, "装着車の車アイコンへ雪マークの説明を付ける");
-const normalIcon = renderToStaticMarkup(createElement(VehicleMapIcon, { vehicle: { color: "#2563eb", hasBackMonitor: false, hasWinterTires: false, isKei: false }, className: "size-4" }));
-assert.doesNotMatch(normalIcon, /スタッドレスタイヤ装着中/, "未装着車には雪マークを付けない");
-assert.doesNotMatch(normalIcon, /軽自動車|scale-80/, "普通車は縮めず軽マークも付けない");
-assert.doesNotMatch(normalIcon, /バックモニター付/, "バックモニターなしの車にはカメラマークを付けない");
-const backMonitorIcon = renderToStaticMarkup(createElement(VehicleMapIcon, { vehicle: { color: "#2563eb", hasBackMonitor: true, hasWinterTires: false, isKei: false }, className: "size-4" }));
-assert.match(backMonitorIcon, /aria-label="バックモニター付"/, "バックモニター付の車アイコンへカメラマークを付ける");
-assert.match(backMonitorIcon, /aria-label="バックモニター付"[^>]*class="[^"]*bg-emerald-50[^"]*text-emerald-700/, "カメラマークは車両詳細の「バックモニター」と同じ緑にする");
-assert.match(winterIcon, /aria-label="スタッドレスタイヤ装着中"[^>]*class="[^"]*bg-sky-50[^"]*text-sky-700/, "雪マークは青にする");
-const keiIcon = renderToStaticMarkup(createElement(VehicleMapIcon, { vehicle: { color: "#2563eb", hasBackMonitor: false, hasWinterTires: false, isKei: true }, className: "size-4" }));
+const equippedIcon = renderToStaticMarkup(createElement(VehicleMapIcon, { vehicle: { color: "#2563eb", isKei: false }, className: "size-4" }));
+assert.doesNotMatch(equippedIcon, /軽自動車|scale-80/, "普通車は縮めず軽マークも付けない");
+// 装備は車の絵に印を重ねず、文字のタグで示す。区画内では4つの置き場所を固定し、ない装備の場所は空けておく。
+// 縦向きは2行2列（上の行に ETC・ナビ）、横向きは上の帯に1行4列で並べる。
+const equipmentSlots = (tile: string) => [...tile.matchAll(/<span (?:title="([^"]+)"|aria-hidden="true")[^>]*>(ETC|ナビ|バック|冬)<\/span>/g)].map((match) => match[1] ? match[2] : "");
+for (const horizontal of [false, true]) {
+  const fullTile = renderToStaticMarkup(vehicleTileContent({ ...vehicle, hasEtc: true, hasNavigation: true, hasBackMonitor: true, hasWinterTires: true }, horizontal));
+  assert.match(fullTile, /aria-label="装備：ETC、ナビ、バックモニター、冬タイヤ"/, "区画内の装備タグに正式な名前をまとめて付ける");
+  assert.deepEqual(equipmentSlots(fullTile), ["ETC", "ナビ", "バック", "冬"], "ETC・ナビ・バック・冬の順に並べ、大事なETC・ナビを先頭の行に置く");
+  assert.match(fullTile, /title="バックモニター"[^>]*bg-emerald-100[^>]*>バック</, "バックモニターは緑の「バック」タグにする");
+  assert.match(fullTile, /title="冬タイヤ"[^>]*>冬</, "スタッドレスタイヤは「冬」タグにする");
+  if (horizontal) {
+    assert.match(fullTile, /class="[^"]*grid-cols-\[repeat\(4,auto\)\][^"]* absolute right-0\.5 top-0\.5 [^"]*" aria-label="装備：/, "横向きの区画は装備タグを上の帯に1行4列で置き、車両名の幅を確保する");
+    assert.match(fullTile, /\[\[data-move-mode\]_&amp;\]:invisible[^"]*" aria-label="装備：/, "位置変更モードでは右上の移動用のつまみと重ならないよう装備タグを隠す");
+  } else assert.match(fullTile, /class="[^"]*grid-cols-\[auto_auto\][^"]*" aria-label="装備：/, "縦向きの区画は装備タグを2行2列で置く");
+  const maintenanceTile = renderToStaticMarkup(vehicleTileContent({ ...vehicle, status: "MAINTENANCE", hasBackMonitor: true }, horizontal));
+  assert.match(maintenanceTile, /整備中/, "整備中の車は区画内に整備中と出す");
+  assert.doesNotMatch(maintenanceTile, /装備：/, "整備中の車は装備タグの代わりに整備中と出す");
+  assert.doesNotMatch(fullTile, /lucide-camera|lucide-snowflake/, "車の絵にカメラや雪の印を重ねない");
+  const plainTile = renderToStaticMarkup(vehicleTileContent(vehicle, horizontal));
+  assert.doesNotMatch(plainTile, /装備：/, "装備のない車にはタグを出さない");
+  const partialTile = renderToStaticMarkup(vehicleTileContent({ ...vehicle, hasNavigation: true, hasWinterTires: true }, horizontal));
+  assert.match(partialTile, /aria-label="装備：ナビ、冬タイヤ"/, "読み上げにはある装備だけを伝える");
+  assert.deepEqual(equipmentSlots(partialTile), ["", "ナビ", "", "冬"], "ない装備の場所は空けて、ある装備の位置を動かさない");
+}
+// 縦向きの区画は幅が狭いので、長い車両名は文字を小さくして1行に収める。
+const verticalName = (name: string) => renderToStaticMarkup(vehicleTileContent({ ...vehicle, name }, false)).match(/<b class="([^"]*)"/)?.[1] ?? "";
+assert.match(verticalName("プリウス"), /@4xl:text-\[13px\]/, "4文字までの車両名は大きいまま表示する");
+assert.match(verticalName("アクア 1"), /@4xl:text-\[13px\]/, "半角の文字は全角の約半分の幅として数える");
+assert.match(verticalName("ヴォクシー"), /@4xl:text-\[10px\]/, "5文字の車両名は少し小さくする");
+assert.match(verticalName("確認用テスト車"), /@4xl:text-\[8px\]/, "7文字の車両名はさらに小さくする");
+assert.match(verticalName("確認用テスト車"), /\btruncate\b/, "縦向きの車両名は折り返さず1行に収める");
+assert.doesNotMatch(renderToStaticMarkup(vehicleTileContent({ ...vehicle, name: "確認用テスト車" }, true)).match(/<b class="([^"]*)"/)?.[1] ?? "", /truncate|text-\[8px\]/, "横向きの区画の車両名は小さくしない");
+const keiIcon = renderToStaticMarkup(createElement(VehicleMapIcon, { vehicle: { color: "#2563eb", isKei: true }, className: "size-4" }));
 assert.match(keiIcon, /scale-80/, "軽自動車の車アイコンを縮める");
 assert.doesNotMatch(keiIcon, />軽</, "軽の札は車アイコンではなく車両番号の横に付ける");
-// 区画内は車両番号の濃い札、車両名、ナンバーの順に並べ、軽自動車は車両番号の横に「軽」の札を付ける。
+// 区画内は車両番号の濃い札、車両名、ナンバーの順に並べ、車両番号の横に「軽」（黄）または「普」（白）の札を付ける。
 for (const horizontal of [false, true]) {
   const keiTile = renderToStaticMarkup(vehicleTileContent({ ...vehicle, isKei: true, plateNumber: "品川 500 あ 12-34" }, horizontal));
   assert.match(keiTile, /bg-slate-800[^"]*text-white[^"]*">C001<\/span><span aria-label="軽自動車"[^>]*>軽<\/span>/, "車両番号の濃い札の横に軽の札を付ける");
   assert.ok(keiTile.indexOf(">C001<") < keiTile.indexOf(">テスト車<") && keiTile.indexOf(">テスト車<") < keiTile.indexOf("12-34"), "車両番号・車両名・ナンバーの順に並べる");
   assert.match(keiTile, /<small class="[^"]*tabular-nums/, "ナンバーは数字の幅をそろえる");
-  assert.doesNotMatch(renderToStaticMarkup(vehicleTileContent(vehicle, horizontal)), /軽自動車/, "普通車には軽の札を付けない");
+  const standardTile = renderToStaticMarkup(vehicleTileContent(vehicle, horizontal));
+  assert.doesNotMatch(standardTile, /軽自動車/, "普通車には軽の札を付けない");
+  assert.match(standardTile, />C001<\/span><span aria-label="普通車"[^>]*bg-white[^>]*>普<\/span>/, "普通車は車両番号の横に白い「普」の札を付ける");
+  assert.match(keiTile, /<span class="grid w-fit grid-cols-\[auto_auto\][^"]*"><span class="[^"]*bg-slate-800/, "車両番号と普・軽の札は2列に固定して並べる");
+  if (!horizontal) assert.match(keiTile, /<\/svg><\/span><span class="grid w-fit/, "縦向きの区画は車の絵を車両番号の段に入れず、最上段に1つだけ置く");
 }
 const dedicatedEmpty = renderToStaticMarkup(createElement(EmptyParkingSpotLabel, { spot: { ...spot, role: "DEDICATED", dedicatedVehicleName: "サクラ" } }));
 assert.match(dedicatedEmpty, />空き</, "専用区画も空いている状態を先に表示する");
@@ -120,4 +143,4 @@ assert.deepEqual(defaultFrontSpotCodes["15"], ["13", "14"], "READMEの例と同�
 for (const code of ["22", "23", "24", "26", "32", "08", "13", "17"]) assert.equal(defaultFrontSpotCodes[code], undefined, "道路に面する区画には手前の区画を入れない");
 const migrationDefaults = Object.fromEntries([...readFileSync("prisma/migrations/20261109100000_default_front_spots/migration.sql", "utf8").matchAll(/\('(\d+)', ARRAY\[([^\]]*)\]\)/g)].map(([, code, list]) => [code, list.match(/\d+/g) ?? []]));
 assert.deepEqual(migrationDefaults, Object.fromEntries(Object.entries(defaultFrontSpotCodes).map(([code, fronts]) => [code, [...fronts]])), "既存DB向けの移行と初期値の表をそろえる");
-console.log("Parking appearance tests passed: empty background only, back monitor camera mark, unchanged borders/occupied/maintenance/off-site, customer spot notice, front spot notice, default front spots");
+console.log("Parking appearance tests passed: empty background only, equipment tags in tiles, unchanged borders/occupied/maintenance/off-site, customer spot notice, front spot notice, default front spots");

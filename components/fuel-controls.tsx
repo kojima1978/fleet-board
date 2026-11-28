@@ -1,11 +1,11 @@
 import { Fuel } from "lucide-react";
-import { FUEL_LEVEL_LABELS, formatFuelLevel, isLowFuel } from "@/lib/fuel-level";
+import { FUEL_LEVEL_LABELS, formatFuelLevel, fuelTone, isLowFuel } from "@/lib/fuel-level";
 import { cn } from "./ui";
 
 const fuelFillHeight = (level: number) => `${Math.max(6, level * 25)}%`;
 
 function FuelGauge({ level, className }: { level: number; className?: string }) {
-  return <span aria-hidden className={cn("relative block overflow-hidden rounded-b-md rounded-t-sm border-2 border-slate-300 bg-white", className)}><span className={cn("absolute inset-x-0 bottom-0", isLowFuel(level) ? "bg-amber-300" : "bg-blue-300")} style={{ height: fuelFillHeight(level) }} /></span>;
+  return <span aria-hidden className={cn("relative block overflow-hidden rounded-b-md rounded-t-sm border-2 border-slate-300 bg-white", className)}><span className={cn("absolute inset-x-0 bottom-0", { empty: "bg-red-300", low: "bg-amber-300", normal: "bg-blue-300" }[fuelTone(level)])} style={{ height: fuelFillHeight(level) }} /></span>;
 }
 
 export function FuelLevelLabel({ level }: { level: number; compact?: boolean }) {
