@@ -4,8 +4,9 @@ import { cn } from "./ui";
 
 const fuelFillHeight = (level: number) => `${Math.max(6, level * 25)}%`;
 
+// 残量の目盛りは、配置図の液面と同じ色にする。
 function FuelGauge({ level, className }: { level: number; className?: string }) {
-  return <span aria-hidden className={cn("relative block overflow-hidden rounded-b-md rounded-t-sm border-2 border-slate-300 bg-white", className)}><span className={cn("absolute inset-x-0 bottom-0", { empty: "bg-red-300", low: "bg-amber-300", normal: "bg-blue-300" }[fuelTone(level)])} style={{ height: fuelFillHeight(level) }} /></span>;
+  return <span aria-hidden className={cn("relative block overflow-hidden rounded-b-md rounded-t-sm border-2 border-slate-300 bg-white", className)}><span className={cn("absolute inset-x-0 bottom-0", { empty: "bg-red-300/70", low: "bg-amber-200/80", normal: "bg-cyan-200/80" }[fuelTone(level)])} style={{ height: fuelFillHeight(level) }} /></span>;
 }
 
 export function FuelLevelLabel({ level }: { level: number; compact?: boolean }) {

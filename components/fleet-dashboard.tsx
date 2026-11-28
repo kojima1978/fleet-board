@@ -1814,7 +1814,7 @@ function useFuelChangeWave(request: FuelWaveRequest | null) {
 }
 // 満タン以外の液面は、上端を小さくゆっくり波打たせ続ける。給油を記録した直後は大きめの波を優先する。
 export function fuelFillClass(level: number, waving: boolean) {
-  return cn("pointer-events-none absolute inset-x-0 bottom-0 rounded-b-[2px] border-t transition-[height] duration-700 ease-out motion-reduce:transition-none", { empty: "border-red-500/80 bg-red-300/70", low: "border-amber-500/80 bg-amber-300/70", normal: "border-cyan-400/80 bg-cyan-200/80" }[fuelTone(level)], waving ? "fuel-wave border-transparent" : level < FUEL_LEVEL_MAX && "fuel-ripple border-transparent");
+  return cn("pointer-events-none absolute inset-x-0 bottom-0 rounded-b-[2px] border-t transition-[height] duration-700 ease-out motion-reduce:transition-none", { empty: "border-red-500/80 bg-red-300/70", low: "border-amber-500/80 bg-amber-200/80", normal: "border-cyan-400/80 bg-cyan-200/80" }[fuelTone(level)], waving ? "fuel-wave border-transparent" : level < FUEL_LEVEL_MAX && "fuel-ripple border-transparent");
 }
 // 区画ごとに波の位置をずらし、全部の区画が同時にそろって動かないようにする（車両IDから0〜3秒の遅れを決める）。
 export function fuelRippleDelay(vehicleId: string) {

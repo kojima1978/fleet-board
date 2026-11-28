@@ -11,7 +11,8 @@ import { FuelLevelPicker } from "../components/fuel-controls";
 assert.deepEqual(FUEL_LEVEL_LABELS.map((_, level) => fuelTone(level)), ["empty", "low", "normal", "normal", "normal"], "Eは赤、1/4は黄色、1/2以上は通常の色にする");
 const picker = renderToStaticMarkup(<FuelLevelPicker value={null} onChange={() => {}} />);
 assert.equal((picker.match(/bg-red-300/g) ?? []).length, 1, "残量の目盛りはEだけを赤にする");
-assert.equal((picker.match(/bg-amber-300/g) ?? []).length, 1, "残量の目盛りは1/4だけを黄色にする");
+assert.equal((picker.match(/bg-amber-200\/80/g) ?? []).length, 1, "残量の目盛りは1/4だけを黄色にする");
+assert.equal((picker.match(/bg-cyan-200\/80/g) ?? []).length, 3, "残量の目盛りは1/2以上を配置図と同じ水色にする");
 
 FUEL_LEVEL_LABELS.forEach((label, level) => {
   const compact = renderToStaticMarkup(<FuelLevelLabel level={level} compact />);
