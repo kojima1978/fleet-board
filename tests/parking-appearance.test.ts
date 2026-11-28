@@ -66,6 +66,13 @@ for (const horizontal of [false, true]) {
   assert.match(keiTile, /<span class="grid w-fit grid-cols-\[auto_auto\][^"]*"><span class="[^"]*bg-slate-800/, "車両番号と普・軽の札は2列に固定して並べる");
   if (!horizontal) assert.match(keiTile, /<\/svg><\/span><span class="grid w-fit/, "縦向きの区画は車の絵を車両番号の段に入れず、最上段に1つだけ置く");
 }
+// 縦向きの区画は上下中央に寄せず上から順に置き、装備タグは下端にそろえる（装備や車両名の長さで高さがずれない）。
+{
+  const verticalTile = renderToStaticMarkup(vehicleTileContent({ ...vehicle, hasEtc: true }, false));
+  assert.match(verticalTile, /^<span class="absolute inset-0 flex [^"]*flex-col[^"]*@4xl:pt-4"/, "縦向きの区画は区画の上から決まった位置に置く");
+  assert.match(verticalTile, /<span class="mt-auto"><span class="[^"]*grid-cols-\[auto_auto\][^"]*" aria-label="装備：/, "装備タグは区画の下端にそろえる");
+  for (const name of ["プリウス", "ヴォクシー", "確認用テスト車"]) assert.match(renderToStaticMarkup(vehicleTileContent({ ...vehicle, name }, false)).match(/<b class="([^"]*)"/)?.[1] ?? "", /@4xl:leading-\[13px\]/, "車両名の行の高さは名前の長さによらず一定にする");
+}
 const dedicatedEmpty = renderToStaticMarkup(createElement(EmptyParkingSpotLabel, { spot: { ...spot, role: "DEDICATED", dedicatedVehicleName: "サクラ" } }));
 assert.match(dedicatedEmpty, />空き</, "専用区画も空いている状態を先に表示する");
 assert.match(dedicatedEmpty, />サクラ専用</, "空き専用区画の用途を文字で表示する");

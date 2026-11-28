@@ -1772,20 +1772,23 @@ const verticalNameSize = (name: string) => {
   if (width <= 7) return "text-[6px] @2xl:text-[7px] @4xl:text-[8px]";
   return "text-[6px] @2xl:text-[6px] @4xl:text-[7px]";
 };
+// 縦向きの車両名は行の高さを一定にし、文字を小さくした名前も同じ行の中で上下中央に置く（下のナンバーの位置がずれない）。
+const verticalNameLine = "leading-[10px] @2xl:leading-[12px] @4xl:leading-[13px]";
 const tileTagClass = "inline-block rounded px-1 text-[8px] font-black leading-tight @2xl:text-[10px]";
 export const vehicleTileContent = (vehicle: Vehicle, horizontal: boolean, offSite = false) => {
   const code = <span className="grid w-fit grid-cols-[auto_auto] items-center gap-0.5"><span className={cn(tileTagClass, horizontal && "@4xl:leading-[1.1]", "bg-slate-800 tracking-[0.06em] text-white")}>{vehicle.code}</span>{vehicle.isKei ? <span aria-label="軽自動車" title="軽自動車" className={cn(tileTagClass, horizontal && "@4xl:leading-[1.1]", "bg-yellow-300 text-yellow-950")}>軽</span> : <span aria-label="普通車" title="普通車" className={cn(tileTagClass, horizontal && "@4xl:leading-[1.1]", "bg-white text-slate-700 ring-1 ring-inset ring-slate-300")}>普</span>}</span>;
   // 文字の大きさの後に行の高さを指定する（cnは後から来た文字の大きさで行の高さを消すため）。
-  const name = <b className={cn("mt-px block max-w-full font-black text-slate-950", horizontal ? "break-words text-[9px] @2xl:text-[11px] @4xl:text-[12px]" : cn("truncate px-0.5", verticalNameSize(vehicle.name)), "leading-[1.1]")} title={horizontal ? undefined : vehicle.name}>{vehicle.name}</b>;
+  const name = <b className={cn("block max-w-full font-black text-slate-950", horizontal ? "mt-px break-words text-[9px] @2xl:text-[11px] @4xl:text-[12px] leading-[1.1]" : cn("truncate px-0.5", verticalNameSize(vehicle.name), verticalNameLine))} title={horizontal ? undefined : vehicle.name}>{vehicle.name}</b>;
   const plate = <small className={cn("block whitespace-nowrap font-bold tabular-nums text-slate-700", horizontal ? "text-[8px] @2xl:text-[10px] @4xl:text-[11px]" : "text-[8px] @2xl:text-[10px] @4xl:text-[12px]", "leading-none")}>{formatPlateShort(vehicle.plateNumber)}</small>;
   const maintenance = vehicle.status === "MAINTENANCE" ? <small className="mt-0.5 block whitespace-nowrap text-[7px] font-black text-amber-800">{offSite ? "車検で不在" : "整備中"}</small> : null;
-  const extra = maintenance ?? <VehicleEquipmentBadges vehicle={vehicle} compact />;
+  const extra = maintenance ?? <VehicleEquipmentBadges vehicle={vehicle} compact className="mt-0" />;
   // 上下に余白を取り、左上の区画番号と右下のガソリン残量の間に収める。
   // 横向きの区画は高さが足りないので、装備タグは上の帯（区画番号の右）に1行4列で置く。
   // 位置変更モードでは右上に移動用のつまみが出るので、重ならないよう装備タグを隠す。
   if (horizontal) return <span className="absolute inset-0 flex items-center gap-1 px-0.5 pb-1.5 pt-2 text-left @4xl:pb-[9px] @4xl:pt-[15px]"><span className="flex shrink-0 flex-col items-center"><VehicleMapIcon vehicle={vehicle} className="size-4" />{maintenance}</span><span className="min-w-0 leading-none">{code}{name}{plate}</span>{maintenance ? null : <VehicleEquipmentBadges vehicle={vehicle} compact row className="absolute right-0.5 top-0.5 mt-0 [[data-move-mode]_&]:invisible" />}</span>;
-  // 縦向きの区画は、車の絵をいつも最上段に1つだけ置き、「軽」の有無で位置がずれないようにする。
-  return <span className="flex min-w-0 flex-col items-center pb-1.5 pt-2 @4xl:pb-2.5 @4xl:pt-[22px]"><VehicleMapIcon vehicle={vehicle} className="size-3.5 @2xl:size-4" />{code}{name}{plate}{extra}</span>;
+  // 縦向きの区画は上下中央に寄せず、区画の上から順に置く。装備タグの有無や車両名の長さで中身の高さが変わっても、
+  // 車の絵・車両番号・車両名・ナンバーが隣の区画と同じ高さに並ぶ。装備タグ（整備中の表示）は下端のガソリン残量の上にそろえる。
+  return <span className="absolute inset-0 flex min-w-0 flex-col items-center pb-1.5 pt-2 @4xl:pb-3 @4xl:pt-4"><VehicleMapIcon vehicle={vehicle} className="size-3.5 @2xl:size-4" />{code}{name}{plate}<span className="mt-auto">{extra}</span></span>;
 };
 
 // 軽自動車は枠の大きさを変えずに車を8割に縮める。「軽」の札は車両番号の横に付ける。
