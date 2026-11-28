@@ -1813,7 +1813,7 @@ function useFuelChangeWave(request: FuelWaveRequest | null) {
   return wavingVehicleIds;
 }
 function FuelFill({ level, waving }: { level: number; waving: boolean }) {
-  return <span aria-hidden className={cn("pointer-events-none absolute inset-x-0 bottom-0 rounded-b-[2px] border-t transition-[height] duration-700 ease-out motion-reduce:transition-none", { empty: "border-red-500/80 bg-red-300/70", low: "border-amber-500/80 bg-amber-300/70", normal: "border-sky-400/80 bg-sky-200/70" }[fuelTone(level)], waving && "fuel-wave border-transparent")} style={{ height: fuelFillHeight(level) }} />;
+  return <span aria-hidden className={cn("pointer-events-none absolute inset-x-0 bottom-0 rounded-b-[2px] border-t transition-[height] duration-700 ease-out motion-reduce:transition-none", { empty: "border-red-500/80 bg-red-300/70", low: "border-amber-500/80 bg-amber-300/70", normal: "border-cyan-400/80 bg-cyan-200/80" }[fuelTone(level)], waving && "fuel-wave border-transparent")} style={{ height: fuelFillHeight(level) }} />;
 }
 function FuelLevelDialog({ vehicle, submitting, onClose, onSubmit }: { vehicle: Vehicle; submitting: boolean; onClose: () => void; onSubmit: (fuelLevel: number) => void }) {
   const [fuelLevel, setFuelLevel] = useState(vehicle.fuelLevel);
