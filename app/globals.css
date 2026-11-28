@@ -37,6 +37,21 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 @media (prefers-reduced-motion: reduce) { .fuel-wave { animation: none; mask-image: none; } }
 
+/* 満タン以外の液面は、高さ3pxの小さな波を3秒で1周期ずつ横へ流し続ける。遅れは区画ごとに変える。 */
+@keyframes fuel-ripple {
+  from { mask-position: 0 0, 0 3px; }
+  to { mask-position: 16px 0, 0 3px; }
+}
+.fuel-ripple {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 4' preserveAspectRatio='none'%3E%3Cpath d='M0 2Q5-2 10 2T20 2V4H0Z'/%3E%3C/svg%3E"), linear-gradient(#000, #000);
+  mask-repeat: repeat-x, no-repeat;
+  mask-size: 16px 3px, 100% 100%;
+  mask-position: 0 0, 0 3px;
+  animation: fuel-ripple 3s linear infinite;
+  animation-delay: var(--fuel-ripple-delay, 0s);
+}
+@media (prefers-reduced-motion: reduce) { .fuel-ripple { animation: none; mask-image: none; } }
+
 /* 返却できる空き区画の枠を緑で点滅させる（駐車中の青と区別する）。区画ごとに少しずつ遅らせ、左から右へ波のように流す。 */
 @keyframes spot-beckon {
   0%, 100% { border-color: #6ee7b7; background-color: #ecfdf5; box-shadow: 0 0 0 0 rgb(5 150 105 / 0); }

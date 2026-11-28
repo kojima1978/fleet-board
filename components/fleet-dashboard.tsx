@@ -18,7 +18,7 @@ import { blockingFrontSpots, canUseSpot, formatSpotLabel, isCustomerSpot, isDash
 import { ParkingSpotNotice } from "./customer-spot-notice";
 import { FrontSpotNotice } from "./front-spot-notice";
 import { RESERVATION_GRACE_MINUTES } from "@/lib/reservations";
-import { formatFuelLevel, fuelTone, needsReturnFuelReminder } from "@/lib/fuel-level";
+import { FUEL_LEVEL_MAX, formatFuelLevel, fuelTone, needsReturnFuelReminder } from "@/lib/fuel-level";
 import { scannerBridgeStatusText, useNfcBridge, useNfcBridgeHealth, useQrBridgeHealth, useScannerBridge, type NfcBridgeStatus, type ScannerEvent } from "@/lib/use-nfc-bridge";
 import { useKioskIdle, useKioskUserTimeout } from "@/lib/use-kiosk-idle";
 import { playNfcSound, prepareOperationSound } from "@/lib/nfc-sound";
@@ -1418,7 +1418,7 @@ function ParkingMap({ minionBlocked, selectedVehicleId, setSelectedVehicleId, da
         {visibleParkingSpots(data.spots).map((spot) => <div key={spot.id} data-parking-spot-id={spot.id} onDragOver={(e) => { if (isTarget(spot)) e.preventDefault(); }} onDrop={(e) => { e.preventDefault(); if (returningTrip) returnTo(spot); else if (returningMaintenance) returnMaintenanceTo(spot); else moveTo(spot); }} className={cn("absolute grid place-items-center rounded-[4px] border-2 transition", parkingSpotClass(spot, !!spot.vehicle && offSiteVehicleIds.has(spot.vehicle.id)), spot.vehicle && reservationByVehicle.has(spot.vehicle.id) && "border-violet-500", sendOutBadgeOf(spot.vehicle) && "border-amber-500", isTarget(spot) && "border-dashed border-emerald-400 bg-emerald-50", (canReturnTo(spot) || canReturnMaintenanceTo(spot)) && !needsParkingSpotWarning(spot, pickingVehicle) && "spot-beckon", pickingVehicle && !spot.vehicle && !canUseSpot(pickingVehicle, spot) && "cursor-not-allowed opacity-60", (spot.vehicle?.id === selectedVehicleId || spot.vehicle?.id === movingVehicleId) && "z-20 ring-4 ring-blue-700", spot.vehicle && changedVehicleIds.includes(spot.vehicle.id) && "z-10 ring-4 ring-amber-300 animate-pulse")} style={{ left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.width}%`, height: `${spot.height}%`, ...((canReturnTo(spot) || canReturnMaintenanceTo(spot)) ? { "--beckon-delay": `${(spot.x / 100) * 0.9}s` } as CSSProperties : {}) }}>
           {spot.vehicle && reservationByVehicle.has(spot.vehicle.id) ? <ParkingReservationBadge reservation={reservationByVehicle.get(spot.vehicle.id)!} /> : null}
           {sendOutBadgeOf(spot.vehicle) ? <MaintenanceSendOutBadge maintenance={sendOutBadgeOf(spot.vehicle)!} now={reservationNow} /> : null}
-          {spot.vehicle && spot.vehicle.fuelLevel !== null && !offSiteVehicleIds.has(spot.vehicle.id) ? <FuelFill level={spot.vehicle.fuelLevel} waving={wavingVehicleIds.includes(spot.vehicle.id)} /> : null}
+          {spot.vehicle && spot.vehicle.fuelLevel !== null && !offSiteVehicleIds.has(spot.vehicle.id) ? <FuelFill level={spot.vehicle.fuelLevel} waving={wavingVehicleIds.includes(spot.vehicle.id)} vehicleId={spot.vehicle.id} /> : null}
           <span className="absolute left-1 top-0.5 z-[1] text-[9px] font-black text-slate-500">{spot.code}{spotRoleTag(spot) ? <small className={cn("ml-0.5 text-[7px]", spot.role !== "HOLDING" && "hidden @2xl:inline", spot.role === "TEMPORARY" && "text-slate-400")}>{spotRoleTag(spot)}</small> : null}</span>
           {spot.vehicle ? <div className="relative size-full" data-move-mode={moveMode || undefined}>{moveMode ? <button type="button" draggable aria-pressed={spot.vehicle.id === movingVehicleId} title={`${spot.vehicle.name}を移動`} onClick={() => setMovingVehicleId((current) => current === spot.vehicle?.id ? null : spot.vehicle?.id ?? null)} onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setMovingVehicleId(spot.vehicle?.id ?? null); }} className="grid size-full cursor-grab place-content-center overflow-hidden text-center active:cursor-grabbing">{vehicleTileContent(spot.vehicle, spot.orientation === "horizontal", offSiteVehicleIds.has(spot.vehicle.id))}<GripVertical aria-hidden className="pointer-events-none absolute right-0.5 top-0.5 size-3.5 text-slate-400" /></button> : <button type="button" aria-pressed={spot.vehicle.id === selectedVehicleId} title={`${spot.vehicle.name}の詳細を表示`} onClick={() => selectVehicle(spot.vehicle?.id === selectedVehicleId ? null : spot.vehicle ?? null)} className={cn("grid size-full place-content-center overflow-hidden text-center", offSiteVehicleIds.has(spot.vehicle.id) && "opacity-60")}>{vehicleTileContent(spot.vehicle, spot.orientation === "horizontal", offSiteVehicleIds.has(spot.vehicle.id))}</button>}{spot.vehicle.fuelLevel !== null && !offSiteVehicleIds.has(spot.vehicle.id) ? <span className={cn("pointer-events-none absolute bottom-0.5 right-0.5 max-w-[calc(100%-0.25rem)] overflow-hidden whitespace-nowrap text-right text-[6px] font-black leading-none @2xl:text-[7px] @5xl:text-[8px]", { empty: "text-red-700", low: "text-amber-800", normal: "text-emerald-800" }[fuelTone(spot.vehicle.fuelLevel)])}><FuelLevelLabel level={spot.vehicle.fuelLevel} compact /></span> : null}</div> : <button type="button" title={`${formatSpotLabel(spot)}へ返却`} onClick={() => { if (returningTrip) returnTo(spot); else if (returningMaintenance) returnMaintenanceTo(spot); else if (moveMode) moveTo(spot); else openReturn(spot); }} className={cn("grid size-full place-content-center overflow-hidden text-center transition", pickingVehicle ? !isTarget(spot) && "cursor-default" : "hover:bg-slate-100/70")}><EmptyParkingSpotLabel spot={spot} /></button>}
         </div>)}
@@ -1812,8 +1812,18 @@ function useFuelChangeWave(request: FuelWaveRequest | null) {
   }, [wavingVehicleIds]);
   return wavingVehicleIds;
 }
-function FuelFill({ level, waving }: { level: number; waving: boolean }) {
-  return <span aria-hidden className={cn("pointer-events-none absolute inset-x-0 bottom-0 rounded-b-[2px] border-t transition-[height] duration-700 ease-out motion-reduce:transition-none", { empty: "border-red-500/80 bg-red-300/70", low: "border-amber-500/80 bg-amber-300/70", normal: "border-cyan-400/80 bg-cyan-200/80" }[fuelTone(level)], waving && "fuel-wave border-transparent")} style={{ height: fuelFillHeight(level) }} />;
+// 満タン以外の液面は、上端を小さくゆっくり波打たせ続ける。給油を記録した直後は大きめの波を優先する。
+export function fuelFillClass(level: number, waving: boolean) {
+  return cn("pointer-events-none absolute inset-x-0 bottom-0 rounded-b-[2px] border-t transition-[height] duration-700 ease-out motion-reduce:transition-none", { empty: "border-red-500/80 bg-red-300/70", low: "border-amber-500/80 bg-amber-300/70", normal: "border-cyan-400/80 bg-cyan-200/80" }[fuelTone(level)], waving ? "fuel-wave border-transparent" : level < FUEL_LEVEL_MAX && "fuel-ripple border-transparent");
+}
+// 区画ごとに波の位置をずらし、全部の区画が同時にそろって動かないようにする（車両IDから0〜3秒の遅れを決める）。
+export function fuelRippleDelay(vehicleId: string) {
+  let hash = 0;
+  for (const char of vehicleId) hash = (hash * 31 + char.charCodeAt(0)) % 3000;
+  return `-${hash}ms`;
+}
+function FuelFill({ level, waving, vehicleId }: { level: number; waving: boolean; vehicleId: string }) {
+  return <span aria-hidden className={fuelFillClass(level, waving)} style={{ height: fuelFillHeight(level), "--fuel-ripple-delay": fuelRippleDelay(vehicleId) } as CSSProperties} />;
 }
 function FuelLevelDialog({ vehicle, submitting, onClose, onSubmit }: { vehicle: Vehicle; submitting: boolean; onClose: () => void; onSubmit: (fuelLevel: number) => void }) {
   const [fuelLevel, setFuelLevel] = useState(vehicle.fuelLevel);

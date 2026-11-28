@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { EmptyParkingSpotLabel, parkingSpotClass, VehicleMapIcon, vehicleTileContent, visibleParkingSpots } from "../components/fleet-dashboard";
+import { EmptyParkingSpotLabel, fuelFillClass, fuelRippleDelay, parkingSpotClass, VehicleMapIcon, vehicleTileContent, visibleParkingSpots } from "../components/fleet-dashboard";
 import { ParkingSpotNotice } from "../components/customer-spot-notice";
 import { FrontSpotNotice } from "../components/front-spot-notice";
 import { settingsSpotStateClass, settingsSpotStateLabel, settingsSpotVehicleClassLabel } from "../components/spot-role-settings";
@@ -152,3 +152,15 @@ for (const code of ["22", "23", "24", "26", "32", "08", "13", "17"]) assert.equa
 const migrationDefaults = Object.fromEntries([...readFileSync("prisma/migrations/20261109100000_default_front_spots/migration.sql", "utf8").matchAll(/\('(\d+)', ARRAY\[([^\]]*)\]\)/g)].map(([, code, list]) => [code, list.match(/\d+/g) ?? []]));
 assert.deepEqual(migrationDefaults, Object.fromEntries(Object.entries(defaultFrontSpotCodes).map(([code, fronts]) => [code, [...fronts]])), "既存DB向けの移行と初期値の表をそろえる");
 console.log("Parking appearance tests passed: empty background only, equipment tags in tiles, unchanged borders/occupied/maintenance/off-site, customer spot notice, front spot notice, default front spots");
+
+// 満タン以外の液面は小さく波打ち続け、満タンは平らなまま。給油直後の大きな波が優先される。
+for (const level of [0, 1, 2, 3]) assert.match(fuelFillClass(level, false), /(^| )fuel-ripple( |$)/);
+assert.doesNotMatch(fuelFillClass(4, false), /fuel-ripple|fuel-wave/);
+assert.match(fuelFillClass(2, true), /(^| )fuel-wave( |$)/);
+assert.doesNotMatch(fuelFillClass(2, true), /fuel-ripple/);
+assert.equal(fuelRippleDelay("vehicle-a"), fuelRippleDelay("vehicle-a"));
+assert.notEqual(fuelRippleDelay("vehicle-a"), fuelRippleDelay("vehicle-b"));
+assert.match(fuelRippleDelay("vehicle-a"), /^-\d{1,4}ms$/);
+const globalsCss = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+assert.match(globalsCss, /\.fuel-ripple \{[^}]*animation: fuel-ripple 3s linear infinite;[^}]*var\(--fuel-ripple-delay/);
+assert.match(globalsCss, /prefers-reduced-motion: reduce\) \{ \.fuel-ripple \{ animation: none; mask-image: none; \} \}/);
