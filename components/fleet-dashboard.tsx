@@ -1786,9 +1786,10 @@ export const vehicleTileContent = (vehicle: Vehicle, horizontal: boolean, offSit
   // 横向きの区画は高さが足りないので、装備タグは上の帯（区画番号の右）に1行4列で置く。
   // 位置変更モードでは右上に移動用のつまみが出るので、重ならないよう装備タグを隠す。
   if (horizontal) return <span className="absolute inset-0 flex items-center gap-1 px-0.5 pb-1.5 pt-2 text-left @4xl:pb-[9px] @4xl:pt-[15px]"><span className="flex shrink-0 flex-col items-center"><VehicleMapIcon vehicle={vehicle} className="size-4" />{maintenance}</span><span className="min-w-0 leading-none">{code}{name}{plate}</span>{maintenance ? null : <VehicleEquipmentBadges vehicle={vehicle} compact row className="absolute right-0.5 top-0.5 mt-0 [[data-move-mode]_&]:invisible" />}</span>;
-  // 縦向きの区画は上下中央に寄せず、区画の上から順に置く。装備タグの有無や車両名の長さで中身の高さが変わっても、
-  // 車の絵・車両番号・車両名・ナンバーが隣の区画と同じ高さに並ぶ。装備タグ（整備中の表示）は下端のガソリン残量の上にそろえる。
-  return <span className="absolute inset-0 flex min-w-0 flex-col items-center pb-1.5 pt-2 @4xl:pb-3 @4xl:pt-4"><VehicleMapIcon vehicle={vehicle} className="size-3.5 @2xl:size-4" />{code}{name}{plate}<span className="mt-auto">{extra}</span></span>;
+  // 縦向きの区画は、車の絵だけを区画の上に置き、車両番号・車両名・ナンバー・装備タグは下端のガソリン残量の上にまとめる。
+  // 装備タグ（整備中の表示）の段は2行ぶんの高さを常に取るので、装備の有無や車両名の長さに関係なく隣の区画と同じ高さに並び、
+  // 画面が広く区画が高いときもナンバーと装備タグの間が空きすぎない。
+  return <span className="absolute inset-0 flex min-w-0 flex-col items-center pb-1.5 pt-2 @4xl:pb-3 @4xl:pt-4"><VehicleMapIcon vehicle={vehicle} className="size-3.5 @2xl:size-4" /><span className="mt-auto flex w-full min-w-0 flex-col items-center">{code}{name}{plate}</span><span className="block h-[15px] @2xl:h-[17px]">{extra}</span></span>;
 };
 
 // 軽自動車は枠の大きさを変えずに車を8割に縮める。「軽」の札は車両番号の横に付ける。
