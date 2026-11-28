@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Fuel, LoaderCircle, Play, RotateCcw, Save, Trash2, Upload, Volume2, VolumeX } from "lucide-react";
+import { Check, Fuel, LoaderCircle, Play, RotateCcw, Save, Trash2, Undo2, Upload, Volume2, VolumeX } from "lucide-react";
 import { FUEL_NOTICE_AUDIO_MAX_BYTES, FUEL_NOTICE_DISPLAY_MODES, fuelNoticeDisplayModeLabel, type FuelNoticeDisplayMode, type FuelNoticePhase, type FuelReturnNotice } from "@/lib/fuel-return-notice";
 import { formatFuelLevel } from "@/lib/fuel-level";
 import { Button, Card, cn } from "./ui";
 import { playGuidancePreview } from "@/lib/guidance-audio-priority";
+import { fuelNoticeAudioSample, loadGuidanceAudioSample } from "@/lib/guidance-default-audio";
 import { FuelThankYouSettings } from "./fuel-thank-you-settings";
 
 type UploadFile = { fileName: string; base64: string };
@@ -80,6 +81,8 @@ function NoticeEditor({ notice, onSaved }: { notice: FuelReturnNotice; onSaved: 
   const audioUrl = audio ? `data:audio/${audio.fileName.toLowerCase().endsWith(".wav") ? "wav" : "mpeg"};base64,${audio.base64}` : audio === null ? null : notice.audioUrl;
   const audioName = reading ? "読み込み中…" : audio?.fileName ?? (audio === null ? "端末の読み上げを使用" : notice.audioName ?? "端末の読み上げを使用");
   const dirty = message !== notice.message || displayMode !== notice.displayMode || audioEnabled !== notice.audioEnabled || audio !== undefined;
+  const sample = fuelNoticeAudioSample(notice.phase, notice.level);
+  const currentAudioName = audio === undefined ? notice.audioName : audio?.fileName ?? null;
 
   useEffect(() => { const element = player.current; return () => { element?.pause(); }; }, [audioUrl]);
 
@@ -92,6 +95,14 @@ function NoticeEditor({ notice, onSaved }: { notice: FuelReturnNotice; onSaved: 
       const dataUrl = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(file); });
       setAudio({ fileName: file.name.slice(0, 100), base64: dataUrl.slice(dataUrl.indexOf(",") + 1) });
     } catch { setError("音声ファイルを読み込めませんでした"); }
+    finally { setReading(false); }
+  }
+
+  async function chooseSample() {
+    if (!sample) return;
+    setError(""); player.current?.pause(); setReading(true);
+    try { setAudio(await loadGuidanceAudioSample(sample)); }
+    catch { setError("初期の音声を読み込めませんでした"); }
     finally { setReading(false); }
   }
 
@@ -117,7 +128,7 @@ function NoticeEditor({ notice, onSaved }: { notice: FuelReturnNotice; onSaved: 
         <p className={cn("mt-2 text-[11px] font-bold", dragging ? "text-blue-700" : "text-slate-500")}>{dragging ? "ここにドロップしてください" : "MP3・WAVをここへドロップ、またはファイルを選択"}</p>
         {audio !== undefined ? <p className="mt-2 text-[11px] font-bold text-amber-700">保存すると反映されます</p> : null}
         <input ref={input} type="file" accept=".mp3,.wav,audio/mpeg,audio/wav" disabled={busy || reading} onChange={(event) => void choose(event.target.files?.[0])} className="sr-only" />
-        <div className="mt-auto flex flex-wrap gap-2 pt-3"><Button type="button" variant="ghost" className="min-h-9 rounded-lg px-3 text-xs" disabled={busy || reading} onClick={() => input.current?.click()}><Upload className="size-3.5" />{audioUrl ? "音声を変更" : "音声を選択"}</Button>{audioUrl ? <Button type="button" variant="ghost" className="min-h-9 rounded-lg px-3 text-xs" disabled={busy || reading} onClick={() => { if (player.current) { void playGuidancePreview(player.current, "fuel").catch(() => setError("音声を再生できません。MP3・WAVの内容をご確認ください。")); } }}><Play className="size-3.5" />試聴</Button> : null}{audioUrl ? <Button type="button" variant="ghost" className="min-h-9 rounded-lg px-3 text-xs" disabled={busy || reading} onClick={() => { player.current?.pause(); setAudio(null); if (input.current) input.current.value = ""; }}><Trash2 className="size-3.5" />外す</Button> : null}</div>
+        <div className="mt-auto flex flex-wrap gap-2 pt-3"><Button type="button" variant="ghost" className="min-h-9 rounded-lg px-3 text-xs" disabled={busy || reading} onClick={() => input.current?.click()}><Upload className="size-3.5" />{audioUrl ? "音声を変更" : "音声を選択"}</Button>{audioUrl ? <Button type="button" variant="ghost" className="min-h-9 rounded-lg px-3 text-xs" disabled={busy || reading} onClick={() => { if (player.current) { void playGuidancePreview(player.current, "fuel").catch(() => setError("音声を再生できません。MP3・WAVの内容をご確認ください。")); } }}><Play className="size-3.5" />試聴</Button> : null}{audioUrl ? <Button type="button" variant="ghost" className="min-h-9 rounded-lg px-3 text-xs" disabled={busy || reading} onClick={() => { player.current?.pause(); setAudio(null); if (input.current) input.current.value = ""; }}><Trash2 className="size-3.5" />外す</Button> : null}{sample && currentAudioName !== sample.fileName ? <Button type="button" variant="ghost" className="min-h-9 rounded-lg px-3 text-xs" disabled={busy || reading} onClick={() => void chooseSample()}><Undo2 className="size-3.5" />初期の音声</Button> : null}</div>
         {audioUrl ? <audio ref={player} preload="none" src={audioUrl} className="hidden" /> : null}
       </div></div>
     </div>

@@ -1752,21 +1752,36 @@ export function MaintenanceReturnDialog({ vehicle, spot, spots, mutate, currentE
   </div></DialogShell>;
 }
 
-// キーは車両番号順に保管しているため、車両名の上に車両番号を小さな札のように添える。狭い配置図では車の絵と同じ行に並べる。
-// 横向きの区画は高さが低いので、車の絵を左、車両番号・車両名・ナンバーを右に並べた2列にする。狭い配置図では右下の残量と重ならないよう左に寄せる。
-const vehicleTileContent = (vehicle: Vehicle, horizontal: boolean, offSite = false) => {
-  const code = <span className="inline-block rounded-full border border-slate-300 bg-white/80 px-1 text-[8px] font-black leading-tight tracking-[0.08em] text-slate-700 @2xl:px-1.5 @2xl:text-[10px]">{vehicle.code}</span>;
-  const plate = formatPlateShort(vehicle.plateNumber);
+// 区画内は「車両番号の札（軽自動車は横に「軽」の札）」「車両名」「ナンバー」の順に並べる。
+// 車両番号は濃い札にして地図上で探しやすくし、車両名を最も大きく表示する。収まらない車両名は折り返す。
+// ナンバーは数字の幅をそろえ、似た番号を見比べやすくする。
+// 横向きの区画は高さが低いので、車の絵を左、文字を右に並べた2列にする。6文字の車両名が1行に収まるよう区画の幅いっぱいを使う。
+const tileTagClass = "inline-block rounded px-1 text-[8px] font-black leading-tight @2xl:text-[10px]";
+export const vehicleTileContent = (vehicle: Vehicle, horizontal: boolean, offSite = false) => {
+  const code = <span className="flex items-center gap-0.5"><span className={cn(tileTagClass, horizontal && "@4xl:leading-[1.1]", "bg-slate-800 tracking-[0.06em] text-white")}>{vehicle.code}</span>{vehicle.isKei ? <span aria-label="軽自動車" title="軽自動車" className={cn(tileTagClass, horizontal && "@4xl:leading-[1.1]", "bg-yellow-300 text-yellow-950")}>軽</span> : null}</span>;
+  // 文字の大きさの後に行の高さを指定する（cnは後から来た文字の大きさで行の高さを消すため）。
+  const name = <b className={cn("mt-px block max-w-full break-words font-black text-slate-950", horizontal ? "text-[9px] @2xl:text-[11px] @4xl:text-[12px]" : "px-1 text-[9px] @2xl:text-[11px] @4xl:text-[13px]", "leading-[1.1]")}>{vehicle.name}</b>;
+  const plate = <small className={cn("block whitespace-nowrap font-bold tabular-nums text-slate-700", horizontal ? "text-[8px] @2xl:text-[10px] @4xl:text-[11px]" : "text-[8px] @2xl:text-[10px] @4xl:text-[12px]", "leading-none")}>{formatPlateShort(vehicle.plateNumber)}</small>;
   const extra = vehicle.status === "MAINTENANCE" ? <small className="mt-0.5 block whitespace-nowrap text-[7px] font-black text-amber-800">{offSite ? "車検で不在" : "整備中"}</small> : <VehicleEquipmentBadges vehicle={vehicle} compact />;
-  if (horizontal) return <span className="flex w-full max-w-full items-center gap-1 px-1 text-left @4xl:w-auto @4xl:gap-1.5 @4xl:px-1.5"><span className="flex shrink-0 flex-col items-center"><VehicleMapIcon vehicle={vehicle} className="size-4 @4xl:size-6" />{extra}</span><span className="min-w-0 text-[8px] leading-none">{code}<b className="block truncate text-[8px] leading-tight @2xl:text-[10px] @4xl:mt-0.5 @4xl:text-[11px]">{vehicle.name}</b><small className="block whitespace-nowrap text-[7px] font-bold leading-none text-slate-500 @2xl:text-[8px] @4xl:text-[9px]">{plate}</small></span></span>;
-  return <><span className="flex items-center justify-center gap-1 @4xl:flex-col @4xl:gap-0.5"><VehicleMapIcon vehicle={vehicle} className="size-3.5 @2xl:size-4 @4xl:size-5" />{code}</span><b className="mt-0.5 block max-w-full truncate px-1 text-[8px] leading-tight @2xl:text-[10px]">{vehicle.name}</b><small className="mt-0.5 block whitespace-nowrap text-[7px] font-bold leading-none text-slate-500 @2xl:text-[8px]">{plate}</small>{extra}</>;
+  // 上下に余白を取り、左上の区画番号と右下のガソリン残量の間に収める。
+  if (horizontal) return <span className="absolute inset-0 flex items-center gap-1 px-0.5 pb-1.5 pt-2 text-left @4xl:pb-[9px] @4xl:pt-[15px]"><span className="flex shrink-0 flex-col items-center"><VehicleMapIcon vehicle={vehicle} className="size-4" layout="horizontal" />{extra}</span><span className="min-w-0 leading-none">{code}{name}{plate}</span></span>;
+  return <span className="flex min-w-0 flex-col items-center pb-1.5 pt-2 @4xl:pb-2.5 @4xl:pt-[22px]"><span className="flex flex-wrap items-center justify-center gap-0.5"><VehicleMapIcon vehicle={vehicle} className="size-3.5 @2xl:size-4" />{code}</span>{name}{plate}{extra}</span>;
 };
 
-// 軽自動車は枠の大きさを変えずに車を8割に縮め、右下に「軽」マークを付ける。
+// 軽自動車は枠の大きさを変えずに車を8割に縮める。「軽」の札は車両番号の横に付ける。
 // バックモニター付は左上にカメラ、スタッドレス装着中は右上に雪のマークを付ける。
-export function VehicleMapIcon({ vehicle, className }: { vehicle: Pick<Vehicle, "color" | "hasBackMonitor" | "hasWinterTires" | "isKei">; className: string }) {
+// 小さくても見分けられるよう、カメラは緑（車両詳細の「バックモニター」と同じ色）、雪は青にする。
+// 印がはみ出す分だけアイコンの外側に余白を取り、隣の車両番号や区画の端に重ねない。
+// 横向きの区画は文字の幅に余裕がないため、印を一回り小さくして車両名を1行に収める。
+const equipmentMarkStyles = {
+  vertical: { mark: "-top-1.5 size-3.5 @4xl:size-4", glyph: "size-2.5 @4xl:size-3", left: "-left-1.5", right: "-right-1.5", space: { left: "ml-1.5", right: "mr-1.5", top: "mt-1.5" } },
+  horizontal: { mark: "-top-1 size-3 @4xl:size-3.5", glyph: "size-2 @4xl:size-2.5", left: "-left-1", right: "-right-1", space: { left: "ml-0.5", right: "", top: "mt-1" } },
+};
+const equipmentMarkClass = "absolute grid place-items-center rounded-full border shadow-sm";
+export function VehicleMapIcon({ vehicle, className, layout = "vertical" }: { vehicle: Pick<Vehicle, "color" | "hasBackMonitor" | "hasWinterTires" | "isKei">; className: string; layout?: keyof typeof equipmentMarkStyles }) {
+  const marks = equipmentMarkStyles[layout];
   // 区画の背景やガソリンの液面の色に車の色が左右されないよう、アイコンの後ろに白い丸い台を敷く。
-  return <span className="relative inline-grid shrink-0 place-items-center"><span className="grid place-items-center rounded-full bg-white p-0.5 ring-1 ring-slate-300"><CarFront className={cn(className, vehicle.isKei && "scale-80")} style={vehicleIconStyle(vehicle.color)} /></span>{vehicle.isKei ? <span aria-label="軽自動車" title="軽自動車" className="absolute -bottom-1 -right-1.5 grid size-3 place-items-center rounded-sm bg-yellow-300 text-[7px] font-black leading-none text-yellow-950 @4xl:size-3.5 @4xl:text-[8px]">軽</span> : null}{vehicle.hasBackMonitor ? <span aria-label="バックモニター付" title="バックモニター付" className="absolute -left-1.5 -top-1.5 grid size-3 place-items-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-sm @4xl:size-3.5"><Camera aria-hidden className="size-2 @4xl:size-2.5" /></span> : null}{vehicle.hasWinterTires ? <span aria-label="スタッドレスタイヤ装着中" title="スタッドレスタイヤ装着中" className="absolute -right-1.5 -top-1.5 grid size-3 place-items-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-sm @4xl:size-3.5"><Snowflake aria-hidden className="size-2 @4xl:size-2.5" /></span> : null}</span>;
+  return <span className={cn("relative inline-grid shrink-0 place-items-center", vehicle.hasBackMonitor && marks.space.left, vehicle.hasWinterTires && marks.space.right, (vehicle.hasBackMonitor || vehicle.hasWinterTires) && marks.space.top)}><span className="grid place-items-center rounded-full bg-white p-0.5 ring-1 ring-slate-300"><CarFront className={cn(className, vehicle.isKei && "scale-80")} style={vehicleIconStyle(vehicle.color)} /></span>{vehicle.hasBackMonitor ? <span aria-label="バックモニター付" title="バックモニター付" className={cn(equipmentMarkClass, marks.mark, marks.left, "border-emerald-600 bg-emerald-50 text-emerald-700")}><Camera aria-hidden className={marks.glyph} /></span> : null}{vehicle.hasWinterTires ? <span aria-label="スタッドレスタイヤ装着中" title="スタッドレスタイヤ装着中" className={cn(equipmentMarkClass, marks.mark, marks.right, "border-sky-600 bg-sky-50 text-sky-700")}><Snowflake aria-hidden className={marks.glyph} /></span> : null}</span>;
 }
 const fuelFillHeight = (level: number) => `${Math.max(6, level * 25)}%`;
 // 残量が変わった車両だけ、少しの間タイルの液面を波打たせる。初回表示では揺らさない。

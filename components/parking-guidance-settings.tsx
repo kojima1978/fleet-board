@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, LoaderCircle, MapPin, Play, RotateCcw, Save, Trash2, Upload, Volume2, VolumeX } from "lucide-react";
+import { Check, LoaderCircle, MapPin, Play, RotateCcw, Save, Trash2, Undo2, Upload, Volume2, VolumeX } from "lucide-react";
 import { PARKING_GUIDANCE_AUDIO_MAX_BYTES, parkingGuidanceLabels, type ParkingGuidanceEvent, type ParkingGuidanceSetting } from "@/lib/parking-guidance";
 import { refreshParkingGuidance } from "@/lib/use-parking-guidance";
 import { beginParkingGuidance, playGuidancePreview } from "@/lib/guidance-audio-priority";
+import { loadGuidanceAudioSample, parkingAudioSample } from "@/lib/guidance-default-audio";
 import { Button, Card, cn } from "./ui";
 
 type UploadFile = { fileName: string; base64: string };
@@ -25,7 +26,7 @@ export function ParkingGuidanceSettings() {
     return () => controller.abort();
   }, [reload]);
   async function resetDefaults() {
-    if (!window.confirm("駐車案内5項目の文面・ON/OFF・音声を初期設定へ戻します。未保存の変更も破棄されます。よろしいですか？")) return;
+    if (!window.confirm(`駐車案内${settings.length}項目の文面・ON/OFF・音声を初期設定へ戻します。未保存の変更も破棄されます。よろしいですか？`)) return;
     setResetting(true); setError("");
     try {
       const response = await fetch("/api/settings/parking-guidance/reset", { method: "POST" });
@@ -62,6 +63,15 @@ function GuidanceEditor({ setting, onSaved }: { setting: ParkingGuidanceSetting;
   }, [audioUrl]);
   const audioName = reading ? "読み込み中…" : audio?.fileName ?? (audio === null ? "端末の読み上げを使用" : setting.audioName ?? "端末の読み上げを使用");
   const dirty = enabled !== setting.enabled || message !== setting.message || audio !== undefined;
+  const sample = parkingAudioSample(setting.event);
+  const currentAudioName = audio === undefined ? setting.audioName : audio?.fileName ?? null;
+  async function chooseSample() {
+    if (!sample) return;
+    setError(""); player.current?.pause(); setReading(true);
+    try { setAudio(await loadGuidanceAudioSample(sample)); }
+    catch { setError("初期の音声を読み込めませんでした"); }
+    finally { setReading(false); }
+  }
   async function choose(file?: File) {
     setError("");
     if (!file) return;
@@ -97,7 +107,7 @@ function GuidanceEditor({ setting, onSaved }: { setting: ParkingGuidanceSetting;
   };
   return <form data-kiosk-auto-home-blocked={dirty || busy || reading} onSubmit={(event) => { event.preventDefault(); if (dirty && message.trim()) void save(); }} className="px-4 py-5 sm:px-5">
     <div className="mb-4 flex items-start gap-3"><div className="mr-auto min-w-0"><h4 className="text-sm font-black text-slate-900">{parkingGuidanceLabels[setting.event].label}</h4><p className="mt-1 text-xs text-slate-500">{parkingGuidanceLabels[setting.event].hint}</p></div><button type="button" role="switch" aria-checked={enabled} disabled={busy} onClick={() => setEnabled((value) => !value)} className={cn("flex min-h-9 w-28 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border px-2 text-xs font-bold", enabled ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-500")}><span className={cn("relative h-4 w-7 shrink-0 rounded-full", enabled ? "bg-blue-600" : "bg-slate-200")}><span className={cn("absolute top-0.5 size-3 rounded-full bg-white shadow-sm transition", enabled ? "left-[14px]" : "left-0.5")} /></span><span>{enabled ? "案内あり" : "案内なし"}</span></button></div>
-    <div className="grid gap-4 lg:grid-cols-2"><div><p className="mb-1.5 text-xs font-bold text-slate-600">読み上げ文</p><textarea aria-label="読み上げ文" required maxLength={300} value={message} disabled={busy} onChange={(event) => setMessage(event.target.value)} className="h-40 w-full resize-none rounded-xl border border-slate-300 p-3 text-sm leading-6 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200" /></div><div><p className="mb-1.5 text-xs font-bold text-slate-600">音声ファイル（任意）</p><div onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setDragging(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }} onDrop={(event) => { event.preventDefault(); setDragging(false); const files = [...event.dataTransfer.files]; if (files.length === 1) void choose(files[0]); else setError("音声ファイルを1つだけドロップしてください"); }} className={cn("flex h-40 flex-col rounded-xl border border-slate-200 bg-slate-50/70 p-3", dragging && "border-blue-400 bg-blue-50 ring-2 ring-blue-100")}><div className="flex items-center gap-2"><span className="grid size-8 place-items-center rounded-lg bg-white text-slate-500 shadow-sm">{audioUrl ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}</span><span className="min-w-0 flex-1 truncate text-xs font-bold text-slate-700">{audioName}</span></div><p className="mt-2 text-[11px] font-bold text-slate-500">MP3・WAVをドロップ、またはファイルを選択</p><input ref={input} type="file" accept=".mp3,.wav,audio/mpeg,audio/wav" className="sr-only" onChange={(event) => void choose(event.target.files?.[0])} /><div className="mt-auto flex flex-wrap gap-2"><Button type="button" variant="ghost" className="min-h-9 px-3 text-xs" onClick={() => input.current?.click()}><Upload className="size-3.5" />{audioUrl ? "音声を変更" : "音声を選択"}</Button><Button type="button" variant="ghost" className="min-h-9 px-3 text-xs" onClick={preview}><Play className="size-3.5" />試聴</Button>{audioUrl ? <Button type="button" variant="ghost" className="min-h-9 px-3 text-xs" onClick={() => { player.current?.pause(); setAudio(null); }}><Trash2 className="size-3.5" />外す</Button> : null}</div>{audioUrl ? <audio ref={player} preload="none" src={audioUrl} className="hidden" /> : null}</div></div></div>
+    <div className="grid gap-4 lg:grid-cols-2"><div><p className="mb-1.5 text-xs font-bold text-slate-600">読み上げ文</p><textarea aria-label="読み上げ文" required maxLength={300} value={message} disabled={busy} onChange={(event) => setMessage(event.target.value)} className="h-40 w-full resize-none rounded-xl border border-slate-300 p-3 text-sm leading-6 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200" /></div><div><p className="mb-1.5 text-xs font-bold text-slate-600">音声ファイル（任意）</p><div onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setDragging(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }} onDrop={(event) => { event.preventDefault(); setDragging(false); const files = [...event.dataTransfer.files]; if (files.length === 1) void choose(files[0]); else setError("音声ファイルを1つだけドロップしてください"); }} className={cn("flex h-40 flex-col rounded-xl border border-slate-200 bg-slate-50/70 p-3", dragging && "border-blue-400 bg-blue-50 ring-2 ring-blue-100")}><div className="flex items-center gap-2"><span className="grid size-8 place-items-center rounded-lg bg-white text-slate-500 shadow-sm">{audioUrl ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}</span><span className="min-w-0 flex-1 truncate text-xs font-bold text-slate-700">{audioName}</span></div><p className="mt-2 text-[11px] font-bold text-slate-500">MP3・WAVをドロップ、またはファイルを選択</p>{audio !== undefined ? <p className="mt-1 text-[11px] font-bold text-amber-700">保存すると反映されます</p> : null}<input ref={input} type="file" accept=".mp3,.wav,audio/mpeg,audio/wav" className="sr-only" onChange={(event) => void choose(event.target.files?.[0])} /><div className="mt-auto flex flex-wrap gap-2"><Button type="button" variant="ghost" className="min-h-9 px-3 text-xs" onClick={() => input.current?.click()}><Upload className="size-3.5" />{audioUrl ? "音声を変更" : "音声を選択"}</Button><Button type="button" variant="ghost" className="min-h-9 px-3 text-xs" onClick={preview}><Play className="size-3.5" />試聴</Button>{audioUrl ? <Button type="button" variant="ghost" className="min-h-9 px-3 text-xs" onClick={() => { player.current?.pause(); setAudio(null); }}><Trash2 className="size-3.5" />外す</Button> : null}{sample && currentAudioName !== sample.fileName ? <Button type="button" variant="ghost" className="min-h-9 px-3 text-xs" disabled={busy || reading} onClick={() => void chooseSample()}><Undo2 className="size-3.5" />初期の音声</Button> : null}</div>{audioUrl ? <audio ref={player} preload="none" src={audioUrl} className="hidden" /> : null}</div></div></div>
     <div className="mt-4 flex items-center gap-3 border-t border-slate-100 pt-4">{error ? <p role="alert" className="mr-auto text-sm font-bold text-rose-700">{error}</p> : <p className="mr-auto flex items-center gap-1.5 text-xs font-bold text-slate-500">{dirty ? "未保存の変更があります" : <><Check className="size-4 text-emerald-600" />保存済み</>}</p>}<Button type="submit" disabled={busy || reading || !dirty || !message.trim()}><Save className="size-4" />{busy ? "保存中…" : "この案内を保存"}</Button></div>
   </form>;
 }

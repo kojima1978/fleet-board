@@ -5,21 +5,11 @@ import { defaultFuelReturnNotice, FUEL_NOTICE_LEVELS, type FuelNoticeLevel, type
 import { FUEL_THANK_YOU_DEFAULT_MESSAGE } from "../lib/fuel-thank-you";
 import { defaultParkingGuidanceSetting, PARKING_GUIDANCE_EVENTS, type ParkingGuidanceEvent } from "../lib/parking-guidance";
 
-type AudioSample = { fileName: string; mime: "audio/mpeg" | "audio/wav" };
+import { fuelNoticeAudioSample, guidanceAudioSamples as audioSamples, parkingAudioSample, type GuidanceAudioSample as AudioSample } from "../lib/guidance-default-audio";
+
 type GuidanceDb = PrismaClient | Prisma.TransactionClient;
 
-const audioSamples = {
-  parkingBlocked: { fileName: "parking-blocked-warning.mp3", mime: "audio/mpeg" },
-  parkingCustomer: { fileName: "parking-customer-spot.mp3", mime: "audio/mpeg" },
-  fuelReturnLow: { fileName: "fuel-return-low-reminder.wav", mime: "audio/wav" },
-  fuelReturnEmpty: { fileName: "fuel-return-empty-reminder.mp3", mime: "audio/mpeg" },
-  fuelThankYou: { fileName: "fuel-refueled-thank-you.wav", mime: "audio/wav" },
-} satisfies Record<string, AudioSample>;
-
 export const guidanceDefaultAudioFiles = Object.values(audioSamples).map((item) => item.fileName);
-
-const parkingAudioSample = (event: ParkingGuidanceEvent) =>
-  event === "BLOCKED_OUT" || event === "BLOCKED_IN" ? audioSamples.parkingBlocked : event === "CUSTOMER_SPOT" ? audioSamples.parkingCustomer : null;
 
 const parkingMessageOverrides: Partial<Record<ParkingGuidanceEvent, string>> = {
   BLOCKED_OUT: "手前に車があるため出庫できません。",
@@ -69,7 +59,7 @@ async function createFuelDefaults(prisma: PrismaClient, phase: FuelNoticePhase) 
       : await prisma.fuelReturnNotice.findUnique({ where: { level }, select: { level: true } });
     if (exists) continue;
     const setting = defaultFuelReturnNotice(level, phase);
-    const sample = phase === "RETURN" ? level === 1 ? audioSamples.fuelReturnLow : level === 0 ? audioSamples.fuelReturnEmpty : null : null;
+    const sample = fuelNoticeAudioSample(phase, level);
     const common = {
       level,
       displayMode: setting.displayMode,
@@ -124,7 +114,7 @@ export async function resetParkingGuidanceDefaults(db: GuidanceDb) {
 export async function resetFuelNoticeDefaults(db: GuidanceDb, phase: FuelNoticePhase) {
   for (const level of FUEL_NOTICE_LEVELS) {
     const setting = defaultFuelReturnNotice(level, phase);
-    const sample = phase === "RETURN" ? level === 1 ? audioSamples.fuelReturnLow : level === 0 ? audioSamples.fuelReturnEmpty : null : null;
+    const sample = fuelNoticeAudioSample(phase, level);
     const audioId = sample ? (await createAudio(db, sample)).id : null;
     const common = {
       displayMode: setting.displayMode,

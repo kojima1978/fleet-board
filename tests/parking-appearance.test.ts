@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { EmptyParkingSpotLabel, isWinterTireSeason, parkingSpotClass, VehicleMapIcon, visibleParkingSpots } from "../components/fleet-dashboard";
+import { EmptyParkingSpotLabel, isWinterTireSeason, parkingSpotClass, VehicleMapIcon, vehicleTileContent, visibleParkingSpots } from "../components/fleet-dashboard";
 import { ParkingSpotNotice } from "../components/customer-spot-notice";
 import { FrontSpotNotice } from "../components/front-spot-notice";
 import { settingsSpotStateClass, settingsSpotStateLabel, settingsSpotVehicleClassLabel } from "../components/spot-role-settings";
@@ -30,9 +30,19 @@ assert.doesNotMatch(normalIcon, /軽自動車|scale-80/, "普通車は縮めず�
 assert.doesNotMatch(normalIcon, /バックモニター付/, "バックモニターなしの車にはカメラマークを付けない");
 const backMonitorIcon = renderToStaticMarkup(createElement(VehicleMapIcon, { vehicle: { color: "#2563eb", hasBackMonitor: true, hasWinterTires: false, isKei: false }, className: "size-4" }));
 assert.match(backMonitorIcon, /aria-label="バックモニター付"/, "バックモニター付の車アイコンへカメラマークを付ける");
+assert.match(backMonitorIcon, /aria-label="バックモニター付"[^>]*class="[^"]*bg-emerald-50[^"]*text-emerald-700/, "カメラマークは車両詳細の「バックモニター」と同じ緑にする");
+assert.match(winterIcon, /aria-label="スタッドレスタイヤ装着中"[^>]*class="[^"]*bg-sky-50[^"]*text-sky-700/, "雪マークは青にする");
 const keiIcon = renderToStaticMarkup(createElement(VehicleMapIcon, { vehicle: { color: "#2563eb", hasBackMonitor: false, hasWinterTires: false, isKei: true }, className: "size-4" }));
 assert.match(keiIcon, /scale-80/, "軽自動車の車アイコンを縮める");
-assert.match(keiIcon, /aria-label="軽自動車"/, "軽自動車に軽マークを付ける");
+assert.doesNotMatch(keiIcon, />軽</, "軽の札は車アイコンではなく車両番号の横に付ける");
+// 区画内は車両番号の濃い札、車両名、ナンバーの順に並べ、軽自動車は車両番号の横に「軽」の札を付ける。
+for (const horizontal of [false, true]) {
+  const keiTile = renderToStaticMarkup(vehicleTileContent({ ...vehicle, isKei: true, plateNumber: "品川 500 あ 12-34" }, horizontal));
+  assert.match(keiTile, /bg-slate-800[^"]*text-white[^"]*">C001<\/span><span aria-label="軽自動車"[^>]*>軽<\/span>/, "車両番号の濃い札の横に軽の札を付ける");
+  assert.ok(keiTile.indexOf(">C001<") < keiTile.indexOf(">テスト車<") && keiTile.indexOf(">テスト車<") < keiTile.indexOf("12-34"), "車両番号・車両名・ナンバーの順に並べる");
+  assert.match(keiTile, /<small class="[^"]*tabular-nums/, "ナンバーは数字の幅をそろえる");
+  assert.doesNotMatch(renderToStaticMarkup(vehicleTileContent(vehicle, horizontal)), /軽自動車/, "普通車には軽の札を付けない");
+}
 const dedicatedEmpty = renderToStaticMarkup(createElement(EmptyParkingSpotLabel, { spot: { ...spot, role: "DEDICATED", dedicatedVehicleName: "サクラ" } }));
 assert.match(dedicatedEmpty, />空き</, "専用区画も空いている状態を先に表示する");
 assert.match(dedicatedEmpty, />サクラ専用</, "空き専用区画の用途を文字で表示する");
